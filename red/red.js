@@ -46,7 +46,7 @@ module.exports = {
         }
 
         if (!userSettings.SKIP_BUILD_CHECK) {
-            checkBuild();
+            // checkBuild();
         }
 
         if (!userSettings.coreNodesDir) {
