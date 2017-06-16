@@ -10,6 +10,7 @@
 *.backup
 *_cred*
 coverage
+test/
 credentials.json
 flows*.json
 nodes/node-red-nodes/
