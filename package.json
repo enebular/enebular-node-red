@@ -59,7 +59,13 @@
         "node-red-node-feedparser":"0.1.*",
         "node-red-node-email":"0.1.*",
         "node-red-node-twitter":"0.1.*",
-        "node-red-node-rbe":"0.1.*",
+        "node-red-node-rbe":"0.1.*"
+    },
+    "optionalDependencies": {
+        "node-red-node-serialport":"0.4.*",
+        "bcrypt":"0.8.7"
+    },
+    "devDependencies": {
         "grunt": "1.0.1",
         "grunt-chmod": "1.1.1",
         "grunt-cli": "1.2.0",
@@ -74,13 +80,7 @@
         "grunt-jsonlint":"1.1.0",
         "grunt-nodemon":"0.4.2",
         "grunt-sass":"1.2.1",
-        "grunt-simple-mocha": "0.4.1"
-    },
-    "optionalDependencies": {
-        "node-red-node-serialport":"0.4.*",
-        "bcrypt":"0.8.7"
-    },
-    "devDependencies": {
+        "grunt-simple-mocha": "0.4.1",
         "mocha": "3.1.1",
         "should": "8.4.0",
         "sinon": "1.17.6",
