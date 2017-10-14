@@ -73,7 +73,7 @@ var RED = (function() {
             url: 'flows',
             success: function(nodes) {
                 var currentHash = window.location.hash;
-                RED.nodes.version(nodes.rev);
+                // RED.nodes.version(nodes.rev);
                 RED.nodes.import(nodes.flows);
                 RED.nodes.dirty(false);
                 RED.view.redraw(true);
