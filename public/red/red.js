@@ -24,6 +24,8 @@ var RED = (function() {
             cache: false,
             url: 'nodes',
             success: function(data) {
+                console.log('mainjs loadNodeList data----------------------', data)
+                
                 RED.nodes.setNodeList(data);
 
                 var nsCount = 0;
@@ -54,6 +56,8 @@ var RED = (function() {
             cache: false,
             url: 'nodes',
             success: function(data) {
+                console.log('mainjs loadNodes data----------------------', data)
+                
                 $("body").append(data);
                 $("body").i18n();
                 $("#palette > .palette-spinner").hide();
@@ -2484,6 +2488,8 @@ RED.nodes = (function() {
                 
                 nodeDefinitions[nt] = def;
                 if (def.category != "subflows") {
+                    console.log('typeToId----------------------', typeToId)
+                    console.log('nodeSets[typeToId[nt]]----------------------', nodeSets[typeToId[nt]])
                     def.set = nodeSets[typeToId[nt]];
                     nodeSets[typeToId[nt]].added = true;
                     nodeSets[typeToId[nt]].enabled = true;

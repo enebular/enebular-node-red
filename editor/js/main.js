@@ -24,6 +24,8 @@ var RED = (function() {
             cache: false,
             url: 'nodes',
             success: function(data) {
+                console.log('mainjs loadNodeList data----------------------', data)
+                
                 RED.nodes.setNodeList(data);
 
                 var nsCount = 0;
@@ -54,6 +56,8 @@ var RED = (function() {
             cache: false,
             url: 'nodes',
             success: function(data) {
+                console.log('mainjs loadNodes data----------------------', data)
+                
                 $("body").append(data);
                 $("body").i18n();
                 $("#palette > .palette-spinner").hide();
