@@ -119,6 +119,10 @@ RED.nodes = (function() {
                 RED.events.emit("registry:node-set-disabled",ns);
             },
             registerNodeType: function(nt,def) {
+                console.log('nt----------------------', nt)
+                console.log('def----------------------', def)
+                console.log('nodeDefinitions----------------------', nodeDefinitions)
+                
                 nodeDefinitions[nt] = def;
                 if (def.category != "subflows") {
                     def.set = nodeSets[typeToId[nt]];

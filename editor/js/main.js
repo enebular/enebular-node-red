@@ -65,6 +65,7 @@ var RED = (function() {
     }
 
     function loadFlows() {
+        console.log('main js loadFlows----------------------')
         $.ajax({
             headers: {
                 "Accept":"application/json",
@@ -72,6 +73,8 @@ var RED = (function() {
             cache: false,
             url: 'flows',
             success: function(nodes) {
+                console.log('mainjs nodes----------------------', nodes)
+                
                 var currentHash = window.location.hash;
                 RED.nodes.version(nodes.rev);
                 RED.nodes.import(nodes.flows);
