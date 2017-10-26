@@ -68,7 +68,6 @@ function init(runtime) {
 }
 
 function loadFlows() {
-    console.log('runtime loadflows----------------------')
     return storage.getFlows().then(function(config) {
         return credentials.load(config.credentials).then(function() {
             return config;
@@ -233,9 +232,7 @@ function start(type,diff,muteLog) {
             } else {
                 log.info(" - "+activeFlowConfig.missingTypes[i]);
             }
-        }
-        console.log('knownUnknowns----------------------', knownUnknowns)
-        
+        }        
         if (knownUnknowns > 0) {
             log.info(log._("nodes.flows.missing-type-install-1"));
             log.info("  npm install <module name>");
