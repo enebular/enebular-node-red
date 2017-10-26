@@ -24,8 +24,6 @@ var RED = (function() {
             cache: false,
             url: 'nodes',
             success: function(data) {
-                console.log('mainjs loadNodeList data----------------------', data)
-                
                 RED.nodes.setNodeList(data);
 
                 var nsCount = 0;
@@ -55,9 +53,7 @@ var RED = (function() {
             },
             cache: false,
             url: 'nodes',
-            success: function(data) {
-                console.log('mainjs loadNodes data----------------------', data)
-                
+            success: function(data) {                
                 $("body").append(data);
                 $("body").i18n();
                 $("#palette > .palette-spinner").hide();
@@ -69,16 +65,13 @@ var RED = (function() {
     }
 
     function loadFlows() {
-        console.log('main js loadFlows----------------------')
         $.ajax({
             headers: {
                 "Accept":"application/json",
             },
             cache: false,
             url: 'flows',
-            success: function(nodes) {
-                console.log('mainjs nodes----------------------', nodes)
-                
+            success: function(nodes) {                
                 var currentHash = window.location.hash;
                 RED.nodes.version(nodes.rev);
                 RED.nodes.import(nodes.flows);
