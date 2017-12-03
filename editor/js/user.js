@@ -26,7 +26,7 @@ RED.user = (function() {
                        '<div style="display: inline-block; width: 250px; vertical-align: bottom; margin-left: 10px; margin-bottom: 20px;">'+
                        '<form id="node-dialog-login-fields" class="form-horizontal" style="margin-bottom: 0px;"></form>'+
                        '</div>'+
-                       '</div>');
+                       '</div>'); 
 
         dialog.dialog({
             autoOpen: false,
@@ -49,7 +49,7 @@ RED.user = (function() {
                     if (data.image) {
                         $("#node-dialog-login-image").attr("src",data.image);
                     } else {
-                        $("#node-dialog-login-image").attr("src","red/images/node-red-256.png");
+                        $("#node-dialog-login-image").attr("src","red/images/enebular-logo.png");
                     }
                     for (;i<data.prompts.length;i++) {
                         var field = data.prompts[i];
