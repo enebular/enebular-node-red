@@ -764,8 +764,7 @@ RED.nodes = (function() {
           nodeMsg +
           ' not supported by enebular. Don&#39;t worry! It can take some time to install ' +
           nodeMsg +
-          '. Please refresh your browser' +
-          '</p>',
+          '.</p><p>Please refresh your browser.</p>',
         'error',
         false,
         15000
