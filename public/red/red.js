@@ -3124,7 +3124,7 @@ RED.nodes = (function() {
           '</p>',
         'error',
         false,
-        10000
+        15000
       )
     }
 
