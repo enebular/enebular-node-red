@@ -110,11 +110,10 @@ RED.deploy = (function() {
           {
             id: 'deploymenu-item-reload',
             toggle: 'deploy-type',
-            icon: 'red/images/deploy-nodes.png',
-            label: 'reload flows',
+            icon: 'red/images/sync-icon.png',
+            label: 'sync',
             sublabel: '',
             onselect: function(s) {
-              console.log(s, 'what is s----------------------')
               $.ajax({
                 headers: {
                   Accept: 'application/json',
@@ -127,12 +126,13 @@ RED.deploy = (function() {
                     data,
                     'success reload flows----------------------'
                   )
+                  console.log(location, 'location----------------------')
+                  location.reload()
                 },
                 error: function(err) {
                   console.log(err, 'reload flows--------- errr')
                 }
               })
-              changeDeploymentType('reload')
             }
           }
         ]
