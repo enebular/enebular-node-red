@@ -5737,6 +5737,9 @@ RED.deploy = (function() {
   var deploymentType = 'full'
 
   function changeDeploymentType(type) {
+    if (type === 'reload') {
+      return
+    }
     deploymentType = type
     $('#btn-deploy-icon').attr('src', deploymentTypes[type].img)
   }
@@ -5815,12 +5818,12 @@ RED.deploy = (function() {
             id: 'deploymenu-item-reload',
             toggle: 'deploy-type',
             icon: 'red/images/deploy-nodes.png',
-            label: 'reload flows*',
+            label: 'reload flows',
             sublabel: '',
             onselect: function(s) {
-              if (s) {
-                changeDeploymentType('reload')
-              }
+              console.log(s, 'what is s----------------------')
+
+              changeDeploymentType('reload')
             }
           }
         ]
