@@ -115,7 +115,23 @@ RED.deploy = (function() {
             sublabel: '',
             onselect: function(s) {
               console.log(s, 'what is s----------------------')
-
+              $.ajax({
+                headers: {
+                  Accept: 'application/json',
+                  'Node-RED-Deployment-Type': 'reload'
+                },
+                type: 'POST',
+                url: 'flows',
+                success: function(data) {
+                  console.log(
+                    data,
+                    'success reload flows----------------------'
+                  )
+                },
+                error: function(err) {
+                  console.log(err, 'reload flows--------- errr')
+                }
+              })
               changeDeploymentType('reload')
             }
           }
