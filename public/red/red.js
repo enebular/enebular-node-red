@@ -5737,9 +5737,6 @@ RED.deploy = (function() {
   var deploymentType = 'full'
 
   function changeDeploymentType(type) {
-    if (type === 'reload') {
-      return
-    }
     deploymentType = type
     $('#btn-deploy-icon').attr('src', deploymentTypes[type].img)
   }
@@ -5812,33 +5809,6 @@ RED.deploy = (function() {
               if (s) {
                 changeDeploymentType('nodes')
               }
-            }
-          },
-          {
-            id: 'deploymenu-item-reload',
-            toggle: 'deploy-type',
-            icon: 'red/images/sync-icon.png',
-            label: 'sync',
-            sublabel: '',
-            onselect: function(s) {
-              $.ajax({
-                headers: {
-                  Accept: 'application/json',
-                  'Node-RED-Deployment-Type': 'reload'
-                },
-                type: 'POST',
-                url: 'flows',
-                success: function(data) {
-                  console.log(
-                    data,
-                    'success reload flows----------------------'
-                  )
-                  console.log(location, 'location----------------------')
-                },
-                error: function(err) {
-                  console.log(err, 'reload flows--------- errr')
-                }
-              })
             }
           }
         ]
