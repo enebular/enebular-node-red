@@ -5834,7 +5834,6 @@ RED.deploy = (function() {
                     'success reload flows----------------------'
                   )
                   console.log(location, 'location----------------------')
-                  location.reload()
                 },
                 error: function(err) {
                   console.log(err, 'reload flows--------- errr')
