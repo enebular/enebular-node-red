@@ -769,10 +769,16 @@ RED.nodes = (function() {
         false,
         15000
       )
-      setTimeout(function() {
-        console.log(location, 'location----------------------')
-        location.reload()
-      }, 15000)
+      RED.events.on('finished-installing', function() {
+        console.log('installed------------------')
+        setTimeout(function() {
+          location.reload()
+        }, 10000)
+      })
+      // setTimeout(function() {
+      //   console.log(location, 'location----------------------')
+      //   location.reload()
+      // }, 15000)
     }
 
     var activeWorkspace = RED.workspaces.active()
