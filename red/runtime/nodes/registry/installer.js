@@ -113,7 +113,6 @@ function installModule(module) {
             reject(new Error(log._('server.install.install-failed')))
           }
         } else {
-          RED.events.emit('finished-installing')
           log.info(log._('server.install.installed', { name: module }))
           resolve(
             require('./index')
