@@ -187,7 +187,7 @@ module.exports = {
 
   getAll: function(req, res) {
     storage.getAllFlows().then(function(flows) {
-      console.log(flows, 'getAllFlowsflows----------------------')
+      console.log('in library.js get All -> getallFlows-------')
 
       log.audit({ event: 'library.get.all', type: 'flow' }, req)
       if (exampleCount > 0) {

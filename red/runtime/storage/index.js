@@ -62,9 +62,9 @@ var storageModuleInterface = {
   },
   getFlows: function() {
     return storageModule.getFlows().then(function(flows) {
-      console.log('storage module get flows SUCCESS', flows)
+      console.log('FLOWS SUCCESS')
       return storageModule.getCredentials().then(function(creds) {
-        console.log('storage module get creds SUCCESS', creds)
+        console.log('CREDENTIAL SUCCESS', creds)
         var result = {
           flows: flows,
           credentials: creds
@@ -181,6 +181,7 @@ var storageModuleInterface = {
 }
 
 function listFlows(path) {
+  console.log('listFlow----------------------')
   return storageModule.getLibraryEntry('flows', path).then(function(res) {
     return when.promise(function(resolve) {
       var promises = []
