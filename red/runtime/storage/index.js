@@ -146,7 +146,7 @@ var storageModuleInterface = {
   getAllFlows: function() {
     if (storageModule.hasOwnProperty('getAllFlows')) {
       return storageModule.getAllFlows().then(function(flows) {
-        console.log('storage module get ~~~ALL~~~ flows', flows)
+        console.log('storage module get ~~~ALL~~~ flows')
         return flows
       })
     } else {
