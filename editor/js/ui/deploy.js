@@ -623,6 +623,7 @@ RED.deploy = (function() {
       .select('#enebular-screenshot > svg > g > g > rect')
       .attr('width', 1200 + 'px')
       .attr('height', 800 + 'px')
+      .attr('fill', '#f7fafb')
     d3
       .select('#enebular-screenshot > svg > g > g')
       .attr('transform', 'scale(0.75)')
