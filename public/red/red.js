@@ -6312,13 +6312,14 @@ RED.deploy = (function() {
 
   function save(skipValidation, force) {
     var screenshotExist = document.querySelector('#enebular-screenshot')
-    if (!screenshotExist) {
-      var elementToExport = document.querySelector('#chart')
-      var cloneElement = elementToExport.cloneNode(true)
-      cloneElement.setAttribute('id', 'enebular-screenshot')
-      cloneElement.setAttribute('style', 'display: none')
-      document.body.appendChild(cloneElement)
+    if (screenshotExist) {
+      screenshotExist.remove()
     }
+    var elementToExport = document.querySelector('#chart')
+    var cloneElement = elementToExport.cloneNode(true)
+    cloneElement.setAttribute('id', 'enebular-screenshot')
+    cloneElement.setAttribute('style', 'display: none')
+    document.body.appendChild(cloneElement)
     d3
       .select('#enebular-screenshot')
       .selectAll('image.node_icon, image.node_error, image.node_changed')
@@ -6328,10 +6329,12 @@ RED.deploy = (function() {
       .attr('width', 1200 + 'px')
       .attr('height', 800 + 'px')
     d3
-      .select('#enebular-screenshot')
-      .select('innerCanvas > rect')
+      .select('#enebular-screenshot > svg > g > g.innerCanvas > rect')
       .attr('width', 1200 + 'px')
       .attr('height', 800 + 'px')
+    d3
+      .select('#enebular-screenshot > svg > g > g.innerCanvas')
+      .attr('transform', 'scale(0.75)')
     var screenshotHTML = document.querySelector('#enebular-screenshot')
       .innerHTML
     if (!$('#btn-deploy').hasClass('disabled')) {
