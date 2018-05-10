@@ -624,7 +624,7 @@ RED.deploy = (function() {
       .attr('width', 1200 + 'px')
       .attr('height', 800 + 'px')
     d3
-      .select('#enebular-screenshot > svg > g > g.innerCanvas')
+      .select('#enebular-screenshot > svg > g > g')
       .attr('transform', 'scale(0.75)')
     var screenshotHTML = document.querySelector('#enebular-screenshot')
       .innerHTML
