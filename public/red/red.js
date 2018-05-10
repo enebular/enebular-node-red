@@ -3265,7 +3265,6 @@ RED.nodes = (function() {
         15000
       )
       setTimeout(function() {
-        console.log(location, 'location----------------------')
         location.reload()
       }, 15000)
     }
