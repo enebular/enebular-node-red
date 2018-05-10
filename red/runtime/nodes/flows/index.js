@@ -95,6 +95,7 @@ function load() {
  */
 function setFlows(_config, type, muteLog) {
   type = type || 'full'
+  console.log(_config, '_config in set flows----------------------')
 
   var configSavePromise = null
   var config = null

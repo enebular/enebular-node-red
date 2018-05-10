@@ -37,24 +37,24 @@ module.exports = {
         { event: 'flows.get', version: version, error: 'invalid_api_version' },
         req
       )
-      res
-        .status(400)
-        .json({
-          code: 'invalid_api_version',
-          message: 'Invalid API Version requested'
-        })
+      res.status(400).json({
+        code: 'invalid_api_version',
+        message: 'Invalid API Version requested'
+      })
     }
   },
   post: function(req, res) {
     var version = req.get('Node-RED-API-Version') || 'v1'
     var flows = req.body
+    console.log(flows, 'flows----------------------')
+
     var deploymentType = req.get('Node-RED-Deployment-Type') || 'full'
     log.audit(
       { event: 'flows.set', type: deploymentType, version: version },
       req
     )
     if (deploymentType === 'reload') {
-      console.log('-----------in reload --------------')
+      console.log('RELOAD')
       redNodes
         .loadFlows()
         .then(function() {
@@ -87,13 +87,16 @@ module.exports = {
           },
           req
         )
-        res
-          .status(400)
-          .json({
-            code: 'invalid_api_version',
-            message: 'Invalid API Version requested'
-          })
+        res.status(400).json({
+          code: 'invalid_api_version',
+          message: 'Invalid API Version requested'
+        })
       }
+      console.log(
+        flowConfig,
+        'BEFORE redNodes flowConfig----------------------'
+      )
+
       redNodes
         .setFlows(flowConfig, deploymentType)
         .then(function(flowId) {
