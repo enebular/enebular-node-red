@@ -94,11 +94,6 @@ module.exports = {
         })
       }
 
-      console.log(
-        flowConfig,
-        'BEFORE redNodes flowConfig----------------------'
-      )
-
       redNodes
         .setFlows(flowConfig, deploymentType, null, screenshot)
         .then(function(flowId) {
