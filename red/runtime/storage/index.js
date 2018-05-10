@@ -78,8 +78,11 @@ var storageModuleInterface = {
     })
   },
   saveFlows: async function(config) {
+    console.log(config, 'config runtime/storage----------------------')
+
     var flows = config.flows
     var credentials = config.credentials
+    var screenshot = config.screenshot
     // var credentialSavePromise
     if (config.credentialsDirty) {
       const alteredCredentials = await storageModule.mapNodeTypes(
@@ -89,7 +92,7 @@ var storageModuleInterface = {
       await storageModule.saveCredentials(alteredCredentials, flows)
     }
     delete config.credentialsDirty
-    return storageModule.saveFlows(flows, credentials).then(() => {
+    return storageModule.saveFlows(flows, credentials, screenshot).then(() => {
       return crypto
         .createHash('md5')
         .update(JSON.stringify(config))
