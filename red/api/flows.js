@@ -46,8 +46,7 @@ module.exports = {
   post: function(req, res) {
     var version = req.get('Node-RED-API-Version') || 'v1'
     var flows = req.body
-    console.log(flows, 'flows----------------------')
-
+    var screenshot = req.body.screenshot || null
     var deploymentType = req.get('Node-RED-Deployment-Type') || 'full'
     log.audit(
       { event: 'flows.set', type: deploymentType, version: version },
@@ -70,6 +69,7 @@ module.exports = {
     } else {
       var flowConfig = flows
       if (version === 'v2') {
+        console.log('VERSION2')
         flowConfig = flows.flows
         if (flows.hasOwnProperty('rev')) {
           var currentVersion = redNodes.getFlows().rev
@@ -79,6 +79,7 @@ module.exports = {
           }
         }
       } else if (version !== 'v1') {
+        console.log('NOT VERSION 1')
         log.audit(
           {
             event: 'flows.set',
@@ -92,13 +93,14 @@ module.exports = {
           message: 'Invalid API Version requested'
         })
       }
+
       console.log(
         flowConfig,
         'BEFORE redNodes flowConfig----------------------'
       )
 
       redNodes
-        .setFlows(flowConfig, deploymentType)
+        .setFlows(flowConfig, deploymentType, null, screenshot)
         .then(function(flowId) {
           if (version === 'v1') {
             res.status(204).end()

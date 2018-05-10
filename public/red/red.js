@@ -63,8 +63,6 @@ var RED = (function() {
   }
 
   function loadFlows() {
-    console.log('main load flows----------------------')
-
     $.ajax({
       headers: {
         Accept: 'application/json'
