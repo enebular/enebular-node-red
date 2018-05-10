@@ -6329,12 +6329,13 @@ RED.deploy = (function() {
       .attr('width', 1200 + 'px')
       .attr('height', 800 + 'px')
     d3
-      .select('#enebular-screenshot > svg > g > g.innerCanvas > rect')
+      .select('#enebular-screenshot > svg > g > g > rect')
       .attr('width', 1200 + 'px')
       .attr('height', 800 + 'px')
     d3
       .select('#enebular-screenshot > svg > g > g')
       .attr('transform', 'scale(0.75)')
+    d3.select('#enebular-screenshot > svg > g > g > g').remove()
     var screenshotHTML = document.querySelector('#enebular-screenshot')
       .innerHTML
     if (!$('#btn-deploy').hasClass('disabled')) {

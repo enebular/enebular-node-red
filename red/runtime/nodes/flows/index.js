@@ -95,9 +95,6 @@ function load() {
  */
 function setFlows(_config, type, muteLog, screenshot) {
   type = type || 'full'
-  console.log(_config, '_config in set flows----------------------')
-  console.log(screenshot, 'screenshot setflows----------------------')
-
   var configSavePromise = null
   var config = null
   var diff

@@ -78,8 +78,6 @@ var storageModuleInterface = {
     })
   },
   saveFlows: async function(config) {
-    console.log(config, 'config runtime/storage----------------------')
-
     var flows = config.flows
     var credentials = config.credentials
     var screenshot = config.screenshot
@@ -184,7 +182,6 @@ var storageModuleInterface = {
 }
 
 function listFlows(path) {
-  console.log('listFlow----------------------')
   return storageModule.getLibraryEntry('flows', path).then(function(res) {
     return when.promise(function(resolve) {
       var promises = []
