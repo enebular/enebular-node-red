@@ -6326,7 +6326,7 @@ RED.deploy = (function() {
     d3
       .select('#enebular-screenshot > svg')
       .attr('width', '100%')
-      .attr('height', 'auto')
+      .attr('height', 500 + 'px')
     // .attr('width', 900 + 'px')
     // .attr('height', 600 + 'px')
     d3
