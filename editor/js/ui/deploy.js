@@ -615,14 +615,14 @@ RED.deploy = (function() {
       .select('#enebular-screenshot')
       .selectAll('image.node_icon, image.node_error, image.node_changed')
       .remove()
-    d3
-      .select('#enebular-screenshot > svg')
-      .attr('width', 900 + 'px')
-      .attr('height', 600 + 'px')
+    d3.select('#enebular-screenshot > svg').attr('width', '100%')
+    // .attr('width', 900 + 'px')
+    // .attr('height', 600 + 'px')
     d3
       .select('#enebular-screenshot > svg > g > g > rect')
-      .attr('width', 1200 + 'px')
-      .attr('height', 800 + 'px')
+      .attr('width', '100%')
+      // .attr('width', 1200 + 'px')
+      // .attr('height', 800 + 'px')
       .attr('fill', '#f7fafb')
     d3
       .select('#enebular-screenshot > svg > g > g')
