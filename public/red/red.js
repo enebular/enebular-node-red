@@ -14,258 +14,397 @@
  * limitations under the License.
  **/
 var RED = (function() {
+  function loadNodeList() {
+    $.ajax({
+      headers: {
+        Accept: 'application/json'
+      },
+      cache: false,
+      url: 'nodes',
+      success: function(data) {
+        RED.nodes.setNodeList(data)
 
-
-    function loadNodeList() {
-        $.ajax({
-            headers: {
-                "Accept":"application/json"
-            },
-            cache: false,
-            url: 'nodes',
-            success: function(data) {
-                RED.nodes.setNodeList(data);
-
-                var nsCount = 0;
-                for (var i=0;i<data.length;i++) {
-                    var ns = data[i];
-                    if (ns.module != "node-red") {
-                        nsCount++;
-                        RED.i18n.loadCatalog(ns.id, function() {
-                            nsCount--;
-                            if (nsCount === 0) {
-                                loadNodes();
-                            }
-                        });
-                    }
-                }
-                if (nsCount === 0) {
-                    loadNodes();
-                }
-            }
-        });
-    }
-
-    function loadNodes() {
-        $.ajax({
-            headers: {
-                "Accept":"text/html"
-            },
-            cache: false,
-            url: 'nodes',
-            success: function(data) {                
-                $("body").append(data);
-                $("body").i18n();
-                $("#palette > .palette-spinner").hide();
-                $(".palette-scroll").removeClass("hide");
-                $("#palette-search").removeClass("hide");
-                loadFlows();
-            }
-        });
-    }
-
-    function loadFlows() {
-        $.ajax({
-            headers: {
-                "Accept":"application/json",
-            },
-            cache: false,
-            url: 'flows',
-            success: function(nodes) {                
-                var currentHash = window.location.hash;
-                RED.nodes.version(nodes.rev);
-                RED.nodes.import(nodes.flows);
-                RED.nodes.dirty(false);
-                RED.view.redraw(true);
-                if (/^#flow\/.+$/.test(currentHash)) {
-                    RED.workspaces.show(currentHash.substring(6));
-                }
-                RED.comms.subscribe("status/#",function(topic,msg) {
-                    var parts = topic.split("/");
-                    var node = RED.nodes.node(parts[1]);
-                    if (node) {
-                        if (msg.hasOwnProperty("text")) {
-                            msg.text = node._(msg.text.toString(),{defaultValue:msg.text.toString()});
-                        }
-                        node.status = msg;
-                        if (statusEnabled) {
-                            node.dirty = true;
-                            RED.view.redraw();
-                        }
-                    }
-                });
-                RED.comms.subscribe("node/#",function(topic,msg) {
-                    var i,m;
-                    var typeList;
-                    var info;
-
-                    if (topic == "node/added") {
-                        var addedTypes = [];
-                        for (i=0;i<msg.length;i++) {
-                            m = msg[i];
-                            var id = m.id;
-                            RED.nodes.addNodeSet(m);
-                            addedTypes = addedTypes.concat(m.types);
-                            RED.i18n.loadCatalog(id, function() {
-                                $.get('nodes/'+id, function(data) {
-                                    $("body").append(data);
-                                });
-                            });
-                        }
-                        if (addedTypes.length) {
-                            typeList = "<ul><li>"+addedTypes.join("</li><li>")+"</li></ul>";
-                            RED.notify(RED._("palette.event.nodeAdded", {count:addedTypes.length})+typeList,"success");
-                        }
-                    } else if (topic == "node/removed") {
-                        for (i=0;i<msg.length;i++) {
-                            m = msg[i];
-                            info = RED.nodes.removeNodeSet(m.id);
-                            if (info.added) {
-                                typeList = "<ul><li>"+m.types.join("</li><li>")+"</li></ul>";
-                                RED.notify(RED._("palette.event.nodeRemoved", {count:m.types.length})+typeList,"success");
-                            }
-                        }
-                    } else if (topic == "node/enabled") {
-                        if (msg.types) {
-                            info = RED.nodes.getNodeSet(msg.id);
-                            if (info.added) {
-                                RED.nodes.enableNodeSet(msg.id);
-                                typeList = "<ul><li>"+msg.types.join("</li><li>")+"</li></ul>";
-                                RED.notify(RED._("palette.event.nodeEnabled", {count:msg.types.length})+typeList,"success");
-                            } else {
-                                $.get('nodes/'+msg.id, function(data) {
-                                    $("body").append(data);
-                                    typeList = "<ul><li>"+msg.types.join("</li><li>")+"</li></ul>";
-                                    RED.notify(RED._("palette.event.nodeAdded", {count:msg.types.length})+typeList,"success");
-                                });
-                            }
-                        }
-                    } else if (topic == "node/disabled") {
-                        if (msg.types) {
-                            RED.nodes.disableNodeSet(msg.id);
-                            typeList = "<ul><li>"+msg.types.join("</li><li>")+"</li></ul>";
-                            RED.notify(RED._("palette.event.nodeDisabled", {count:msg.types.length})+typeList,"success");
-                        }
-                    }
-                    // Refresh flow library to ensure any examples are updated
-                    RED.library.loadFlowLibrary();
-                });
-            }
-        });
-    }
-
-    function showAbout() {
-        $.get('red/about', function(data) {
-            var aboutHeader = '<div style="text-align:center;">'+
-                                '<img width="50px" src="red/images/node-red-icon.svg" />'+
-                              '</div>';
-
-            RED.sidebar.info.set(aboutHeader+marked(data));
-            RED.sidebar.info.show();
-        });
-    }
-
-    var statusEnabled = false;
-    function toggleStatus(state) {
-        statusEnabled = state;
-        RED.view.status(statusEnabled);
-    }
-
-    function loadEditor() {
-
-        var menuOptions = [];
-        menuOptions.push({id:"menu-item-view-menu",label:RED._("menu.label.view.view"),options:[
-            {id:"menu-item-view-show-grid",label:RED._("menu.label.view.showGrid"),toggle:true,onselect:RED.view.toggleShowGrid},
-            {id:"menu-item-view-snap-grid",label:RED._("menu.label.view.snapGrid"),toggle:true,onselect:RED.view.toggleSnapGrid},
-            {id:"menu-item-status",label:RED._("menu.label.displayStatus"),toggle:true,onselect:toggleStatus, selected: true},
-            null,
-            // {id:"menu-item-bidi",label:RED._("menu.label.view.textDir"),options:[
-            //     {id:"menu-item-bidi-default",toggle:"text-direction",label:RED._("menu.label.view.defaultDir"),selected: true, onselect:function(s) { if(s){RED.text.bidi.setTextDirection("")}}},
-            //     {id:"menu-item-bidi-ltr",toggle:"text-direction",label:RED._("menu.label.view.ltr"), onselect:function(s) { if(s){RED.text.bidi.setTextDirection("ltr")}}},
-            //     {id:"menu-item-bidi-rtl",toggle:"text-direction",label:RED._("menu.label.view.rtl"), onselect:function(s) { if(s){RED.text.bidi.setTextDirection("rtl")}}},
-            //     {id:"menu-item-bidi-auto",toggle:"text-direction",label:RED._("menu.label.view.auto"), onselect:function(s) { if(s){RED.text.bidi.setTextDirection("auto")}}}
-            // ]},
-            // null,
-            {id:"menu-item-sidebar",label:RED._("menu.label.sidebar.show"),toggle:true,onselect:RED.sidebar.toggleSidebar, selected: true}
-        ]});
-        menuOptions.push(null);
-        menuOptions.push({id:"menu-item-import",label:RED._("menu.label.import"),options:[
-            {id:"menu-item-import-clipboard",label:RED._("menu.label.clipboard"),onselect:RED.clipboard.import},
-            {id:"menu-item-import-library",label:RED._("menu.label.library"),options:[]}
-        ]});
-        menuOptions.push({id:"menu-item-export",label:RED._("menu.label.export"),disabled:true,options:[
-            {id:"menu-item-export-clipboard",label:RED._("menu.label.clipboard"),disabled:true,onselect:RED.clipboard.export},
-            {id:"menu-item-export-library",label:RED._("menu.label.library"),disabled:true,onselect:RED.library.export}
-        ]});
-        menuOptions.push(null);
-        menuOptions.push({id:"menu-item-search",label:RED._("menu.label.search"),onselect:RED.search.show});
-        menuOptions.push(null);
-        menuOptions.push({id:"menu-item-config-nodes",label:RED._("menu.label.displayConfig"),onselect:function() {}});
-        menuOptions.push({id:"menu-item-workspace",label:RED._("menu.label.flows"),options:[
-            {id:"menu-item-workspace-add",label:RED._("menu.label.add"),onselect:RED.workspaces.add},
-            {id:"menu-item-workspace-edit",label:RED._("menu.label.rename"),onselect:RED.workspaces.edit},
-            {id:"menu-item-workspace-delete",label:RED._("menu.label.delete"),onselect:RED.workspaces.remove}
-        ]});
-        menuOptions.push({id:"menu-item-subflow",label:RED._("menu.label.subflows"), options: [
-            {id:"menu-item-subflow-create",label:RED._("menu.label.createSubflow"),onselect:RED.subflow.createSubflow},
-            {id:"menu-item-subflow-convert",label:RED._("menu.label.selectionToSubflow"),disabled:true,onselect:RED.subflow.convertToSubflow},
-        ]});
-        menuOptions.push(null);
-        if (RED.settings.theme('palette.editable') !== false) {
-            RED.palette.editor.init();
-            menuOptions.push({id:"menu-item-edit-palette",label:RED._("menu.label.editPalette"),onselect:RED.palette.editor.show});
-            menuOptions.push(null);
+        var nsCount = 0
+        for (var i = 0; i < data.length; i++) {
+          var ns = data[i]
+          if (ns.module != 'node-red') {
+            nsCount++
+            RED.i18n.loadCatalog(ns.id, function() {
+              nsCount--
+              if (nsCount === 0) {
+                loadNodes()
+              }
+            })
+          }
         }
-
-        menuOptions.push({id:"menu-item-keyboard-shortcuts",label:RED._("menu.label.keyboardShortcuts"),onselect:RED.keyboard.showHelp});
-        menuOptions.push({id:"menu-item-help",
-            label: RED.settings.theme("menu.menu-item-help.label","Node-RED website"),
-            href: RED.settings.theme("menu.menu-item-help.url","http://nodered.org/docs")
-        });
-        menuOptions.push({id:"menu-item-node-red-version", label:"v"+RED.settings.version, onselect: showAbout });
-
-        RED.menu.init({id:"btn-sidemenu",options: menuOptions});
-
-        RED.user.init();
-
-        RED.library.init();
-        RED.palette.init();
-        RED.sidebar.init();
-        RED.subflow.init();
-        RED.workspaces.init();
-        RED.clipboard.init();
-        RED.search.init();
-        RED.view.init();
-        RED.editor.init();
-
-        RED.deploy.init(RED.settings.theme("deployButton",null));
-
-        RED.keyboard.add("workspace", /* ? */ 191,{shift:true},function() {RED.keyboard.showHelp();d3.event.preventDefault();});
-        RED.comms.connect();
-
-        $("#main-container").show();
-        $(".header-toolbar").show();
-
-        loadNodeList();
-    }
-
-    $(function() {
-
-        if ((window.location.hostname !== "localhost") && (window.location.hostname !== "127.0.0.1")) {
-            document.title = document.title+" : "+window.location.hostname;
+        if (nsCount === 0) {
+          loadNodes()
         }
+      }
+    })
+  }
 
-        ace.require("ace/ext/language_tools");
+  function loadNodes() {
+    $.ajax({
+      headers: {
+        Accept: 'text/html'
+      },
+      cache: false,
+      url: 'nodes',
+      success: function(data) {
+        $('body').append(data)
+        $('body').i18n()
+        $('#palette > .palette-spinner').hide()
+        $('.palette-scroll').removeClass('hide')
+        $('#palette-search').removeClass('hide')
+        loadFlows()
+      }
+    })
+  }
 
-        RED.i18n.init(function() {
-            RED.settings.init(loadEditor);
+  function loadFlows() {
+    $.ajax({
+      headers: {
+        Accept: 'application/json'
+      },
+      cache: false,
+      url: 'flows',
+      success: function(nodes) {
+        var currentHash = window.location.hash
+        RED.nodes.version(nodes.rev)
+        RED.nodes.import(nodes.flows)
+        RED.nodes.dirty(false)
+        RED.view.redraw(true)
+        if (/^#flow\/.+$/.test(currentHash)) {
+          RED.workspaces.show(currentHash.substring(6))
+        }
+        RED.comms.subscribe('status/#', function(topic, msg) {
+          var parts = topic.split('/')
+          var node = RED.nodes.node(parts[1])
+          if (node) {
+            if (msg.hasOwnProperty('text')) {
+              msg.text = node._(msg.text.toString(), {
+                defaultValue: msg.text.toString()
+              })
+            }
+            node.status = msg
+            if (statusEnabled) {
+              node.dirty = true
+              RED.view.redraw()
+            }
+          }
         })
-    });
+        RED.comms.subscribe('node/#', function(topic, msg) {
+          var i, m
+          var typeList
+          var info
 
+          if (topic == 'node/added') {
+            var addedTypes = []
+            for (i = 0; i < msg.length; i++) {
+              m = msg[i]
+              var id = m.id
+              RED.nodes.addNodeSet(m)
+              addedTypes = addedTypes.concat(m.types)
+              RED.i18n.loadCatalog(id, function() {
+                $.get('nodes/' + id, function(data) {
+                  $('body').append(data)
+                })
+              })
+            }
+            if (addedTypes.length) {
+              typeList =
+                '<ul><li>' + addedTypes.join('</li><li>') + '</li></ul>'
+              RED.notify(
+                RED._('palette.event.nodeAdded', { count: addedTypes.length }) +
+                  typeList,
+                'success'
+              )
+            }
+          } else if (topic == 'node/removed') {
+            for (i = 0; i < msg.length; i++) {
+              m = msg[i]
+              info = RED.nodes.removeNodeSet(m.id)
+              if (info.added) {
+                typeList = '<ul><li>' + m.types.join('</li><li>') + '</li></ul>'
+                RED.notify(
+                  RED._('palette.event.nodeRemoved', {
+                    count: m.types.length
+                  }) + typeList,
+                  'success'
+                )
+              }
+            }
+          } else if (topic == 'node/enabled') {
+            if (msg.types) {
+              info = RED.nodes.getNodeSet(msg.id)
+              if (info.added) {
+                RED.nodes.enableNodeSet(msg.id)
+                typeList =
+                  '<ul><li>' + msg.types.join('</li><li>') + '</li></ul>'
+                RED.notify(
+                  RED._('palette.event.nodeEnabled', {
+                    count: msg.types.length
+                  }) + typeList,
+                  'success'
+                )
+              } else {
+                $.get('nodes/' + msg.id, function(data) {
+                  $('body').append(data)
+                  typeList =
+                    '<ul><li>' + msg.types.join('</li><li>') + '</li></ul>'
+                  RED.notify(
+                    RED._('palette.event.nodeAdded', {
+                      count: msg.types.length
+                    }) + typeList,
+                    'success'
+                  )
+                })
+              }
+            }
+          } else if (topic == 'node/disabled') {
+            if (msg.types) {
+              RED.nodes.disableNodeSet(msg.id)
+              typeList = '<ul><li>' + msg.types.join('</li><li>') + '</li></ul>'
+              RED.notify(
+                RED._('palette.event.nodeDisabled', {
+                  count: msg.types.length
+                }) + typeList,
+                'success'
+              )
+            }
+          }
+          // Refresh flow library to ensure any examples are updated
+          RED.library.loadFlowLibrary()
+        })
+      }
+    })
+  }
 
-    return {
-    };
-})();
+  function showAbout() {
+    $.get('red/about', function(data) {
+      var aboutHeader =
+        '<div style="text-align:center;">' +
+        '<img width="50px" src="red/images/node-red-icon.svg" />' +
+        '</div>'
+
+      RED.sidebar.info.set(aboutHeader + marked(data))
+      RED.sidebar.info.show()
+    })
+  }
+
+  var statusEnabled = false
+  function toggleStatus(state) {
+    statusEnabled = state
+    RED.view.status(statusEnabled)
+  }
+
+  function loadEditor() {
+    var menuOptions = []
+    menuOptions.push({
+      id: 'menu-item-view-menu',
+      label: RED._('menu.label.view.view'),
+      options: [
+        {
+          id: 'menu-item-view-show-grid',
+          label: RED._('menu.label.view.showGrid'),
+          toggle: true,
+          onselect: RED.view.toggleShowGrid
+        },
+        {
+          id: 'menu-item-view-snap-grid',
+          label: RED._('menu.label.view.snapGrid'),
+          toggle: true,
+          onselect: RED.view.toggleSnapGrid
+        },
+        {
+          id: 'menu-item-status',
+          label: RED._('menu.label.displayStatus'),
+          toggle: true,
+          onselect: toggleStatus,
+          selected: true
+        },
+        null,
+        // {id:"menu-item-bidi",label:RED._("menu.label.view.textDir"),options:[
+        //     {id:"menu-item-bidi-default",toggle:"text-direction",label:RED._("menu.label.view.defaultDir"),selected: true, onselect:function(s) { if(s){RED.text.bidi.setTextDirection("")}}},
+        //     {id:"menu-item-bidi-ltr",toggle:"text-direction",label:RED._("menu.label.view.ltr"), onselect:function(s) { if(s){RED.text.bidi.setTextDirection("ltr")}}},
+        //     {id:"menu-item-bidi-rtl",toggle:"text-direction",label:RED._("menu.label.view.rtl"), onselect:function(s) { if(s){RED.text.bidi.setTextDirection("rtl")}}},
+        //     {id:"menu-item-bidi-auto",toggle:"text-direction",label:RED._("menu.label.view.auto"), onselect:function(s) { if(s){RED.text.bidi.setTextDirection("auto")}}}
+        // ]},
+        // null,
+        {
+          id: 'menu-item-sidebar',
+          label: RED._('menu.label.sidebar.show'),
+          toggle: true,
+          onselect: RED.sidebar.toggleSidebar,
+          selected: true
+        }
+      ]
+    })
+    menuOptions.push(null)
+    menuOptions.push({
+      id: 'menu-item-import',
+      label: RED._('menu.label.import'),
+      options: [
+        {
+          id: 'menu-item-import-clipboard',
+          label: RED._('menu.label.clipboard'),
+          onselect: RED.clipboard.import
+        },
+        {
+          id: 'menu-item-import-library',
+          label: RED._('menu.label.library'),
+          options: []
+        }
+      ]
+    })
+    menuOptions.push({
+      id: 'menu-item-export',
+      label: RED._('menu.label.export'),
+      disabled: true,
+      options: [
+        {
+          id: 'menu-item-export-clipboard',
+          label: RED._('menu.label.clipboard'),
+          disabled: true,
+          onselect: RED.clipboard.export
+        },
+        {
+          id: 'menu-item-export-library',
+          label: RED._('menu.label.library'),
+          disabled: true,
+          onselect: RED.library.export
+        }
+      ]
+    })
+    menuOptions.push(null)
+    menuOptions.push({
+      id: 'menu-item-search',
+      label: RED._('menu.label.search'),
+      onselect: RED.search.show
+    })
+    menuOptions.push(null)
+    menuOptions.push({
+      id: 'menu-item-config-nodes',
+      label: RED._('menu.label.displayConfig'),
+      onselect: function() {}
+    })
+    menuOptions.push({
+      id: 'menu-item-workspace',
+      label: RED._('menu.label.flows'),
+      options: [
+        {
+          id: 'menu-item-workspace-add',
+          label: RED._('menu.label.add'),
+          onselect: RED.workspaces.add
+        },
+        {
+          id: 'menu-item-workspace-edit',
+          label: RED._('menu.label.rename'),
+          onselect: RED.workspaces.edit
+        },
+        {
+          id: 'menu-item-workspace-delete',
+          label: RED._('menu.label.delete'),
+          onselect: RED.workspaces.remove
+        }
+      ]
+    })
+    menuOptions.push({
+      id: 'menu-item-subflow',
+      label: RED._('menu.label.subflows'),
+      options: [
+        {
+          id: 'menu-item-subflow-create',
+          label: RED._('menu.label.createSubflow'),
+          onselect: RED.subflow.createSubflow
+        },
+        {
+          id: 'menu-item-subflow-convert',
+          label: RED._('menu.label.selectionToSubflow'),
+          disabled: true,
+          onselect: RED.subflow.convertToSubflow
+        }
+      ]
+    })
+    menuOptions.push(null)
+    if (RED.settings.theme('palette.editable') !== false) {
+      RED.palette.editor.init()
+      menuOptions.push({
+        id: 'menu-item-edit-palette',
+        label: RED._('menu.label.editPalette'),
+        onselect: RED.palette.editor.show
+      })
+      menuOptions.push(null)
+    }
+
+    menuOptions.push({
+      id: 'menu-item-keyboard-shortcuts',
+      label: RED._('menu.label.keyboardShortcuts'),
+      onselect: RED.keyboard.showHelp
+    })
+    menuOptions.push({
+      id: 'menu-item-help',
+      label: RED.settings.theme(
+        'menu.menu-item-help.label',
+        'Node-RED website'
+      ),
+      href: RED.settings.theme(
+        'menu.menu-item-help.url',
+        'http://nodered.org/docs'
+      )
+    })
+    menuOptions.push({
+      id: 'menu-item-node-red-version',
+      label: 'v' + RED.settings.version,
+      onselect: showAbout
+    })
+
+    RED.menu.init({ id: 'btn-sidemenu', options: menuOptions })
+
+    RED.user.init()
+
+    RED.library.init()
+    RED.palette.init()
+    RED.sidebar.init()
+    RED.subflow.init()
+    RED.workspaces.init()
+    RED.clipboard.init()
+    RED.search.init()
+    RED.view.init()
+    RED.editor.init()
+
+    RED.deploy.init(RED.settings.theme('deployButton', null))
+
+    RED.keyboard.add('workspace', /* ? */ 191, { shift: true }, function() {
+      RED.keyboard.showHelp()
+      d3.event.preventDefault()
+    })
+    RED.comms.connect()
+
+    $('#main-container').show()
+    $('.header-toolbar').show()
+
+    loadNodeList()
+  }
+
+  $(function() {
+    if (
+      window.location.hostname !== 'localhost' &&
+      window.location.hostname !== '127.0.0.1'
+    ) {
+      document.title = document.title + ' : ' + window.location.hostname
+    }
+
+    ace.require('ace/ext/language_tools')
+
+    RED.i18n.init(function() {
+      RED.settings.init(loadEditor)
+    })
+  })
+
+  return {}
+})()
 ;/**
  * Copyright 2015, 2016 IBM Corp.
  *
@@ -3125,6 +3264,9 @@ RED.nodes = (function() {
         false,
         15000
       )
+      setTimeout(function() {
+        location.reload()
+      }, 15000)
     }
 
     var activeWorkspace = RED.workspaces.active()
@@ -5581,669 +5723,809 @@ RED.tabs = (function() {
  **/
 
 RED.deploy = (function() {
+  var deploymentTypes = {
+    full: { img: 'red/images/deploy-full-o.png' },
+    nodes: { img: 'red/images/deploy-nodes-o.png' },
+    flows: { img: 'red/images/deploy-flows-o.png' }
+  }
 
-    var deploymentTypes = {
-        "full":{img:"red/images/deploy-full-o.png"},
-        "nodes":{img:"red/images/deploy-nodes-o.png"},
-        "flows":{img:"red/images/deploy-flows-o.png"}
-    }
+  var ignoreDeployWarnings = {
+    unknown: false,
+    unusedConfig: false,
+    invalid: false
+  }
 
-    var ignoreDeployWarnings = {
-        unknown: false,
-        unusedConfig: false,
-        invalid: false
-    }
+  var deploymentType = 'full'
 
-    var deploymentType = "full";
+  function changeDeploymentType(type) {
+    deploymentType = type
+    $('#btn-deploy-icon').attr('src', deploymentTypes[type].img)
+  }
 
-    function changeDeploymentType(type) {
-        deploymentType = type;
-        $("#btn-deploy-icon").attr("src",deploymentTypes[type].img);
-    }
+  var currentDiff = null
 
-    var currentDiff = null;
+  /**
+   * options:
+   *   type: "default" - Button with drop-down options - no further customisation available
+   *   type: "simple"  - Button without dropdown. Customisations:
+   *      label: the text to display - default: "Deploy"
+   *      icon : the icon to use. Null removes the icon. default: "red/images/deploy-full-o.png"
+   */
+  function init(options) {
+    options = options || {}
+    var type = options.type || 'default'
 
-    /**
-     * options:
-     *   type: "default" - Button with drop-down options - no further customisation available
-     *   type: "simple"  - Button without dropdown. Customisations:
-     *      label: the text to display - default: "Deploy"
-     *      icon : the icon to use. Null removes the icon. default: "red/images/deploy-full-o.png"
-     */
-    function init(options) {
-        options = options || {};
-        var type = options.type || "default";
-
-        if (type == "default") {
-            $('<li><span class="deploy-button-group button-group">'+
-              '<a id="btn-deploy" class="deploy-button disabled" href="#">'+
-                '<span class="deploy-button-content">'+
-                 '<img id="btn-deploy-icon" src="red/images/deploy-full-o.png"> '+
-                 '<span>'+RED._("deploy.deploy")+'</span>'+
-                '</span>'+
-                '<span class="deploy-button-spinner hide">'+
-                 '<img src="red/images/spin.svg"/>'+
-                '</span>'+
-              '</a>'+
-              '<a id="btn-deploy-options" data-toggle="dropdown" class="deploy-button" href="#"><i class="fa fa-caret-down"></i></a>'+
-              '</span></li>').prependTo(".header-toolbar");
-              RED.menu.init({id:"btn-deploy-options",
-                  options: [
-                      {id:"deploymenu-item-full",toggle:"deploy-type",icon:"red/images/deploy-full.png",label:RED._("deploy.full"),sublabel:RED._("deploy.fullDesc"),selected: true, onselect:function(s) { if(s){changeDeploymentType("full")}}},
-                      {id:"deploymenu-item-flow",toggle:"deploy-type",icon:"red/images/deploy-flows.png",label:RED._("deploy.modifiedFlows"),sublabel:RED._("deploy.modifiedFlowsDesc"), onselect:function(s) {if(s){changeDeploymentType("flows")}}},
-                      {id:"deploymenu-item-node",toggle:"deploy-type",icon:"red/images/deploy-nodes.png",label:RED._("deploy.modifiedNodes"),sublabel:RED._("deploy.modifiedNodesDesc"),onselect:function(s) { if(s){changeDeploymentType("nodes")}}}
-                  ]
-              });
-        } else if (type == "simple") {
-            var label = options.label || RED._("deploy.deploy");
-            var icon = 'red/images/deploy-full-o.png';
-            if (options.hasOwnProperty('icon')) {
-                icon = options.icon;
+    if (type == 'default') {
+      $(
+        '<li><span class="deploy-button-group button-group">' +
+          '<a id="btn-deploy" class="deploy-button disabled" href="#">' +
+          '<span class="deploy-button-content">' +
+          '<img id="btn-deploy-icon" src="red/images/deploy-full-o.png"> ' +
+          '<span>' +
+          RED._('deploy.deploy') +
+          '</span>' +
+          '</span>' +
+          '<span class="deploy-button-spinner hide">' +
+          '<img src="red/images/spin.svg"/>' +
+          '</span>' +
+          '</a>' +
+          '<a id="btn-deploy-options" data-toggle="dropdown" class="deploy-button" href="#"><i class="fa fa-caret-down"></i></a>' +
+          '</span></li>'
+      ).prependTo('.header-toolbar')
+      RED.menu.init({
+        id: 'btn-deploy-options',
+        options: [
+          {
+            id: 'deploymenu-item-full',
+            toggle: 'deploy-type',
+            icon: 'red/images/deploy-full.png',
+            label: RED._('deploy.full'),
+            sublabel: RED._('deploy.fullDesc'),
+            selected: true,
+            onselect: function(s) {
+              if (s) {
+                changeDeploymentType('full')
+              }
             }
-
-            $('<li><span class="deploy-button-group button-group">'+
-              '<a id="btn-deploy" class="deploy-button disabled" href="#">'+
-                '<span class="deploy-button-content">'+
-                  (icon?'<img id="btn-deploy-icon" src="'+icon+'"> ':'')+
-                  '<span>'+label+'</span>'+
-                '</span>'+
-                '<span class="deploy-button-spinner hide">'+
-                 '<img src="red/images/spin.svg"/>'+
-                '</span>'+
-              '</a>'+
-              '</span></li>').prependTo(".header-toolbar");
-        }
-
-        $('#btn-deploy').click(function() { save(); });
-
-        $( "#node-dialog-confirm-deploy" ).dialog({
-                title: RED._('deploy.confirm.button.confirm'),
-                modal: true,
-                autoOpen: false,
-                width: 550,
-                height: "auto",
-                buttons: [
-                    {
-                        text: RED._("deploy.confirm.button.cancel"),
-                        click: function() {
-                            $( this ).dialog( "close" );
-                        }
-                    },
-                    // {
-                    //     id: "node-dialog-confirm-deploy-review",
-                    //     text: RED._("deploy.confirm.button.review"),
-                    //     class: "primary",
-                    //     click: function() {
-                    //         showDiff();
-                    //         $( this ).dialog( "close" );
-                    //     }
-                    // },
-                    {
-                        text: RED._("deploy.confirm.button.confirm"),
-                        class: "primary",
-                        click: function() {
-
-                            var ignoreChecked = $( "#node-dialog-confirm-deploy-hide" ).prop("checked");
-                            if (ignoreChecked) {
-                                ignoreDeployWarnings[$( "#node-dialog-confirm-deploy-type" ).val()] = true;
-                            }
-                            save(true,$( "#node-dialog-confirm-deploy-type" ).val() === "conflict");
-                            $( this ).dialog( "close" );
-                        }
-                    }
-                ],
-                create: function() {
-                    $("#node-dialog-confirm-deploy").parent().find("div.ui-dialog-buttonpane")
-                        .prepend('<div style="height:0; vertical-align: middle; display:inline-block; margin-top: 13px; float:left;">'+
-                                   '<input style="vertical-align:top;" type="checkbox" id="node-dialog-confirm-deploy-hide">'+
-                                   '<label style="display:inline;" for="node-dialog-confirm-deploy-hide"> do not warn about this again</label>'+
-                                   '<input type="hidden" id="node-dialog-confirm-deploy-type">'+
-                                   '</div>');
-                },
-                open: function() {
-                    if ($( "#node-dialog-confirm-deploy-type" ).val() === "conflict") {
-                        // $("#node-dialog-confirm-deploy-review").show();
-                        $("#node-dialog-confirm-deploy-hide").parent().hide();
-                    } else {
-                        // $("#node-dialog-confirm-deploy-review").hide();
-                        $("#node-dialog-confirm-deploy-hide").parent().show();
-                    }
-                }
-        });
-
-        RED.events.on('nodes:change',function(state) {
-            if (state.dirty) {
-                window.onbeforeunload = function() {
-                    return RED._("deploy.confirm.undeployedChanges");
-                }
-                $("#btn-deploy").removeClass("disabled");
-            } else {
-                window.onbeforeunload = null;
-                $("#btn-deploy").addClass("disabled");
+          },
+          {
+            id: 'deploymenu-item-flow',
+            toggle: 'deploy-type',
+            icon: 'red/images/deploy-flows.png',
+            label: RED._('deploy.modifiedFlows'),
+            sublabel: RED._('deploy.modifiedFlowsDesc'),
+            onselect: function(s) {
+              if (s) {
+                changeDeploymentType('flows')
+              }
             }
-        });
+          },
+          {
+            id: 'deploymenu-item-node',
+            toggle: 'deploy-type',
+            icon: 'red/images/deploy-nodes.png',
+            label: RED._('deploy.modifiedNodes'),
+            sublabel: RED._('deploy.modifiedNodesDesc'),
+            onselect: function(s) {
+              if (s) {
+                changeDeploymentType('nodes')
+              }
+            }
+          }
+        ]
+      })
+    } else if (type == 'simple') {
+      var label = options.label || RED._('deploy.deploy')
+      var icon = 'red/images/deploy-full-o.png'
+      if (options.hasOwnProperty('icon')) {
+        icon = options.icon
+      }
 
-        // $("#node-dialog-view-diff").dialog({
-        //     title: RED._('deploy.confirm.button.review'),
-        //     modal: true,
-        //     autoOpen: false,
-        //     buttons: [
-        //         {
-        //             text: RED._("deploy.confirm.button.cancel"),
-        //             click: function() {
-        //                 $( this ).dialog( "close" );
-        //             }
-        //         },
-        //         {
-        //             text: RED._("deploy.confirm.button.merge"),
-        //             class: "primary",
-        //             click: function() {
-        //                 $( this ).dialog( "close" );
-        //             }
-        //         }
-        //     ],
-        //     open: function() {
-        //         $(this).dialog({width:Math.min($(window).width(),900),height:Math.min($(window).height(),600)});
+      $(
+        '<li><span class="deploy-button-group button-group">' +
+          '<a id="btn-deploy" class="deploy-button disabled" href="#">' +
+          '<span class="deploy-button-content">' +
+          (icon ? '<img id="btn-deploy-icon" src="' + icon + '"> ' : '') +
+          '<span>' +
+          label +
+          '</span>' +
+          '</span>' +
+          '<span class="deploy-button-spinner hide">' +
+          '<img src="red/images/spin.svg"/>' +
+          '</span>' +
+          '</a>' +
+          '</span></li>'
+      ).prependTo('.header-toolbar')
+    }
+
+    $('#btn-deploy').click(function() {
+      save()
+    })
+
+    $('#node-dialog-confirm-deploy').dialog({
+      title: RED._('deploy.confirm.button.confirm'),
+      modal: true,
+      autoOpen: false,
+      width: 550,
+      height: 'auto',
+      buttons: [
+        {
+          text: RED._('deploy.confirm.button.cancel'),
+          click: function() {
+            $(this).dialog('close')
+          }
+        },
+        // {
+        //     id: "node-dialog-confirm-deploy-review",
+        //     text: RED._("deploy.confirm.button.review"),
+        //     class: "primary",
+        //     click: function() {
+        //         showDiff();
+        //         $( this ).dialog( "close" );
         //     }
-        // });
-
-        // $("#node-dialog-view-diff-diff").editableList({
-        //     addButton: false,
-        //     scrollOnAdd: false,
-        //     addItem: function(container,i,object) {
-        //         var tab = object.tab.n;
-        //         var tabDiv = $('<div>',{class:"node-diff-tab collapsed"}).appendTo(container);
-        //
-        //         var titleRow = $('<div>',{class:"node-diff-tab-title"}).appendTo(tabDiv);
-        //         titleRow.click(function(evt) {
-        //             evt.preventDefault();
-        //             titleRow.parent().toggleClass('collapsed');
-        //         })
-        //         var chevron = $('<i class="fa fa-angle-down node-diff-chevron ">').appendTo(titleRow);
-        //         var title = $('<span>').html(tab.label||tab.id).appendTo(titleRow);
-        //
-        //         var stats = $('<span>',{class:"node-diff-tab-stats"}).appendTo(titleRow);
-        //
-        //         var addedCount = 0;
-        //         var deletedCount = 0;
-        //         var changedCount = 0;
-        //         var conflictedCount = 0;
-        //
-        //         object.tab.nodes.forEach(function(node) {
-        //             var realNode = RED.nodes.node(node.id);
-        //             var hasChanges = false;
-        //             if (currentDiff.added[node.id]) {
-        //                 addedCount++;
-        //                 hasChanges = true;
-        //             }
-        //             if (currentDiff.deleted[node.id]) {
-        //                 deletedCount++;
-        //                 hasChanges = true;
-        //             }
-        //             if (currentDiff.changed[node.id]) {
-        //                 changedCount++;
-        //                 hasChanges = true;
-        //             }
-        //             if (currentDiff.conflicted[node.id]) {
-        //                 conflictedCount++;
-        //                 hasChanges = true;
-        //             }
-        //
-        //             if (hasChanges) {
-        //                 var def = RED.nodes.getType(node.type)||{};
-        //                 var div = $("<div>",{class:"node-diff-node-entry collapsed"}).appendTo(tabDiv);
-        //                 var nodeTitleDiv = $("<div>",{class:"node-diff-node-entry-title"}).appendTo(div);
-        //                 nodeTitleDiv.click(function(evt) {
-        //                     evt.preventDefault();
-        //                     $(this).parent().toggleClass('collapsed');
-        //                 })
-        //                 var newNode = currentDiff.newConfig.all[node.id];
-        //                 var nodePropertiesDiv = $("<div>",{class:"node-diff-node-entry-properties"}).appendTo(div);
-        //
-        //                 var nodePropertiesTable = $("<table>").appendTo(nodePropertiesDiv);
-        //
-        //                 if (node.hasOwnProperty('x')) {
-        //                     if (newNode.x !== node.x || newNode.y !== node.y) {
-        //                         var currentPosition = node.x+", "+node.y
-        //                         var newPosition = newNode.x+", "+newNode.y;
-        //                         $("<tr><td>position</td><td>"+currentPosition+"</td><td>"+newPosition+"</td></tr>").appendTo(nodePropertiesTable);
-        //                     }
-        //                 }
-        //                 var properties = Object.keys(node).filter(function(p) { return p!='z'&&p!='wires'&&p!=='x'&&p!=='y'&&p!=='id'&&p!=='type'&&(!def.defaults||!def.defaults.hasOwnProperty(p))});
-        //                 if (def.defaults) {
-        //                     properties = properties.concat(Object.keys(def.defaults));
-        //                 }
-        //                 properties.forEach(function(d) {
-        //                     var localValue = JSON.stringify(node[d]);
-        //                     var remoteValue = JSON.stringify(newNode[d]);
-        //                     var originalValue = realNode._config[d];
-        //
-        //                     if (remoteValue !== originalValue) {
-        //                         var formattedProperty = formatNodeProperty(node[d]);
-        //                         var newFormattedProperty = formatNodeProperty(newNode[d]);
-        //                         if (localValue === originalValue) {
-        //                             // no conflict change
-        //                         } else {
-        //                             // conflicting change
-        //                         }
-        //                         $("<tr><td>"+d+'</td><td class="">'+formattedProperty+'</td><td class="node-diff-property-changed">'+newFormattedProperty+"</td></tr>").appendTo(nodePropertiesTable);
-        //                     }
-        //
-        //                 })
-        //                 var nodeChevron = $('<i class="fa fa-angle-down node-diff-chevron">').appendTo(nodeTitleDiv);
-        //
-        //
-        //                 // var leftColumn = $('<div>',{class:"node-diff-column"}).appendTo(div);
-        //                 // var rightColumn = $('<div>',{class:"node-diff-column"}).appendTo(div);
-        //                 // rightColumn.html("&nbsp");
-        //
-        //
-        //
-        //                 var nodeDiv = $("<div>",{class:"node-diff-node-entry-node"}).appendTo(nodeTitleDiv);
-        //                 var colour = def.color;
-        //                 var icon_url = "arrow-in.png";
-        //                 if (node.type === 'tab') {
-        //                     colour = "#C0DEED";
-        //                     icon_url = "subflow.png";
-        //                 } else if (def.category === 'config') {
-        //                     icon_url = "cog.png";
-        //                 } else if (node.type === 'unknown') {
-        //                     icon_url = "alert.png";
-        //                 } else {
-        //                     icon_url = def.icon;
-        //                 }
-        //                 nodeDiv.css('backgroundColor',colour);
-        //
-        //                 var iconContainer = $('<div/>',{class:"palette_icon_container"}).appendTo(nodeDiv);
-        //                 $('<div/>',{class:"palette_icon",style:"background-image: url(icons/"+icon_url+")"}).appendTo(iconContainer);
-        //
-        //
-        //
-        //                 var contentDiv = $('<div>',{class:"node-diff-node-description"}).appendTo(nodeTitleDiv);
-        //
-        //                 $('<span>',{class:"node-diff-node-label"}).html(node.label || node.name || node.id).appendTo(contentDiv);
-        //                 //$('<div>',{class:"red-ui-search-result-node-type"}).html(node.type).appendTo(contentDiv);
-        //                 //$('<div>',{class:"red-ui-search-result-node-id"}).html(node.id).appendTo(contentDiv);
-        //             }
-        //
-        //         });
-        //
-        //         var statsInfo = '<span class="node-diff-count">'+object.tab.nodes.length+" nodes"+
-        //                         (addedCount+deletedCount+changedCount+conflictedCount > 0 ? " : ":"")+
-        //                         "</span> "+
-        //                         ((addedCount > 0)?'<span class="node-diff-added">'+addedCount+' added</span> ':'')+
-        //                         ((deletedCount > 0)?'<span class="node-diff-deleted">'+deletedCount+' deleted</span> ':'')+
-        //                         ((changedCount > 0)?'<span class="node-diff-changed">'+changedCount+' changed</span> ':'')+
-        //                         ((conflictedCount > 0)?'<span class="node-diff-conflicted">'+conflictedCount+' conflicts</span>':'');
-        //         stats.html(statsInfo);
-        //
-        //
-        //
-        //         //
-        //         //
-        //         //
-        //         // var node = object.node;
-        //         // var realNode = RED.nodes.node(node.id);
-        //         // var def = RED.nodes.getType(object.node.type)||{};
-        //         // var l = "";
-        //         // if (def && def.label && realNode) {
-        //         //     l = def.label;
-        //         //     try {
-        //         //         l = (typeof l === "function" ? l.call(realNode) : l);
-        //         //     } catch(err) {
-        //         //         console.log("Definition error: "+node.type+".label",err);
-        //         //     }
-        //         // }
-        //         // l = l||node.label||node.name||node.id||"";
-        //         // console.log(node);
-        //         // var div = $('<div>').appendTo(container);
-        //         // div.html(l);
-        //     }
-        // });
-    }
-
-    function formatNodeProperty(prop) {
-        var formattedProperty = prop;
-        if (formattedProperty === null) {
-            formattedProperty = 'null';
-        } else if (formattedProperty === undefined) {
-            formattedProperty = 'undefined';
-        } else if (typeof formattedProperty === 'object') {
-            formattedProperty = JSON.stringify(formattedProperty);
-        }
-        if (/\n/.test(formattedProperty)) {
-            formattedProperty = "<pre>"+formattedProperty+"</pre>"
-        }
-        return formattedProperty;
-    }
-
-    function getNodeInfo(node) {
-        var tabLabel = "";
-        if (node.z) {
-            var tab = RED.nodes.workspace(node.z);
-            if (!tab) {
-                tab = RED.nodes.subflow(node.z);
-                tabLabel = tab.name;
-            } else {
-                tabLabel = tab.label;
+        // },
+        {
+          text: RED._('deploy.confirm.button.confirm'),
+          class: 'primary',
+          click: function() {
+            var ignoreChecked = $('#node-dialog-confirm-deploy-hide').prop(
+              'checked'
+            )
+            if (ignoreChecked) {
+              ignoreDeployWarnings[
+                $('#node-dialog-confirm-deploy-type').val()
+              ] = true
             }
+            save(
+              true,
+              $('#node-dialog-confirm-deploy-type').val() === 'conflict'
+            )
+            $(this).dialog('close')
+          }
         }
-        var label = "";
-        if (typeof node._def.label == "function") {
-            try {
-                label = node._def.label.call(node);
-            } catch(err) {
-                console.log("Definition error: "+node_def.type+".label",err);
-                label = node_def.type;
-            }
+      ],
+      create: function() {
+        $('#node-dialog-confirm-deploy')
+          .parent()
+          .find('div.ui-dialog-buttonpane')
+          .prepend(
+            '<div style="height:0; vertical-align: middle; display:inline-block; margin-top: 13px; float:left;">' +
+              '<input style="vertical-align:top;" type="checkbox" id="node-dialog-confirm-deploy-hide">' +
+              '<label style="display:inline;" for="node-dialog-confirm-deploy-hide"> do not warn about this again</label>' +
+              '<input type="hidden" id="node-dialog-confirm-deploy-type">' +
+              '</div>'
+          )
+      },
+      open: function() {
+        if ($('#node-dialog-confirm-deploy-type').val() === 'conflict') {
+          // $("#node-dialog-confirm-deploy-review").show();
+          $('#node-dialog-confirm-deploy-hide')
+            .parent()
+            .hide()
         } else {
-            label = node._def.label;
+          // $("#node-dialog-confirm-deploy-review").hide();
+          $('#node-dialog-confirm-deploy-hide')
+            .parent()
+            .show()
         }
-        label = label || node.id;
-        return {tab:tabLabel,type:node.type,label:label};
-    }
-    function sortNodeInfo(A,B) {
-        if (A.tab < B.tab) { return -1;}
-        if (A.tab > B.tab) { return 1;}
-        if (A.type < B.type) { return -1;}
-        if (A.type > B.type) { return 1;}
-        if (A.name < B.name) { return -1;}
-        if (A.name > B.name) { return 1;}
-        return 0;
-    }
+      }
+    })
 
-    function resolveConflict(currentNodes) {
-        $( "#node-dialog-confirm-deploy-config" ).hide();
-        $( "#node-dialog-confirm-deploy-unknown" ).hide();
-        $( "#node-dialog-confirm-deploy-unused" ).hide();
-        $( "#node-dialog-confirm-deploy-conflict" ).show();
-        $( "#node-dialog-confirm-deploy-type" ).val("conflict");
-        $( "#node-dialog-confirm-deploy" ).dialog( "open" );
+    RED.events.on('nodes:change', function(state) {
+      if (state.dirty) {
+        window.onbeforeunload = function() {
+          return RED._('deploy.confirm.undeployedChanges')
+        }
+        $('#btn-deploy').removeClass('disabled')
+      } else {
+        window.onbeforeunload = null
+        $('#btn-deploy').addClass('disabled')
+      }
+    })
 
-        // $("#node-dialog-confirm-deploy-review").append($('<img src="red/images/spin.svg" style="background: rgba(255,255,255,0.8); margin-top: -16px; margin-left: -8px; height:16px; position: absolute; "/>'));
-        // $("#node-dialog-confirm-deploy-review .ui-button-text").css("opacity",0.4);
-        // $("#node-dialog-confirm-deploy-review").attr("disabled",true).addClass("disabled");
-        // $.ajax({
-        //     headers: {
-        //         "Accept":"application/json",
-        //     },
-        //     cache: false,
-        //     url: 'flows',
-        //     success: function(nodes) {
-        //         var newNodes = nodes.flows;
-        //         var newRevision = nodes.rev;
-        //         generateDiff(currentNodes,newNodes);
-        //         $("#node-dialog-confirm-deploy-review").attr("disabled",false).removeClass("disabled");
-        //         $("#node-dialog-confirm-deploy-review img").remove();
-        //         $("#node-dialog-confirm-deploy-review .ui-button-text").css("opacity",1);
-        //     }
-        // });
-    }
-
-    // function parseNodes(nodeList) {
-    //     var tabOrder = [];
-    //     var tabs = {};
-    //     var subflows = {};
-    //     var globals = [];
-    //     var all = {};
-    //
-    //     nodeList.forEach(function(node) {
-    //         all[node.id] = node;
-    //         if (node.type === 'tab') {
-    //             tabOrder.push(node.id);
-    //             tabs[node.id] = {n:node,nodes:[]};
-    //         } else if (node.type === 'subflow') {
-    //             subflows[node.id] = {n:node,nodes:[]};
-    //         }
-    //     });
-    //
-    //     nodeList.forEach(function(node) {
-    //         if (node.type !== 'tab' && node.type !== 'subflow') {
-    //             if (tabs[node.z]) {
-    //                 tabs[node.z].nodes.push(node);
-    //             } else if (subflows[node.z]) {
-    //                 subflows[node.z].nodes.push(node);
-    //             } else {
-    //                 globals.push(node);
+    // $("#node-dialog-view-diff").dialog({
+    //     title: RED._('deploy.confirm.button.review'),
+    //     modal: true,
+    //     autoOpen: false,
+    //     buttons: [
+    //         {
+    //             text: RED._("deploy.confirm.button.cancel"),
+    //             click: function() {
+    //                 $( this ).dialog( "close" );
+    //             }
+    //         },
+    //         {
+    //             text: RED._("deploy.confirm.button.merge"),
+    //             class: "primary",
+    //             click: function() {
+    //                 $( this ).dialog( "close" );
     //             }
     //         }
-    //     });
-    //
-    //     return {
-    //         all: all,
-    //         tabOrder: tabOrder,
-    //         tabs: tabs,
-    //         subflows: subflows,
-    //         globals: globals
+    //     ],
+    //     open: function() {
+    //         $(this).dialog({width:Math.min($(window).width(),900),height:Math.min($(window).height(),600)});
     //     }
-    // }
+    // });
 
-    // function generateDiff(currentNodes,newNodes) {
-    //     var currentConfig = parseNodes(currentNodes);
-    //     var newConfig = parseNodes(newNodes);
-    //     var pending = RED.nodes.pending();
-    //     var added = {};
-    //     var deleted = {};
-    //     var changed = {};
-    //     var conflicted = {};
+    // $("#node-dialog-view-diff-diff").editableList({
+    //     addButton: false,
+    //     scrollOnAdd: false,
+    //     addItem: function(container,i,object) {
+    //         var tab = object.tab.n;
+    //         var tabDiv = $('<div>',{class:"node-diff-tab collapsed"}).appendTo(container);
     //
-    //
-    //     Object.keys(currentConfig.all).forEach(function(id) {
-    //         var node = RED.nodes.workspace(id)||RED.nodes.subflow(id)||RED.nodes.node(id);
-    //         if (!newConfig.all.hasOwnProperty(id)) {
-    //             if (!pending.added.hasOwnProperty(id)) {
-    //                 deleted[id] = true;
-    //                 conflicted[id] = node.changed;
-    //             }
-    //         } else if (JSON.stringify(currentConfig.all[id]) !== JSON.stringify(newConfig.all[id])) {
-    //             changed[id] = true;
-    //             conflicted[id] = node.changed;
-    //         }
-    //     });
-    //     Object.keys(newConfig.all).forEach(function(id) {
-    //         if (!currentConfig.all.hasOwnProperty(id) && !pending.deleted.hasOwnProperty(id)) {
-    //             added[id] = true;
-    //         }
-    //     });
-    //
-    //     // console.log("Added",added);
-    //     // console.log("Deleted",deleted);
-    //     // console.log("Changed",changed);
-    //     // console.log("Conflicted",conflicted);
-    //
-    //     var formatString = function(id) {
-    //         return conflicted[id]?"!":(added[id]?"+":(deleted[id]?"-":(changed[id]?"~":" ")));
-    //     }
-    //     newConfig.tabOrder.forEach(function(tabId) {
-    //         var tab = newConfig.tabs[tabId];
-    //         console.log(formatString(tabId),"Flow:",tab.n.label, "("+tab.n.id+")");
-    //         tab.nodes.forEach(function(node) {
-    //             console.log(" ",formatString(node.id),node.type,node.name || node.id);
+    //         var titleRow = $('<div>',{class:"node-diff-tab-title"}).appendTo(tabDiv);
+    //         titleRow.click(function(evt) {
+    //             evt.preventDefault();
+    //             titleRow.parent().toggleClass('collapsed');
     //         })
-    //         if (currentConfig.tabs[tabId]) {
-    //             currentConfig.tabs[tabId].nodes.forEach(function(node) {
-    //                 if (deleted[node.id]) {
-    //                     console.log(" ",formatString(node.id),node.type,node.name || node.id);
-    //                 }
-    //             })
-    //         }
-    //     });
-    //     currentConfig.tabOrder.forEach(function(tabId) {
-    //         if (deleted[tabId]) {
-    //             console.log(formatString(tabId),"Flow:",tab.n.label, "("+tab.n.id+")");
-    //         }
-    //     });
+    //         var chevron = $('<i class="fa fa-angle-down node-diff-chevron ">').appendTo(titleRow);
+    //         var title = $('<span>').html(tab.label||tab.id).appendTo(titleRow);
     //
-    //     currentDiff = {
-    //         currentConfig: currentConfig,
-    //         newConfig: newConfig,
-    //         added: added,
-    //         deleted: deleted,
-    //         changed: changed,
-    //         conflicted: conflicted
-    //     }
-    // }
-
-    // function showDiff() {
-    //     if (currentDiff) {
-    //         var list = $("#node-dialog-view-diff-diff");
-    //         list.editableList('empty');
-    //         var currentConfig = currentDiff.currentConfig;
-    //         currentConfig.tabOrder.forEach(function(tabId) {
-    //             var tab = currentConfig.tabs[tabId];
-    //             list.editableList('addItem',{tab:tab})
+    //         var stats = $('<span>',{class:"node-diff-tab-stats"}).appendTo(titleRow);
+    //
+    //         var addedCount = 0;
+    //         var deletedCount = 0;
+    //         var changedCount = 0;
+    //         var conflictedCount = 0;
+    //
+    //         object.tab.nodes.forEach(function(node) {
+    //             var realNode = RED.nodes.node(node.id);
+    //             var hasChanges = false;
+    //             if (currentDiff.added[node.id]) {
+    //                 addedCount++;
+    //                 hasChanges = true;
+    //             }
+    //             if (currentDiff.deleted[node.id]) {
+    //                 deletedCount++;
+    //                 hasChanges = true;
+    //             }
+    //             if (currentDiff.changed[node.id]) {
+    //                 changedCount++;
+    //                 hasChanges = true;
+    //             }
+    //             if (currentDiff.conflicted[node.id]) {
+    //                 conflictedCount++;
+    //                 hasChanges = true;
+    //             }
+    //
+    //             if (hasChanges) {
+    //                 var def = RED.nodes.getType(node.type)||{};
+    //                 var div = $("<div>",{class:"node-diff-node-entry collapsed"}).appendTo(tabDiv);
+    //                 var nodeTitleDiv = $("<div>",{class:"node-diff-node-entry-title"}).appendTo(div);
+    //                 nodeTitleDiv.click(function(evt) {
+    //                     evt.preventDefault();
+    //                     $(this).parent().toggleClass('collapsed');
+    //                 })
+    //                 var newNode = currentDiff.newConfig.all[node.id];
+    //                 var nodePropertiesDiv = $("<div>",{class:"node-diff-node-entry-properties"}).appendTo(div);
+    //
+    //                 var nodePropertiesTable = $("<table>").appendTo(nodePropertiesDiv);
+    //
+    //                 if (node.hasOwnProperty('x')) {
+    //                     if (newNode.x !== node.x || newNode.y !== node.y) {
+    //                         var currentPosition = node.x+", "+node.y
+    //                         var newPosition = newNode.x+", "+newNode.y;
+    //                         $("<tr><td>position</td><td>"+currentPosition+"</td><td>"+newPosition+"</td></tr>").appendTo(nodePropertiesTable);
+    //                     }
+    //                 }
+    //                 var properties = Object.keys(node).filter(function(p) { return p!='z'&&p!='wires'&&p!=='x'&&p!=='y'&&p!=='id'&&p!=='type'&&(!def.defaults||!def.defaults.hasOwnProperty(p))});
+    //                 if (def.defaults) {
+    //                     properties = properties.concat(Object.keys(def.defaults));
+    //                 }
+    //                 properties.forEach(function(d) {
+    //                     var localValue = JSON.stringify(node[d]);
+    //                     var remoteValue = JSON.stringify(newNode[d]);
+    //                     var originalValue = realNode._config[d];
+    //
+    //                     if (remoteValue !== originalValue) {
+    //                         var formattedProperty = formatNodeProperty(node[d]);
+    //                         var newFormattedProperty = formatNodeProperty(newNode[d]);
+    //                         if (localValue === originalValue) {
+    //                             // no conflict change
+    //                         } else {
+    //                             // conflicting change
+    //                         }
+    //                         $("<tr><td>"+d+'</td><td class="">'+formattedProperty+'</td><td class="node-diff-property-changed">'+newFormattedProperty+"</td></tr>").appendTo(nodePropertiesTable);
+    //                     }
+    //
+    //                 })
+    //                 var nodeChevron = $('<i class="fa fa-angle-down node-diff-chevron">').appendTo(nodeTitleDiv);
+    //
+    //
+    //                 // var leftColumn = $('<div>',{class:"node-diff-column"}).appendTo(div);
+    //                 // var rightColumn = $('<div>',{class:"node-diff-column"}).appendTo(div);
+    //                 // rightColumn.html("&nbsp");
+    //
+    //
+    //
+    //                 var nodeDiv = $("<div>",{class:"node-diff-node-entry-node"}).appendTo(nodeTitleDiv);
+    //                 var colour = def.color;
+    //                 var icon_url = "arrow-in.png";
+    //                 if (node.type === 'tab') {
+    //                     colour = "#C0DEED";
+    //                     icon_url = "subflow.png";
+    //                 } else if (def.category === 'config') {
+    //                     icon_url = "cog.png";
+    //                 } else if (node.type === 'unknown') {
+    //                     icon_url = "alert.png";
+    //                 } else {
+    //                     icon_url = def.icon;
+    //                 }
+    //                 nodeDiv.css('backgroundColor',colour);
+    //
+    //                 var iconContainer = $('<div/>',{class:"palette_icon_container"}).appendTo(nodeDiv);
+    //                 $('<div/>',{class:"palette_icon",style:"background-image: url(icons/"+icon_url+")"}).appendTo(iconContainer);
+    //
+    //
+    //
+    //                 var contentDiv = $('<div>',{class:"node-diff-node-description"}).appendTo(nodeTitleDiv);
+    //
+    //                 $('<span>',{class:"node-diff-node-label"}).html(node.label || node.name || node.id).appendTo(contentDiv);
+    //                 //$('<div>',{class:"red-ui-search-result-node-type"}).html(node.type).appendTo(contentDiv);
+    //                 //$('<div>',{class:"red-ui-search-result-node-id"}).html(node.id).appendTo(contentDiv);
+    //             }
+    //
     //         });
+    //
+    //         var statsInfo = '<span class="node-diff-count">'+object.tab.nodes.length+" nodes"+
+    //                         (addedCount+deletedCount+changedCount+conflictedCount > 0 ? " : ":"")+
+    //                         "</span> "+
+    //                         ((addedCount > 0)?'<span class="node-diff-added">'+addedCount+' added</span> ':'')+
+    //                         ((deletedCount > 0)?'<span class="node-diff-deleted">'+deletedCount+' deleted</span> ':'')+
+    //                         ((changedCount > 0)?'<span class="node-diff-changed">'+changedCount+' changed</span> ':'')+
+    //                         ((conflictedCount > 0)?'<span class="node-diff-conflicted">'+conflictedCount+' conflicts</span>':'');
+    //         stats.html(statsInfo);
+    //
+    //
+    //
+    //         //
+    //         //
+    //         //
+    //         // var node = object.node;
+    //         // var realNode = RED.nodes.node(node.id);
+    //         // var def = RED.nodes.getType(object.node.type)||{};
+    //         // var l = "";
+    //         // if (def && def.label && realNode) {
+    //         //     l = def.label;
+    //         //     try {
+    //         //         l = (typeof l === "function" ? l.call(realNode) : l);
+    //         //     } catch(err) {
+    //         //         console.log("Definition error: "+node.type+".label",err);
+    //         //     }
+    //         // }
+    //         // l = l||node.label||node.name||node.id||"";
+    //         // console.log(node);
+    //         // var div = $('<div>').appendTo(container);
+    //         // div.html(l);
     //     }
-    //     $("#node-dialog-view-diff").dialog("open");
-    // }
+    // });
+  }
 
+  function formatNodeProperty(prop) {
+    var formattedProperty = prop
+    if (formattedProperty === null) {
+      formattedProperty = 'null'
+    } else if (formattedProperty === undefined) {
+      formattedProperty = 'undefined'
+    } else if (typeof formattedProperty === 'object') {
+      formattedProperty = JSON.stringify(formattedProperty)
+    }
+    if (/\n/.test(formattedProperty)) {
+      formattedProperty = '<pre>' + formattedProperty + '</pre>'
+    }
+    return formattedProperty
+  }
 
-    function save(skipValidation,force) {
-        if (!$("#btn-deploy").hasClass("disabled")) {
-            if (!skipValidation) {
-                var hasUnknown = false;
-                var hasInvalid = false;
-                var hasUnusedConfig = false;
+  function getNodeInfo(node) {
+    var tabLabel = ''
+    if (node.z) {
+      var tab = RED.nodes.workspace(node.z)
+      if (!tab) {
+        tab = RED.nodes.subflow(node.z)
+        tabLabel = tab.name
+      } else {
+        tabLabel = tab.label
+      }
+    }
+    var label = ''
+    if (typeof node._def.label == 'function') {
+      try {
+        label = node._def.label.call(node)
+      } catch (err) {
+        console.log('Definition error: ' + node_def.type + '.label', err)
+        label = node_def.type
+      }
+    } else {
+      label = node._def.label
+    }
+    label = label || node.id
+    return { tab: tabLabel, type: node.type, label: label }
+  }
+  function sortNodeInfo(A, B) {
+    if (A.tab < B.tab) {
+      return -1
+    }
+    if (A.tab > B.tab) {
+      return 1
+    }
+    if (A.type < B.type) {
+      return -1
+    }
+    if (A.type > B.type) {
+      return 1
+    }
+    if (A.name < B.name) {
+      return -1
+    }
+    if (A.name > B.name) {
+      return 1
+    }
+    return 0
+  }
 
-                var unknownNodes = [];
-                var invalidNodes = [];
+  function resolveConflict(currentNodes) {
+    $('#node-dialog-confirm-deploy-config').hide()
+    $('#node-dialog-confirm-deploy-unknown').hide()
+    $('#node-dialog-confirm-deploy-unused').hide()
+    $('#node-dialog-confirm-deploy-conflict').show()
+    $('#node-dialog-confirm-deploy-type').val('conflict')
+    $('#node-dialog-confirm-deploy').dialog('open')
 
-                RED.nodes.eachNode(function(node) {
-                    hasInvalid = hasInvalid || !node.valid;
-                    if (!node.valid) {
-                        invalidNodes.push(getNodeInfo(node));
-                    }
-                    if (node.type === "unknown") {
-                        if (unknownNodes.indexOf(node.name) == -1) {
-                            unknownNodes.push(node.name);
-                        }
-                    }
-                });
-                hasUnknown = unknownNodes.length > 0;
+    // $("#node-dialog-confirm-deploy-review").append($('<img src="red/images/spin.svg" style="background: rgba(255,255,255,0.8); margin-top: -16px; margin-left: -8px; height:16px; position: absolute; "/>'));
+    // $("#node-dialog-confirm-deploy-review .ui-button-text").css("opacity",0.4);
+    // $("#node-dialog-confirm-deploy-review").attr("disabled",true).addClass("disabled");
+    // $.ajax({
+    //     headers: {
+    //         "Accept":"application/json",
+    //     },
+    //     cache: false,
+    //     url: 'flows',
+    //     success: function(nodes) {
+    //         var newNodes = nodes.flows;
+    //         var newRevision = nodes.rev;
+    //         generateDiff(currentNodes,newNodes);
+    //         $("#node-dialog-confirm-deploy-review").attr("disabled",false).removeClass("disabled");
+    //         $("#node-dialog-confirm-deploy-review img").remove();
+    //         $("#node-dialog-confirm-deploy-review .ui-button-text").css("opacity",1);
+    //     }
+    // });
+  }
 
-                var unusedConfigNodes = [];
-                RED.nodes.eachConfig(function(node) {
-                    if (node.users.length === 0 && (node._def.hasUsers !== false)) {
-                        unusedConfigNodes.push(getNodeInfo(node));
-                        hasUnusedConfig = true;
-                    }
-                });
+  // function parseNodes(nodeList) {
+  //     var tabOrder = [];
+  //     var tabs = {};
+  //     var subflows = {};
+  //     var globals = [];
+  //     var all = {};
+  //
+  //     nodeList.forEach(function(node) {
+  //         all[node.id] = node;
+  //         if (node.type === 'tab') {
+  //             tabOrder.push(node.id);
+  //             tabs[node.id] = {n:node,nodes:[]};
+  //         } else if (node.type === 'subflow') {
+  //             subflows[node.id] = {n:node,nodes:[]};
+  //         }
+  //     });
+  //
+  //     nodeList.forEach(function(node) {
+  //         if (node.type !== 'tab' && node.type !== 'subflow') {
+  //             if (tabs[node.z]) {
+  //                 tabs[node.z].nodes.push(node);
+  //             } else if (subflows[node.z]) {
+  //                 subflows[node.z].nodes.push(node);
+  //             } else {
+  //                 globals.push(node);
+  //             }
+  //         }
+  //     });
+  //
+  //     return {
+  //         all: all,
+  //         tabOrder: tabOrder,
+  //         tabs: tabs,
+  //         subflows: subflows,
+  //         globals: globals
+  //     }
+  // }
 
-                $( "#node-dialog-confirm-deploy-config" ).hide();
-                $( "#node-dialog-confirm-deploy-unknown" ).hide();
-                $( "#node-dialog-confirm-deploy-unused" ).hide();
-                $( "#node-dialog-confirm-deploy-conflict" ).hide();
+  // function generateDiff(currentNodes,newNodes) {
+  //     var currentConfig = parseNodes(currentNodes);
+  //     var newConfig = parseNodes(newNodes);
+  //     var pending = RED.nodes.pending();
+  //     var added = {};
+  //     var deleted = {};
+  //     var changed = {};
+  //     var conflicted = {};
+  //
+  //
+  //     Object.keys(currentConfig.all).forEach(function(id) {
+  //         var node = RED.nodes.workspace(id)||RED.nodes.subflow(id)||RED.nodes.node(id);
+  //         if (!newConfig.all.hasOwnProperty(id)) {
+  //             if (!pending.added.hasOwnProperty(id)) {
+  //                 deleted[id] = true;
+  //                 conflicted[id] = node.changed;
+  //             }
+  //         } else if (JSON.stringify(currentConfig.all[id]) !== JSON.stringify(newConfig.all[id])) {
+  //             changed[id] = true;
+  //             conflicted[id] = node.changed;
+  //         }
+  //     });
+  //     Object.keys(newConfig.all).forEach(function(id) {
+  //         if (!currentConfig.all.hasOwnProperty(id) && !pending.deleted.hasOwnProperty(id)) {
+  //             added[id] = true;
+  //         }
+  //     });
+  //
+  //     // console.log("Added",added);
+  //     // console.log("Deleted",deleted);
+  //     // console.log("Changed",changed);
+  //     // console.log("Conflicted",conflicted);
+  //
+  //     var formatString = function(id) {
+  //         return conflicted[id]?"!":(added[id]?"+":(deleted[id]?"-":(changed[id]?"~":" ")));
+  //     }
+  //     newConfig.tabOrder.forEach(function(tabId) {
+  //         var tab = newConfig.tabs[tabId];
+  //         console.log(formatString(tabId),"Flow:",tab.n.label, "("+tab.n.id+")");
+  //         tab.nodes.forEach(function(node) {
+  //             console.log(" ",formatString(node.id),node.type,node.name || node.id);
+  //         })
+  //         if (currentConfig.tabs[tabId]) {
+  //             currentConfig.tabs[tabId].nodes.forEach(function(node) {
+  //                 if (deleted[node.id]) {
+  //                     console.log(" ",formatString(node.id),node.type,node.name || node.id);
+  //                 }
+  //             })
+  //         }
+  //     });
+  //     currentConfig.tabOrder.forEach(function(tabId) {
+  //         if (deleted[tabId]) {
+  //             console.log(formatString(tabId),"Flow:",tab.n.label, "("+tab.n.id+")");
+  //         }
+  //     });
+  //
+  //     currentDiff = {
+  //         currentConfig: currentConfig,
+  //         newConfig: newConfig,
+  //         added: added,
+  //         deleted: deleted,
+  //         changed: changed,
+  //         conflicted: conflicted
+  //     }
+  // }
 
-                var showWarning = false;
+  // function showDiff() {
+  //     if (currentDiff) {
+  //         var list = $("#node-dialog-view-diff-diff");
+  //         list.editableList('empty');
+  //         var currentConfig = currentDiff.currentConfig;
+  //         currentConfig.tabOrder.forEach(function(tabId) {
+  //             var tab = currentConfig.tabs[tabId];
+  //             list.editableList('addItem',{tab:tab})
+  //         });
+  //     }
+  //     $("#node-dialog-view-diff").dialog("open");
+  // }
 
-                if (hasUnknown && !ignoreDeployWarnings.unknown) {
-                    showWarning = true;
-                    $( "#node-dialog-confirm-deploy-type" ).val("unknown");
-                    $( "#node-dialog-confirm-deploy-unknown" ).show();
-                    $( "#node-dialog-confirm-deploy-unknown-list" )
-                        .html("<li>"+unknownNodes.join("</li><li>")+"</li>");
-                } else if (hasInvalid && !ignoreDeployWarnings.invalid) {
-                    showWarning = true;
-                    $( "#node-dialog-confirm-deploy-type" ).val("invalid");
-                    $( "#node-dialog-confirm-deploy-config" ).show();
-                    invalidNodes.sort(sortNodeInfo);
-                    $( "#node-dialog-confirm-deploy-invalid-list" )
-                        .html("<li>"+invalidNodes.map(function(A) { return (A.tab?"["+A.tab+"] ":"")+A.label+" ("+A.type+")"}).join("</li><li>")+"</li>");
+  function save(skipValidation, force) {
+    var screenshotExist = document.querySelector('#enebular-screenshot')
+    if (screenshotExist) {
+      screenshotExist.remove()
+    }
+    var elementToExport = document.querySelector('#chart')
+    var cloneElement = elementToExport.cloneNode(true)
+    cloneElement.setAttribute('id', 'enebular-screenshot')
+    cloneElement.setAttribute('style', 'display: none')
+    document.body.appendChild(cloneElement)
+    d3
+      .select('#enebular-screenshot')
+      .selectAll('image.node_icon, image.node_error, image.node_changed')
+      .remove()
+    d3
+      .select('#enebular-screenshot > svg')
+      .attr('width', '100%')
+      .attr('height', 500 + 'px')
+    // .attr('width', 900 + 'px')
+    // .attr('height', 600 + 'px')
+    d3
+      .select('#enebular-screenshot > svg > g > g > rect')
+      .attr('width', '100%')
+      .attr('height', 'auto')
+      // .attr('width', 1200 + 'px')
+      // .attr('height', 800 + 'px')
+      .attr('fill', '#f7fafb')
+    d3
+      .select('#enebular-screenshot > svg > g > g')
+      .attr('transform', 'scale(0.75)')
+    d3.select('#enebular-screenshot > svg > g > g > g').remove()
+    var screenshotHTML = document.querySelector('#enebular-screenshot')
+      .innerHTML
+    if (!$('#btn-deploy').hasClass('disabled')) {
+      if (!skipValidation) {
+        var hasUnknown = false
+        var hasInvalid = false
+        var hasUnusedConfig = false
 
-                } else if (hasUnusedConfig && !ignoreDeployWarnings.unusedConfig) {
-                    // showWarning = true;
-                    // $( "#node-dialog-confirm-deploy-type" ).val("unusedConfig");
-                    // $( "#node-dialog-confirm-deploy-unused" ).show();
-                    //
-                    // unusedConfigNodes.sort(sortNodeInfo);
-                    // $( "#node-dialog-confirm-deploy-unused-list" )
-                    //     .html("<li>"+unusedConfigNodes.map(function(A) { return (A.tab?"["+A.tab+"] ":"")+A.label+" ("+A.type+")"}).join("</li><li>")+"</li>");
-                }
-                if (showWarning) {
-                    $( "#node-dialog-confirm-deploy-hide" ).prop("checked",false);
-                    $( "#node-dialog-confirm-deploy" ).dialog( "open" );
-                    return;
-                }
+        var unknownNodes = []
+        var invalidNodes = []
+
+        RED.nodes.eachNode(function(node) {
+          hasInvalid = hasInvalid || !node.valid
+          if (!node.valid) {
+            invalidNodes.push(getNodeInfo(node))
+          }
+          if (node.type === 'unknown') {
+            if (unknownNodes.indexOf(node.name) == -1) {
+              unknownNodes.push(node.name)
             }
+          }
+        })
+        hasUnknown = unknownNodes.length > 0
 
-            var nns = RED.nodes.createCompleteNodeSet();
+        var unusedConfigNodes = []
+        RED.nodes.eachConfig(function(node) {
+          if (node.users.length === 0 && node._def.hasUsers !== false) {
+            unusedConfigNodes.push(getNodeInfo(node))
+            hasUnusedConfig = true
+          }
+        })
 
-            var startTime = Date.now();
-            $(".deploy-button-content").css('opacity',0);
-            $(".deploy-button-spinner").show();
-            $("#btn-deploy").addClass("disabled");
+        $('#node-dialog-confirm-deploy-config').hide()
+        $('#node-dialog-confirm-deploy-unknown').hide()
+        $('#node-dialog-confirm-deploy-unused').hide()
+        $('#node-dialog-confirm-deploy-conflict').hide()
 
-            var data = {flows:nns};
+        var showWarning = false
 
-            if (!force) {
-                data.rev = RED.nodes.version();
-            }
-
-            $.ajax({
-                url:"flows",
-                type: "POST",
-                data: JSON.stringify(data),
-                contentType: "application/json; charset=utf-8",
-                headers: {
-                    "Node-RED-Deployment-Type":deploymentType
-                }
-            }).done(function(data,textStatus,xhr) {
-                RED.nodes.dirty(false);
-                RED.nodes.version(data.rev);
-                if (hasUnusedConfig) {
-                    RED.notify(
-                    '<p>'+RED._("deploy.successfulDeploy")+'</p>'+
-                    '<p>'+RED._("deploy.unusedConfigNodes")+' <a href="#" onclick="RED.sidebar.config.show(true); return false;">'+RED._("deploy.unusedConfigNodesLink")+'</a></p>',"success",false,6000);
-                } else {
-                    RED.notify(RED._("deploy.successfulDeploy"),"success");
-                }
-                RED.nodes.eachNode(function(node) {
-                    if (node.changed) {
-                        node.dirty = true;
-                        node.changed = false;
-                    }
-                    if(node.credentials) {
-                        delete node.credentials;
-                    }
-                });
-                RED.nodes.eachConfig(function (confNode) {
-                    confNode.changed = false;
-                    if (confNode.credentials) {
-                        delete confNode.credentials;
-                    }
-                });
-                RED.nodes.eachWorkspace(function(ws) {
-                    ws.changed = false;
+        if (hasUnknown && !ignoreDeployWarnings.unknown) {
+          showWarning = true
+          $('#node-dialog-confirm-deploy-type').val('unknown')
+          $('#node-dialog-confirm-deploy-unknown').show()
+          $('#node-dialog-confirm-deploy-unknown-list').html(
+            '<li>' + unknownNodes.join('</li><li>') + '</li>'
+          )
+        } else if (hasInvalid && !ignoreDeployWarnings.invalid) {
+          showWarning = true
+          $('#node-dialog-confirm-deploy-type').val('invalid')
+          $('#node-dialog-confirm-deploy-config').show()
+          invalidNodes.sort(sortNodeInfo)
+          $('#node-dialog-confirm-deploy-invalid-list').html(
+            '<li>' +
+              invalidNodes
+                .map(function(A) {
+                  return (
+                    (A.tab ? '[' + A.tab + '] ' : '') +
+                    A.label +
+                    ' (' +
+                    A.type +
+                    ')'
+                  )
                 })
-                // Once deployed, cannot undo back to a clean state
-                RED.history.markAllDirty();
-                RED.view.redraw();
-                RED.events.emit("deploy");
-            }).fail(function(xhr,textStatus,err) {
-                RED.nodes.dirty(true);
-                $("#btn-deploy").removeClass("disabled");
-                if (xhr.status === 401) {
-                    RED.notify(RED._("deploy.deployFailed",{message:RED._("user.notAuthorized")}),"error");
-                } else if (xhr.status === 409) {
-                    resolveConflict(nns);
-                } else if (xhr.responseText) {
-                    RED.notify(RED._("deploy.deployFailed",{message:xhr.responseText}),"error");
-                } else {
-                    RED.notify(RED._("deploy.deployFailed",{message:RED._("deploy.errors.noResponse")}),"error");
-                }
-            }).always(function() {
-                var delta = Math.max(0,300-(Date.now()-startTime));
-                setTimeout(function() {
-                    $(".deploy-button-content").css('opacity',1);
-                    $(".deploy-button-spinner").hide();
-                },delta);
-            });
+                .join('</li><li>') +
+              '</li>'
+          )
+        } else if (hasUnusedConfig && !ignoreDeployWarnings.unusedConfig) {
+          // showWarning = true;
+          // $( "#node-dialog-confirm-deploy-type" ).val("unusedConfig");
+          // $( "#node-dialog-confirm-deploy-unused" ).show();
+          //
+          // unusedConfigNodes.sort(sortNodeInfo);
+          // $( "#node-dialog-confirm-deploy-unused-list" )
+          //     .html("<li>"+unusedConfigNodes.map(function(A) { return (A.tab?"["+A.tab+"] ":"")+A.label+" ("+A.type+")"}).join("</li><li>")+"</li>");
         }
+        if (showWarning) {
+          $('#node-dialog-confirm-deploy-hide').prop('checked', false)
+          $('#node-dialog-confirm-deploy').dialog('open')
+          return
+        }
+      }
+
+      var nns = RED.nodes.createCompleteNodeSet()
+
+      var startTime = Date.now()
+      $('.deploy-button-content').css('opacity', 0)
+      $('.deploy-button-spinner').show()
+      $('#btn-deploy').addClass('disabled')
+
+      var data = { flows: nns, screenshot: screenshotHTML }
+
+      if (!force) {
+        data.rev = RED.nodes.version()
+      }
+
+      $.ajax({
+        url: 'flows',
+        type: 'POST',
+        data: JSON.stringify(data),
+        contentType: 'application/json; charset=utf-8',
+        headers: {
+          'Node-RED-Deployment-Type': deploymentType
+        }
+      })
+        .done(function(data, textStatus, xhr) {
+          RED.nodes.dirty(false)
+          RED.nodes.version(data.rev)
+          if (hasUnusedConfig) {
+            RED.notify(
+              '<p>' +
+                RED._('deploy.successfulDeploy') +
+                '</p>' +
+                '<p>' +
+                RED._('deploy.unusedConfigNodes') +
+                ' <a href="#" onclick="RED.sidebar.config.show(true); return false;">' +
+                RED._('deploy.unusedConfigNodesLink') +
+                '</a></p>',
+              'success',
+              false,
+              6000
+            )
+          } else {
+            RED.notify(RED._('deploy.successfulDeploy'), 'success')
+          }
+          RED.nodes.eachNode(function(node) {
+            if (node.changed) {
+              node.dirty = true
+              node.changed = false
+            }
+            if (node.credentials) {
+              delete node.credentials
+            }
+          })
+          RED.nodes.eachConfig(function(confNode) {
+            confNode.changed = false
+            if (confNode.credentials) {
+              delete confNode.credentials
+            }
+          })
+          RED.nodes.eachWorkspace(function(ws) {
+            ws.changed = false
+          })
+          // Once deployed, cannot undo back to a clean state
+          RED.history.markAllDirty()
+          RED.view.redraw()
+          RED.events.emit('deploy')
+        })
+        .fail(function(xhr, textStatus, err) {
+          RED.nodes.dirty(true)
+          $('#btn-deploy').removeClass('disabled')
+          if (xhr.status === 401) {
+            RED.notify(
+              RED._('deploy.deployFailed', {
+                message: RED._('user.notAuthorized')
+              }),
+              'error'
+            )
+          } else if (xhr.status === 409) {
+            resolveConflict(nns)
+          } else if (xhr.responseText) {
+            RED.notify(
+              RED._('deploy.deployFailed', { message: xhr.responseText }),
+              'error'
+            )
+          } else {
+            RED.notify(
+              RED._('deploy.deployFailed', {
+                message: RED._('deploy.errors.noResponse')
+              }),
+              'error'
+            )
+          }
+        })
+        .always(function() {
+          var delta = Math.max(0, 300 - (Date.now() - startTime))
+          setTimeout(function() {
+            $('.deploy-button-content').css('opacity', 1)
+            $('.deploy-button-spinner').hide()
+          }, delta)
+        })
     }
-    return {
-        init: init
-    }
-})();
+  }
+  return {
+    init: init
+  }
+})()
 ;/**
  * Copyright 2013 IBM Corp.
  *

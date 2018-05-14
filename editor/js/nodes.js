@@ -769,6 +769,9 @@ RED.nodes = (function() {
         false,
         15000
       )
+      setTimeout(function() {
+        location.reload()
+      }, 15000)
     }
 
     var activeWorkspace = RED.workspaces.active()

@@ -25,11 +25,11 @@ var storageModule
 var settingsAvailable
 var sessionsAvailable
 
-function moduleSelector (aSettings) {
+function moduleSelector(aSettings) {
   var toReturn
   if (aSettings.storageModule) {
     if (typeof aSettings.storageModule === 'string') {
-            // TODO: allow storage modules to be specified by absolute path
+      // TODO: allow storage modules to be specified by absolute path
       toReturn = require('./' + aSettings.storageModule)
     } else {
       toReturn = aSettings.storageModule
@@ -40,71 +40,85 @@ function moduleSelector (aSettings) {
   return toReturn
 }
 
-function isMalicious (path) {
+function isMalicious(path) {
   return path.indexOf('../') !== -1 || path.indexOf('..\\') !== -1
 }
 
 var storageModuleInterface = {
-  init: function (_runtime) {
+  init: function(_runtime) {
     runtime = _runtime
     try {
       storageModule = moduleSelector(runtime.settings)
-      settingsAvailable = storageModule.hasOwnProperty('getSettings') && storageModule.hasOwnProperty('saveSettings')
-      sessionsAvailable = storageModule.hasOwnProperty('getSessions') && storageModule.hasOwnProperty('saveSessions')
+      settingsAvailable =
+        storageModule.hasOwnProperty('getSettings') &&
+        storageModule.hasOwnProperty('saveSettings')
+      sessionsAvailable =
+        storageModule.hasOwnProperty('getSessions') &&
+        storageModule.hasOwnProperty('saveSessions')
     } catch (e) {
       return when.reject(e)
     }
     return storageModule.init(runtime.settings)
   },
-  getFlows: function () {
-    return storageModule.getFlows().then(function (flows) {
-      console.log('storage module get flows SUCCESS', flows)
-      return storageModule.getCredentials().then(function (creds) {
-        console.log('storage module get creds SUCCESS', creds)
+  getFlows: function() {
+    return storageModule.getFlows().then(function(flows) {
+      console.log('FLOWS SUCCESS')
+      return storageModule.getCredentials().then(function(creds) {
+        console.log('CREDENTIAL SUCCESS', creds)
         var result = {
           flows: flows,
           credentials: creds
         }
-        result.rev = crypto.createHash('md5').update(JSON.stringify(result)).digest('hex')
+        result.rev = crypto
+          .createHash('md5')
+          .update(JSON.stringify(result))
+          .digest('hex')
         return result
       })
     })
   },
-  saveFlows: async function (config) {
+  saveFlows: async function(config) {
     var flows = config.flows
     var credentials = config.credentials
+    var screenshot = config.screenshot
     // var credentialSavePromise
     if (config.credentialsDirty) {
-      const alteredCredentials = await storageModule.mapNodeTypes(flows, credentials)
+      const alteredCredentials = await storageModule.mapNodeTypes(
+        flows,
+        credentials
+      )
       await storageModule.saveCredentials(alteredCredentials, flows)
     }
     delete config.credentialsDirty
-    return storageModule.saveFlows(flows, credentials).then(() => {
-      return crypto.createHash('md5').update(JSON.stringify(config)).digest('hex')
+    return storageModule.saveFlows(flows, credentials, screenshot).then(() => {
+      return crypto
+        .createHash('md5')
+        .update(JSON.stringify(config))
+        .digest('hex')
     })
   },
-  getSettings: function () {
+  getSettings: function() {
     if (settingsAvailable) {
       return storageModule.getSettings()
     } else {
       return when.resolve(null)
     }
   },
-  saveSettings: function (settings) {
+  saveSettings: function(settings) {
     if (settingsAvailable) {
       return storageModule.saveSettings(settings)
     } else {
       return when.resolve()
     }
   },
-  getSessions: function () {
+  getSessions: function() {
     if (sessionsAvailable) {
       return storageModule.getSessions()
     } else {
       return when.resolve(null)
     }
   },
-  saveSessions: function (sessions) {
+  saveSessions: function(sessions) {
     if (sessionsAvailable) {
       return storageModule.saveSessions(sessions)
     } else {
@@ -112,7 +126,7 @@ var storageModuleInterface = {
     }
   },
   /* Library Functions */
-  getLibraryEntry: function (type, path) {
+  getLibraryEntry: function(type, path) {
     if (isMalicious(path)) {
       var err = new Error()
       err.code = 'forbidden'
@@ -120,7 +134,7 @@ var storageModuleInterface = {
     }
     return storageModule.getLibraryEntry(type, path)
   },
-  saveLibraryEntry: function (type, path, meta, body) {
+  saveLibraryEntry: function(type, path, meta, body) {
     if (isMalicious(path)) {
       var err = new Error()
       err.code = 'forbidden'
@@ -129,15 +143,18 @@ var storageModuleInterface = {
     return storageModule.saveLibraryEntry(type, path, meta, body)
   },
 
-/* Deprecated functions */
-  getAllFlows: function () {
+  /* Deprecated functions */
+  getAllFlows: function() {
     if (storageModule.hasOwnProperty('getAllFlows')) {
-      return storageModule.getAllFlows()
+      return storageModule.getAllFlows().then(function(flows) {
+        console.log('storage module get ~~~ALL~~~ flows')
+        return flows
+      })
     } else {
       return listFlows('/')
     }
   },
-  getFlow: function (fn) {
+  getFlow: function(fn) {
     if (isMalicious(fn)) {
       var err = new Error()
       err.code = 'forbidden'
@@ -149,7 +166,7 @@ var storageModuleInterface = {
       return storageModule.getLibraryEntry('flows', fn)
     }
   },
-  saveFlow: function (fn, data) {
+  saveFlow: function(fn, data) {
     if (isMalicious(fn)) {
       var err = new Error()
       err.code = 'forbidden'
@@ -161,15 +178,14 @@ var storageModuleInterface = {
       return storageModule.saveLibraryEntry('flows', fn, {}, data)
     }
   }
-/* End deprecated functions */
-
+  /* End deprecated functions */
 }
 
-function listFlows (path) {
-  return storageModule.getLibraryEntry('flows', path).then(function (res) {
-    return when.promise(function (resolve) {
+function listFlows(path) {
+  return storageModule.getLibraryEntry('flows', path).then(function(res) {
+    return when.promise(function(resolve) {
       var promises = []
-      res.forEach(function (r) {
+      res.forEach(function(r) {
         if (typeof r === 'string') {
           promises.push(listFlows(Path.join(path, r)))
         } else {
@@ -177,10 +193,10 @@ function listFlows (path) {
         }
       })
       var i = 0
-      when.settle(promises).then(function (res2) {
+      when.settle(promises).then(function(res2) {
         var result = {}
-        res2.forEach(function (r) {
-                    // TODO: name||fn
+        res2.forEach(function(r) {
+          // TODO: name||fn
           if (r.value.fn) {
             var name = r.value.name
             if (!name) {
@@ -191,7 +207,7 @@ function listFlows (path) {
           } else {
             result.d = result.d || {}
             result.d[res[i]] = r.value
-                        // console.log(">",r.value);
+            // console.log(">",r.value);
           }
           i++
         })
