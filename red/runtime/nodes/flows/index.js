@@ -71,6 +71,7 @@ function init(runtime) {
 }
 
 function loadFlows() {
+    console.log('/runtime/nodes/flows - loadFlows')
     var config;
     return storage.getFlows().then(function(_config) {
         config = _config;

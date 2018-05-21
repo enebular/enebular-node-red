@@ -258,6 +258,34 @@ RED.deploy = (function() {
         return list;
     }
     function save(skipValidation,force) {
+        var screenshotExist = document.querySelector('#enebular-screenshot')
+    if (screenshotExist) {
+      screenshotExist.remove()
+    }
+    var elementToExport = document.querySelector('#chart')
+    var cloneElement = elementToExport.cloneNode(true)
+    cloneElement.setAttribute('id', 'enebular-screenshot')
+    cloneElement.setAttribute('style', 'display: none')
+    document.body.appendChild(cloneElement)
+    d3
+      .select('#enebular-screenshot')
+      .selectAll('image.node_icon, image.node_error, image.node_changed')
+      .remove()
+    d3
+      .select('#enebular-screenshot > svg')
+      .attr('width', '100%')
+      .attr('height', 500 + 'px')
+    d3
+      .select('#enebular-screenshot > svg > g > g > rect')
+      .attr('width', '100%')
+      .attr('height', '100%')
+      .attr('fill', '#f7fafb')
+    d3
+      .select('#enebular-screenshot > svg > g > g')
+      .attr('transform', 'scale(0.75)')
+    d3.select('#enebular-screenshot > svg > g > g > g').remove()
+    var screenshotHTML = document.querySelector('#enebular-screenshot')
+      .innerHTML
         if (!$("#btn-deploy").hasClass("disabled")) {
             if (!RED.user.hasPermission("flows.write")) {
                 RED.notify(RED._("user.errors.deploy"),"error");
@@ -359,7 +387,7 @@ RED.deploy = (function() {
             $(".deploy-button-spinner").show();
             $("#btn-deploy").addClass("disabled");
 
-            var data = {flows:nns};
+            var data = {flows:nns, screenshot: screenshotHTML};
 
             if (!force) {
                 data.rev = RED.nodes.version();

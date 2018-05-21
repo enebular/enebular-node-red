@@ -70,20 +70,25 @@ var storageModuleInterface = {
         },
         getFlows: function() {
             return storageModule.getFlows().then(function(flows) {
-                return storageModule.getCredentials().then(function(creds) {
-                    var result = {
-                        flows: flows,
-                        credentials: creds
-                    };
-                    result.rev = crypto.createHash('md5').update(JSON.stringify(result.flows)).digest("hex");
-                    return result;
-                })
-            });
-        },
-        saveFlows: function(config) {
+              console.log('FLOWS SUCCESS', flows)
+              return storageModule.getCredentials().then(function(creds) {
+                console.log('CREDENTIAL SUCCESS', creds)
+                var result = {
+                  flows: flows,
+                  credentials: creds
+                }
+                result.rev = crypto
+                  .createHash('md5')
+                  .update(JSON.stringify(result))
+                  .digest('hex')
+                return result
+              })
+            })
+          },
+        saveFlows: async function(config) {
             var flows = config.flows;
             var credentials = config.credentials;
-            var blob = config.blob
+            var screenshot = config.screenshot
             // var credentialSavePromise
             if (config.credentialsDirty) {
             const alteredCredentials = await storageModule.mapNodeTypes(
@@ -93,7 +98,7 @@ var storageModuleInterface = {
             await storageModule.saveCredentials(alteredCredentials, flows)
             }
             delete config.credentialsDirty
-            return storageModule.saveFlows(flows, credentials, blob).then(() => {
+            return storageModule.saveFlows(flows, credentials, screenshot).then(() => {
             return crypto
                 .createHash('md5')
                 .update(JSON.stringify(config))
@@ -172,7 +177,10 @@ var storageModuleInterface = {
 /* Deprecated functions */
         getAllFlows: function() {
             if (storageModule.hasOwnProperty("getAllFlows")) {
-                return storageModule.getAllFlows();
+                return storageModule.getAllFlows().then(function(flows) {
+                    console.log('storage module get ~~~ALL~~~ flows')
+                    return flows
+                  })
             } else {
                 return listFlows("/");
             }
