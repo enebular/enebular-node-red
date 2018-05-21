@@ -43,6 +43,7 @@ module.exports = {
             return;
         }
         var flows = req.body;
+        var screenshot = req.body.screenshot || null
         var deploymentType = req.get("Node-RED-Deployment-Type")||"full";
         log.audit({event: "flows.set",type:deploymentType,version:version},req);
         if (deploymentType === 'reload') {
@@ -69,7 +70,7 @@ module.exports = {
                     }
                 }
             }
-            redNodes.setFlows(flowConfig,deploymentType).then(function(flowId) {
+            redNodes.setFlows(flowConfig,deploymentType, null, null, screenshot).then(function(flowId) {
                 if (version === "v1") {
                     res.status(204).end();
                 } else if (version === "v2") {

@@ -83,19 +83,37 @@ var storageModuleInterface = {
         saveFlows: function(config) {
             var flows = config.flows;
             var credentials = config.credentials;
-            var credentialSavePromise;
+            var blob = config.blob
+            // var credentialSavePromise
             if (config.credentialsDirty) {
-                credentialSavePromise = storageModule.saveCredentials(credentials);
-            } else {
-                credentialSavePromise = when.resolve();
+            const alteredCredentials = await storageModule.mapNodeTypes(
+                flows,
+                credentials
+            )
+            await storageModule.saveCredentials(alteredCredentials, flows)
             }
-            delete config.credentialsDirty;
+            delete config.credentialsDirty
+            return storageModule.saveFlows(flows, credentials, blob).then(() => {
+            return crypto
+                .createHash('md5')
+                .update(JSON.stringify(config))
+                .digest('hex')
+            })
+            // var flows = config.flows;
+            // var credentials = config.credentials;
+            // var credentialSavePromise;
+            // if (config.credentialsDirty) {
+            //     credentialSavePromise = storageModule.saveCredentials(credentials);
+            // } else {
+            //     credentialSavePromise = when.resolve();
+            // }
+            // delete config.credentialsDirty;
 
-            return credentialSavePromise.then(function() {
-                return storageModule.saveFlows(flows).then(function() {
-                    return crypto.createHash('md5').update(JSON.stringify(config.flows)).digest("hex");
-                })
-            });
+            // return credentialSavePromise.then(function() {
+            //     return storageModule.saveFlows(flows).then(function() {
+            //         return crypto.createHash('md5').update(JSON.stringify(config.flows)).digest("hex");
+            //     })
+            // });
         },
         // getCredentials: function() {
         //     return storageModule.getCredentials();

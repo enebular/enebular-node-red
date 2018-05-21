@@ -107,7 +107,7 @@ function load(forceStart) {
  * type - full/nodes/flows/load (default full)
  * muteLog - don't emit the standard log messages (used for individual flow api)
  */
-function setFlows(_config,type,muteLog,forceStart) {
+function setFlows(_config,type,muteLog,forceStart, screenshot) {
     type = type||"full";
 
     var configSavePromise = null;
@@ -142,7 +142,8 @@ function setFlows(_config,type,muteLog,forceStart) {
             var saveConfig = {
                 flows: config,
                 credentialsDirty:credsDirty,
-                credentials: creds
+                credentials: creds,
+                screenshot: screenshot
             }
             return storage.saveFlows(saveConfig);
         });

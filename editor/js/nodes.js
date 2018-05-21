@@ -758,6 +758,31 @@ RED.nodes = (function() {
             RED.notify("<p>"+RED._("clipboard.importUnrecognised",{count:unknownTypes.length})+"</p>"+typeList,"error",false,10000);
         }
 
+        if (unknownTypes.length > 0) {
+            var typeList = '<ul><li>' + unknownTypes.join('</li><li>') + '</li></ul>'
+            var type = 'type' + (unknownTypes.length > 1 ? 's' : '')
+            var nodeMsg = type.indexOf('s') > -1 ? 'nodes' : 'a node'
+            RED.notify(
+              '<strong>' +
+                RED._('clipboard.importUnrecognised', {
+                  count: unknownTypes.length
+                }) +
+                '</strong>' +
+                typeList +
+                '<p>It looks like you are using ' +
+                nodeMsg +
+                ' not supported by enebular. Don&#39;t worry! It can take some time to install ' +
+                nodeMsg +
+                '.</p><p>Please refresh your browser.</p>',
+              'error',
+              false,
+              15000
+            )
+            setTimeout(function() {
+              location.reload()
+            }, 15000)
+          }
+
         var activeWorkspace = RED.workspaces.active();
         //TODO: check the z of the subflow instance and check _that_ if it exists
         var activeSubflow = getSubflow(activeWorkspace);
