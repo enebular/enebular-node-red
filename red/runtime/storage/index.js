@@ -104,12 +104,20 @@ var storageModuleInterface = {
       await storageModule.saveCredentials(alteredCredentials, flows)
     }
     delete config.credentialsDirty
-    return storageModule.saveFlows(flows, credentials, screenshot).then(() => {
-      return crypto
-        .createHash('md5')
-        .update(JSON.stringify(config))
-        .digest('hex')
-    })
+    return storageModule
+      .saveFlows(flows, credentials, screenshot)
+      .then(function(response) {
+        console.log(response, '----------response------------')
+        return crypto
+          .createHash('md5')
+          .update(JSON.stringify(config))
+          .digest('hex')
+      })
+      .catch(function(err) {
+        if (err) {
+          console.log(err, 'save flow error in node red')
+        }
+      })
     // var flows = config.flows;
     // var credentials = config.credentials;
     // var credentialSavePromise;
