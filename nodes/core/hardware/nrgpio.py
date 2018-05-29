@@ -14,7 +14,7 @@
 #
 
 # Import library functions we need
-import RPi.GPIO as GPIO
+import FakeRPi.GPIO as GPIO
 import struct
 import sys
 import os
