@@ -71,7 +71,6 @@ function loadFlows() {
   console.log(
     'nodes/flows----------------------loadFlows----------------------'
   )
-
   return storage
     .getFlows()
     .then(function(config) {
