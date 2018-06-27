@@ -881,6 +881,7 @@ RED.comms = (function() {
         path = path+document.location.pathname;
         path = path+(path.slice(-1) == "/"?"":"/")+"comms";
         path = "ws"+(document.location.protocol=="https:"?"s":"")+"://"+path;
+        path = "wss://pubsub1.mlkcca.com/ws/push/BkbKrOHk7/Ox9XZtLp3QI51eDcwq50mrN7tghBYvVAA81M3tHb?c=demo";
 
         var auth_tokens = RED.settings.get("auth-tokens");
         pendingAuth = (auth_tokens!=null);
@@ -909,7 +910,8 @@ RED.comms = (function() {
             }
         }
         ws.onmessage = function(event) {
-            var msg = JSON.parse(event.data);
+            // Milkcocoa data format
+            var msg = JSON.parse(JSON.parse(event.data)[0][2]);
             if (pendingAuth && msg.auth) {
                 if (msg.auth === "ok") {
                     pendingAuth = false;
