@@ -7133,7 +7133,7 @@ RED.stack = (function() {
  * limitations under the License.
  **/
 
-RED.deploy = (function() {
+RED.deploy = (function () {
   var deploymentTypes = {
     full: { img: 'red/images/deploy-full-o.png' },
     nodes: { img: 'red/images/deploy-nodes-o.png' },
@@ -7152,7 +7152,7 @@ RED.deploy = (function() {
 
   var currentDiff = null
 
-  function changeDeploymentType(type) {
+  function changeDeploymentType (type) {
     deploymentType = type
     $('#btn-deploy-icon').attr('src', deploymentTypes[type].img)
   }
@@ -7164,26 +7164,26 @@ RED.deploy = (function() {
    *      label: the text to display - default: "Deploy"
    *      icon : the icon to use. Null removes the icon. default: "red/images/deploy-full-o.png"
    */
-  function init(options) {
+  function init (options) {
     options = options || {}
     var type = options.type || 'default'
 
     if (type == 'default') {
       $(
         '<li><span class="deploy-button-group button-group">' +
-          '<a id="btn-deploy" class="deploy-button disabled" href="#">' +
-          '<span class="deploy-button-content">' +
-          '<img id="btn-deploy-icon" src="red/images/deploy-full-o.png"> ' +
-          '<span>' +
-          RED._('deploy.deploy') +
-          '</span>' +
-          '</span>' +
-          '<span class="deploy-button-spinner hide">' +
-          '<img src="red/images/spin.svg"/>' +
-          '</span>' +
-          '</a>' +
-          '<a id="btn-deploy-options" data-toggle="dropdown" class="deploy-button" href="#"><i class="fa fa-caret-down"></i></a>' +
-          '</span></li>'
+        '<a id="btn-deploy" class="deploy-button disabled" href="#">' +
+        '<span class="deploy-button-content">' +
+        '<img id="btn-deploy-icon" src="red/images/deploy-full-o.png"> ' +
+        '<span>' +
+        RED._('deploy.deploy') +
+        '</span>' +
+        '</span>' +
+        '<span class="deploy-button-spinner hide">' +
+        '<img src="red/images/spin.svg"/>' +
+        '</span>' +
+        '</a>' +
+        '<a id="btn-deploy-options" data-toggle="dropdown" class="deploy-button" href="#"><i class="fa fa-caret-down"></i></a>' +
+        '</span></li>'
       ).prependTo('.header-toolbar')
       RED.menu.init({
         id: 'btn-deploy-options',
@@ -7195,7 +7195,7 @@ RED.deploy = (function() {
             label: RED._('deploy.full'),
             sublabel: RED._('deploy.fullDesc'),
             selected: true,
-            onselect: function(s) {
+            onselect: function (s) {
               if (s) {
                 changeDeploymentType('full')
               }
@@ -7207,7 +7207,7 @@ RED.deploy = (function() {
             icon: 'red/images/deploy-flows.png',
             label: RED._('deploy.modifiedFlows'),
             sublabel: RED._('deploy.modifiedFlowsDesc'),
-            onselect: function(s) {
+            onselect: function (s) {
               if (s) {
                 changeDeploymentType('flows')
               }
@@ -7219,7 +7219,7 @@ RED.deploy = (function() {
             icon: 'red/images/deploy-nodes.png',
             label: RED._('deploy.modifiedNodes'),
             sublabel: RED._('deploy.modifiedNodesDesc'),
-            onselect: function(s) {
+            onselect: function (s) {
               if (s) {
                 changeDeploymentType('nodes')
               }
@@ -7236,31 +7236,31 @@ RED.deploy = (function() {
 
       $(
         '<li><span class="deploy-button-group button-group">' +
-          '<a id="btn-deploy" class="deploy-button disabled" href="#">' +
-          '<span class="deploy-button-content">' +
-          (icon ? '<img id="btn-deploy-icon" src="' + icon + '"> ' : '') +
-          '<span>' +
-          label +
-          '</span>' +
-          '</span>' +
-          '<span class="deploy-button-spinner hide">' +
-          '<img src="red/images/spin.svg"/>' +
-          '</span>' +
-          '</a>' +
-          '</span></li>'
+        '<a id="btn-deploy" class="deploy-button disabled" href="#">' +
+        '<span class="deploy-button-content">' +
+        (icon ? '<img id="btn-deploy-icon" src="' + icon + '"> ' : '') +
+        '<span>' +
+        label +
+        '</span>' +
+        '</span>' +
+        '<span class="deploy-button-spinner hide">' +
+        '<img src="red/images/spin.svg"/>' +
+        '</span>' +
+        '</a>' +
+        '</span></li>'
       ).prependTo('.header-toolbar')
     }
 
-    $('#btn-deploy').click(function(event) {
+    $('#btn-deploy').click(function (event) {
       event.preventDefault()
       save()
     })
 
     RED.actions.add('core:deploy-flows', save)
 
-    RED.events.on('nodes:change', function(state) {
+    RED.events.on('nodes:change', function (state) {
       if (state.dirty) {
-        window.onbeforeunload = function() {
+        window.onbeforeunload = function () {
           return RED._('deploy.confirm.undeployedChanges')
         }
         $('#btn-deploy').removeClass('disabled')
@@ -7271,7 +7271,7 @@ RED.deploy = (function() {
     })
 
     var activeNotifyMessage
-    RED.comms.subscribe('notification/runtime-deploy', function(topic, msg) {
+    RED.comms.subscribe('notification/runtime-deploy', function (topic, msg) {
       if (!activeNotifyMessage) {
         var currentRev = RED.nodes.version()
         if (
@@ -7288,7 +7288,7 @@ RED.deploy = (function() {
           buttons: [
             {
               text: RED._('deploy.confirm.button.ignore'),
-              click: function() {
+              click: function () {
                 activeNotifyMessage.close()
                 activeNotifyMessage = null
               }
@@ -7296,7 +7296,7 @@ RED.deploy = (function() {
             {
               text: RED._('deploy.confirm.button.review'),
               class: 'primary',
-              click: function() {
+              click: function () {
                 activeNotifyMessage.close()
                 var nns = RED.nodes.createCompleteNodeSet()
                 resolveConflict(nns, false)
@@ -7309,7 +7309,7 @@ RED.deploy = (function() {
     })
   }
 
-  function getNodeInfo(node) {
+  function getNodeInfo (node) {
     var tabLabel = ''
     if (node.z) {
       var tab = RED.nodes.workspace(node.z)
@@ -7323,7 +7323,7 @@ RED.deploy = (function() {
     var label = RED.utils.getNodeLabel(node, node.id)
     return { tab: tabLabel, type: node.type, label: label }
   }
-  function sortNodeInfo(A, B) {
+  function sortNodeInfo (A, B) {
     if (A.tab < B.tab) {
       return -1
     }
@@ -7345,25 +7345,25 @@ RED.deploy = (function() {
     return 0
   }
 
-  function resolveConflict(currentNodes, activeDeploy) {
+  function resolveConflict (currentNodes, activeDeploy) {
     var message = $('<div>')
     $('<p data-i18n="deploy.confirm.conflict"></p>').appendTo(message)
     var conflictCheck = $(
       '<div id="node-dialog-confirm-deploy-conflict-checking" class="node-dialog-confirm-conflict-row">' +
-        '<img src="red/images/spin.svg"/><div data-i18n="deploy.confirm.conflictChecking"></div>' +
-        '</div>'
+      '<img src="red/images/spin.svg"/><div data-i18n="deploy.confirm.conflictChecking"></div>' +
+      '</div>'
     ).appendTo(message)
     var conflictAutoMerge = $(
       '<div class="node-dialog-confirm-conflict-row">' +
-        '<i style="color: #3a3;" class="fa fa-check"></i><div data-i18n="deploy.confirm.conflictAutoMerge"></div>' +
-        '</div>'
+      '<i style="color: #3a3;" class="fa fa-check"></i><div data-i18n="deploy.confirm.conflictAutoMerge"></div>' +
+      '</div>'
     )
       .hide()
       .appendTo(message)
     var conflictManualMerge = $(
       '<div id="node-dialog-confirm-deploy-conflict-manual-merge" class="node-dialog-confirm-conflict-row">' +
-        '<i style="color: #999;" class="fa fa-exclamation"></i><div data-i18n="deploy.confirm.conflictManualMerge"></div>' +
-        '</div>'
+      '<i style="color: #999;" class="fa fa-exclamation"></i><div data-i18n="deploy.confirm.conflictManualMerge"></div>' +
+      '</div>'
     )
       .hide()
       .appendTo(message)
@@ -7373,7 +7373,7 @@ RED.deploy = (function() {
     var buttons = [
       {
         text: RED._('common.label.cancel'),
-        click: function() {
+        click: function () {
           conflictNotification.close()
         }
       },
@@ -7381,7 +7381,7 @@ RED.deploy = (function() {
         id: 'node-dialog-confirm-deploy-review',
         text: RED._('deploy.confirm.button.review'),
         class: 'primary disabled',
-        click: function() {
+        click: function () {
           if (!$('#node-dialog-confirm-deploy-review').hasClass('disabled')) {
             RED.diff.showRemoteDiff()
             conflictNotification.close()
@@ -7392,7 +7392,7 @@ RED.deploy = (function() {
         id: 'node-dialog-confirm-deploy-merge',
         text: RED._('deploy.confirm.button.merge'),
         class: 'primary disabled',
-        click: function() {
+        click: function () {
           if (!$('#node-dialog-confirm-deploy-merge').hasClass('disabled')) {
             RED.diff.mergeDiff(currentDiff)
             conflictNotification.close()
@@ -7405,7 +7405,7 @@ RED.deploy = (function() {
         id: 'node-dialog-confirm-deploy-overwrite',
         text: RED._('deploy.confirm.button.overwrite'),
         class: 'primary',
-        click: function() {
+        click: function () {
           save(true, activeDeploy)
           conflictNotification.close()
         }
@@ -7419,10 +7419,10 @@ RED.deploy = (function() {
     })
 
     var now = Date.now()
-    RED.diff.getRemoteDiff(function(diff) {
+    RED.diff.getRemoteDiff(function (diff) {
       var ellapsed = Math.max(1000 - (Date.now() - now), 0)
       currentDiff = diff
-      setTimeout(function() {
+      setTimeout(function () {
         conflictCheck.hide()
         var d = Object.keys(diff.conflicts)
         if (d.length === 0) {
@@ -7435,7 +7435,7 @@ RED.deploy = (function() {
       }, ellapsed)
     })
   }
-  function cropList(list) {
+  function cropList (list) {
     if (list.length > 5) {
       var remainder = list.length - 5
       list = list.slice(0, 5)
@@ -7443,7 +7443,7 @@ RED.deploy = (function() {
     }
     return list
   }
-  function save(skipValidation, force) {
+  function save (skipValidation, force) {
     var screenshotExist = document.querySelector('#enebular-screenshot')
     if (screenshotExist) {
       screenshotExist.remove()
@@ -7464,11 +7464,8 @@ RED.deploy = (function() {
     d3.select('#enebular-screenshot > svg > g > g > rect').style({
       width: '100%',
       height: '100%',
-      fill: '#f7fafb'
+      fill: 'none'
     })
-    //   .attr('width', '100%')
-    //   .attr('height', '100%')
-    //   .attr('fill', '#f7fafb')
     d3
       .select('#enebular-screenshot > svg > g > g')
       .attr('transform', 'scale(0.75)')
@@ -7488,7 +7485,7 @@ RED.deploy = (function() {
         var unknownNodes = []
         var invalidNodes = []
 
-        RED.nodes.eachNode(function(node) {
+        RED.nodes.eachNode(function (node) {
           hasInvalid = hasInvalid || !node.valid
           if (!node.valid) {
             invalidNodes.push(getNodeInfo(node))
@@ -7502,7 +7499,7 @@ RED.deploy = (function() {
         hasUnknown = unknownNodes.length > 0
 
         var unusedConfigNodes = []
-        RED.nodes.eachConfig(function(node) {
+        RED.nodes.eachConfig(function (node) {
           if (node.users.length === 0 && node._def.hasUsers !== false) {
             unusedConfigNodes.push(getNodeInfo(node))
             hasUnusedConfig = true
@@ -7530,7 +7527,7 @@ RED.deploy = (function() {
               id: 'node-dialog-confirm-deploy-deploy',
               text: RED._('deploy.confirm.button.confirm'),
               class: 'primary',
-              click: function() {
+              click: function () {
                 save(true)
                 notification.close()
               }
@@ -7546,7 +7543,7 @@ RED.deploy = (function() {
             '</p>' +
             '<ul class="node-dialog-configm-deploy-list"><li>' +
             cropList(
-              invalidNodes.map(function(A) {
+              invalidNodes.map(function (A) {
                 return (
                   (A.tab ? '[' + A.tab + '] ' : '') +
                   A.label +
@@ -7564,7 +7561,7 @@ RED.deploy = (function() {
               id: 'node-dialog-confirm-deploy-deploy',
               text: RED._('deploy.confirm.button.confirm'),
               class: 'primary',
-              click: function() {
+              click: function () {
                 save(true)
                 notification.close()
               }
@@ -7574,7 +7571,7 @@ RED.deploy = (function() {
         if (showWarning) {
           notificationButtons.unshift({
             text: RED._('common.label.cancel'),
-            click: function() {
+            click: function () {
               notification.close()
             }
           })
@@ -7614,20 +7611,20 @@ RED.deploy = (function() {
           'Node-RED-Deployment-Type': deploymentType
         }
       })
-        .done(function(data, textStatus, xhr) {
+        .done(function (data, textStatus, xhr) {
           RED.nodes.dirty(false)
           RED.nodes.version(data.rev)
           RED.nodes.originalFlow(nns)
           if (hasUnusedConfig) {
             RED.notify(
               '<p>' +
-                RED._('deploy.successfulDeploy') +
-                '</p>' +
-                '<p>' +
-                RED._('deploy.unusedConfigNodes') +
-                ' <a href="#" onclick="RED.sidebar.config.show(true); return false;">' +
-                RED._('deploy.unusedConfigNodesLink') +
-                '</a></p>',
+              RED._('deploy.successfulDeploy') +
+              '</p>' +
+              '<p>' +
+              RED._('deploy.unusedConfigNodes') +
+              ' <a href="#" onclick="RED.sidebar.config.show(true); return false;">' +
+              RED._('deploy.unusedConfigNodesLink') +
+              '</a></p>',
               'success',
               false,
               6000
@@ -7638,7 +7635,7 @@ RED.deploy = (function() {
               'success'
             )
           }
-          RED.nodes.eachNode(function(node) {
+          RED.nodes.eachNode(function (node) {
             if (node.changed) {
               node.dirty = true
               node.changed = false
@@ -7651,16 +7648,16 @@ RED.deploy = (function() {
               delete node.credentials
             }
           })
-          RED.nodes.eachConfig(function(confNode) {
+          RED.nodes.eachConfig(function (confNode) {
             confNode.changed = false
             if (confNode.credentials) {
               delete confNode.credentials
             }
           })
-          RED.nodes.eachSubflow(function(subflow) {
+          RED.nodes.eachSubflow(function (subflow) {
             subflow.changed = false
           })
-          RED.nodes.eachWorkspace(function(ws) {
+          RED.nodes.eachWorkspace(function (ws) {
             ws.changed = false
           })
           // Once deployed, cannot undo back to a clean state
@@ -7668,7 +7665,7 @@ RED.deploy = (function() {
           RED.view.redraw()
           RED.events.emit('deploy')
         })
-        .fail(function(xhr, textStatus, err) {
+        .fail(function (xhr, textStatus, err) {
           RED.nodes.dirty(true)
           $('#btn-deploy').removeClass('disabled')
           if (xhr.status === 401) {
@@ -7694,10 +7691,10 @@ RED.deploy = (function() {
             )
           }
         })
-        .always(function() {
+        .always(function () {
           deployInflight = false
           var delta = Math.max(0, 300 - (Date.now() - startTime))
-          setTimeout(function() {
+          setTimeout(function () {
             $('.deploy-button-content').css('opacity', 1)
             $('.deploy-button-spinner').hide()
             $('#header-shade').hide()
@@ -7710,7 +7707,7 @@ RED.deploy = (function() {
   }
   return {
     init: init,
-    setDeployInflight: function(state) {
+    setDeployInflight: function (state) {
       deployInflight = state
     }
   }
