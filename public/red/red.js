@@ -3259,14 +3259,11 @@ RED.nodes = (function() {
           nodeMsg +
           ' not supported by enebular. Don&#39;t worry! It can take some time to install ' +
           nodeMsg +
-          '.</p><p>Please refresh your browser.</p>',
+          '.</p><p>Please refresh your browser. If refreshing does not work, the node may be incompatible with the existing runtime.</p>',
         'error',
         false,
         15000
       )
-      setTimeout(function() {
-        location.reload()
-      }, 15000)
     }
 
     var activeWorkspace = RED.workspaces.active()
