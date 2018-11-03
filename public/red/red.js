@@ -13,492 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  **/
-(function() {
-
-    function appendNodeConfig(nodeConfig) {
-        var m = /<!-- --- \[red-module:(\S+)\] --- -->/.exec(nodeConfig.trim());
-        var moduleId;
-        if (m) {
-            moduleId = m[1];
-        } else {
-            moduleId = "unknown";
-        }
-        try {
-            $("body").append(nodeConfig);
-        } catch(err) {
-            RED.notify(RED._("notification.errors.failedToAppendNode",{module:moduleId, error:err.toString()}),{
-                type: "error",
-                timeout: 10000
-            });
-            console.log("["+moduleId+"] "+err.toString());
-        }
-    }
-
-    function loadNodeList() {
-        $.ajax({
-            headers: {
-                "Accept":"application/json"
-            },
-            cache: false,
-            url: 'nodes',
-            success: function(data) {
-                RED.nodes.setNodeList(data);
-                RED.i18n.loadNodeCatalogs(function() {
-                    loadIconList(loadNodes);
-                });
-            }
-        });
-    }
-
-    function loadIconList(done) {
-        $.ajax({
-            headers: {
-                "Accept":"application/json"
-            },
-            cache: false,
-            url: 'icons',
-            success: function(data) {
-                RED.nodes.setIconSets(data);
-                if (done) {
-                    done();
-                }
-            }
-        });
-    }
-
-    function loadNodes() {
-        $.ajax({
-            headers: {
-                "Accept":"text/html"
-            },
-            cache: false,
-            url: 'nodes',
-            success: function(data) {
-                var configs = data.trim().split(/(?=<!-- --- \[red-module:\S+\] --- -->)/);
-                configs.forEach(function(data) {
-                    appendNodeConfig(data);
-                });
-
-                $("body").i18n();
-                $("#palette > .palette-spinner").hide();
-                $(".palette-scroll").removeClass("hide");
-                $("#palette-search").removeClass("hide");
-                loadFlows(function() {
-                    if (RED.settings.theme("projects.enabled",false)) {
-                        RED.projects.refresh(function(activeProject) {
-                            RED.sidebar.info.refresh()
-                            if (!activeProject) {
-                                // Projects enabled but no active project
-                                RED.menu.setDisabled('menu-item-projects-open',true);
-                                RED.menu.setDisabled('menu-item-projects-settings',true);
-                                if (activeProject === false) {
-                                    // User previously decline the migration to projects.
-                                } else { // null/undefined
-                                    RED.projects.showStartup();
-                                }
-                            }
-                            completeLoad();
-                        });
-                    } else {
-                        // Projects disabled by the user
-                        RED.sidebar.info.refresh()
-                        completeLoad();
-                    }
-                });
-            }
-        });
-    }
-
-    function loadFlows(done) {
-        $.ajax({
-            headers: {
-                "Accept":"application/json",
-            },
-            cache: false,
-            url: 'flows',
-            success: function(nodes) {
-                if (nodes) {
-                    var currentHash = window.location.hash;
-                    RED.nodes.version(nodes.rev);
-                    RED.nodes.import(nodes.flows);
-                    RED.nodes.dirty(false);
-                    RED.view.redraw(true);
-                    if (/^#flow\/.+$/.test(currentHash)) {
-                        RED.workspaces.show(currentHash.substring(6));
-                    }
-                }
-                done();
-            }
-        });
-    }
-
-    function completeLoad() {
-        var persistentNotifications = {};
-        RED.comms.subscribe("notification/#",function(topic,msg) {
-            var parts = topic.split("/");
-            var notificationId = parts[1];
-            if (notificationId === "runtime-deploy") {
-                // handled in ui/deploy.js
-                return;
-            }
-            if (notificationId === "node") {
-                // handled below
-                return;
-            }
-            if (notificationId === "project-update") {
-                RED.nodes.clear();
-                RED.history.clear();
-                RED.view.redraw(true);
-                RED.projects.refresh(function() {
-                    loadFlows(function() {
-                        var project = RED.projects.getActiveProject();
-                        var message = {
-                            "change-branch":"Change to local branch '"+project.git.branches.local+"'",
-                            "merge-abort":"Git merge aborted",
-                            "loaded":"Project '"+msg.project+"' loaded",
-                            "updated":"Project '"+msg.project+"' updated",
-                            "pull":"Project '"+msg.project+"' reloaded",
-                            "revert": "Project '"+msg.project+"' reloaded",
-                            "merge-complete":"Git merge completed"
-                        }[msg.action];
-                        RED.notify("<p>"+message+"</p>");
-                        RED.sidebar.info.refresh()
-                    });
-                });
-                return;
-            }
-
-            if (msg.text) {
-                msg.default = msg.text;
-                var text = RED._(msg.text,msg);
-                var options = {
-                    type: msg.type,
-                    fixed: msg.timeout === undefined,
-                    timeout: msg.timeout,
-                    id: notificationId
-                }
-                if (notificationId === "runtime-state") {
-                    if (msg.error === "missing-types") {
-                        text+="<ul><li>"+msg.types.join("</li><li>")+"</li></ul>";
-                        if (!!RED.projects.getActiveProject()) {
-                            options.buttons = [
-                                {
-                                    text: "Manage project dependencies",
-                                    click: function() {
-                                        persistentNotifications[notificationId].hideNotification();
-                                        RED.projects.settings.show('deps');
-                                    }
-                                }
-                            ]
-                        // } else if (RED.settings.theme('palette.editable') !== false) {
-                        } else {
-                            options.buttons = [
-                                {
-                                    text: "Close",
-                                    click: function() {
-                                        persistentNotifications[notificationId].hideNotification();
-                                    }
-                                }
-                            ]
-                        }
-                    } else if (msg.error === "credentials_load_failed") {
-                        if (RED.settings.theme("projects.enabled",false)) {
-                            // projects enabled
-                            if (RED.user.hasPermission("projects.write")) {
-                                options.buttons = [
-                                    {
-                                        text: "Setup credentials",
-                                        click: function() {
-                                            persistentNotifications[notificationId].hideNotification();
-                                            RED.projects.showCredentialsPrompt();
-                                        }
-                                    }
-                                ]
-                            }
-                        } else {
-                            options.buttons = [
-                                {
-                                    text: "Close",
-                                    click: function() {
-                                        persistentNotifications[notificationId].hideNotification();
-                                    }
-                                }
-                            ]
-                        }
-                    } else if (msg.error === "missing_flow_file") {
-                        if (RED.user.hasPermission("projects.write")) {
-                            options.buttons = [
-                                {
-                                    text: "Setup project files",
-                                    click: function() {
-                                        persistentNotifications[notificationId].hideNotification();
-                                        RED.projects.showFilesPrompt();
-                                    }
-                                }
-                            ]
-                        }
-                    } else if (msg.error === "missing_package_file") {
-                        if (RED.user.hasPermission("projects.write")) {
-                            options.buttons = [
-                                {
-                                    text: "Create default package file",
-                                    click: function() {
-                                        persistentNotifications[notificationId].hideNotification();
-                                        RED.projects.createDefaultPackageFile();
-                                    }
-                                }
-                            ]
-                        }
-                    } else if (msg.error === "project_empty") {
-                        if (RED.user.hasPermission("projects.write")) {
-                            options.buttons = [
-                                {
-                                    text: "No thanks",
-                                    click: function() {
-                                        persistentNotifications[notificationId].hideNotification();
-                                    }
-                                },
-                                {
-                                    text: "Create default project files",
-                                    click: function() {
-                                        persistentNotifications[notificationId].hideNotification();
-                                        RED.projects.createDefaultFileSet();
-                                    }
-                                }
-                            ]
-                        }
-                    } else if (msg.error === "git_merge_conflict") {
-                        RED.nodes.clear();
-                        RED.sidebar.versionControl.refresh(true);
-                        if (RED.user.hasPermission("projects.write")) {
-                            options.buttons = [
-                                {
-                                    text: "Show merge conflicts",
-                                    click: function() {
-                                        persistentNotifications[notificationId].hideNotification();
-                                        RED.sidebar.versionControl.showLocalChanges();
-                                    }
-                                }
-                            ]
-                        }
-                    }
-                }
-                if (!persistentNotifications.hasOwnProperty(notificationId)) {
-                    persistentNotifications[notificationId] = RED.notify(text,options);
-                } else {
-                    persistentNotifications[notificationId].update(text,options);
-                }
-            } else if (persistentNotifications.hasOwnProperty(notificationId)) {
-                persistentNotifications[notificationId].close();
-                delete persistentNotifications[notificationId];
-            }
-        });
-        RED.comms.subscribe("status/#",function(topic,msg) {
-            var parts = topic.split("/");
-            var node = RED.nodes.node(parts[1]);
-            if (node) {
-                if (msg.hasOwnProperty("text")) {
-                    if (msg.text[0] !== ".") {
-                        msg.text = node._(msg.text.toString(),{defaultValue:msg.text.toString()});
-                    }
-                }
-                node.status = msg;
-                node.dirty = true;
-                RED.view.redraw();
-            }
-        });
-        RED.comms.subscribe("notification/node/#",function(topic,msg) {
-            var i,m;
-            var typeList;
-            var info;
-            if (topic == "notification/node/added") {
-                var addedTypes = [];
-                msg.forEach(function(m) {
-                    var id = m.id;
-                    RED.nodes.addNodeSet(m);
-                    addedTypes = addedTypes.concat(m.types);
-                    RED.i18n.loadCatalog(id, function() {
-                        $.get('nodes/'+id, function(data) {
-                            appendNodeConfig(data);
-                        });
-                    });
-                });
-                if (addedTypes.length) {
-                    typeList = "<ul><li>"+addedTypes.join("</li><li>")+"</li></ul>";
-                    RED.notify(RED._("palette.event.nodeAdded", {count:addedTypes.length})+typeList,"success");
-                }
-                loadIconList();
-            } else if (topic == "notification/node/removed") {
-                for (i=0;i<msg.length;i++) {
-                    m = msg[i];
-                    info = RED.nodes.removeNodeSet(m.id);
-                    if (info.added) {
-                        typeList = "<ul><li>"+m.types.join("</li><li>")+"</li></ul>";
-                        RED.notify(RED._("palette.event.nodeRemoved", {count:m.types.length})+typeList,"success");
-                    }
-                }
-                loadIconList();
-            } else if (topic == "notification/node/enabled") {
-                if (msg.types) {
-                    info = RED.nodes.getNodeSet(msg.id);
-                    if (info.added) {
-                        RED.nodes.enableNodeSet(msg.id);
-                        typeList = "<ul><li>"+msg.types.join("</li><li>")+"</li></ul>";
-                        RED.notify(RED._("palette.event.nodeEnabled", {count:msg.types.length})+typeList,"success");
-                    } else {
-                        $.get('nodes/'+msg.id, function(data) {
-                            appendNodeConfig(data);
-                            typeList = "<ul><li>"+msg.types.join("</li><li>")+"</li></ul>";
-                            RED.notify(RED._("palette.event.nodeAdded", {count:msg.types.length})+typeList,"success");
-                        });
-                    }
-                }
-            } else if (topic == "notification/node/disabled") {
-                if (msg.types) {
-                    RED.nodes.disableNodeSet(msg.id);
-                    typeList = "<ul><li>"+msg.types.join("</li><li>")+"</li></ul>";
-                    RED.notify(RED._("palette.event.nodeDisabled", {count:msg.types.length})+typeList,"success");
-                }
-            } else if (topic == "node/upgraded") {
-                RED.notify(RED._("palette.event.nodeUpgraded", {module:msg.module,version:msg.version}),"success");
-                RED.nodes.registry.setModulePendingUpdated(msg.module,msg.version);
-            }
-            // Refresh flow library to ensure any examples are updated
-            RED.library.loadFlowLibrary();
-        });
-    }
-
-    function showAbout() {
-        $.get('red/about', function(data) {
-            var aboutHeader = '<div style="text-align:center;">'+
-                                '<img width="50px" src="red/images/node-red-icon.svg" />'+
-                              '</div>';
-
-            RED.sidebar.info.set(aboutHeader+marked(data));
-            RED.sidebar.info.show();
-        });
-    }
-
-    function loadEditor() {
-        var menuOptions = [];
-        if (RED.settings.theme("projects.enabled",false)) {
-            menuOptions.push({id:"menu-item-projects-menu",label:"Projects",options:[
-                {id:"menu-item-projects-new",label:"New",disabled:false,onselect:"core:new-project"},
-                {id:"menu-item-projects-open",label:"Open",disabled:false,onselect:"core:open-project"},
-                {id:"menu-item-projects-settings",label:"Project Settings",disabled:false,onselect:"core:show-project-settings"}
-            ]});
-        }
-
-
-        menuOptions.push({id:"menu-item-view-menu",label:RED._("menu.label.view.view"),options:[
-            // {id:"menu-item-view-show-grid",setting:"view-show-grid",label:RED._("menu.label.view.showGrid"),toggle:true,onselect:"core:toggle-show-grid"},
-            // {id:"menu-item-view-snap-grid",setting:"view-snap-grid",label:RED._("menu.label.view.snapGrid"),toggle:true,onselect:"core:toggle-snap-grid"},
-            // {id:"menu-item-status",setting:"node-show-status",label:RED._("menu.label.displayStatus"),toggle:true,onselect:"core:toggle-status", selected: true},
-            //null,
-            // {id:"menu-item-bidi",label:RED._("menu.label.view.textDir"),options:[
-            //     {id:"menu-item-bidi-default",toggle:"text-direction",label:RED._("menu.label.view.defaultDir"),selected: true, onselect:function(s) { if(s){RED.text.bidi.setTextDirection("")}}},
-            //     {id:"menu-item-bidi-ltr",toggle:"text-direction",label:RED._("menu.label.view.ltr"), onselect:function(s) { if(s){RED.text.bidi.setTextDirection("ltr")}}},
-            //     {id:"menu-item-bidi-rtl",toggle:"text-direction",label:RED._("menu.label.view.rtl"), onselect:function(s) { if(s){RED.text.bidi.setTextDirection("rtl")}}},
-            //     {id:"menu-item-bidi-auto",toggle:"text-direction",label:RED._("menu.label.view.auto"), onselect:function(s) { if(s){RED.text.bidi.setTextDirection("auto")}}}
-            // ]},
-            // null,
-            {id:"menu-item-sidebar",label:RED._("menu.label.sidebar.show"),toggle:true,onselect:"core:toggle-sidebar", selected: true},
-            null
-        ]});
-        menuOptions.push(null);
-        menuOptions.push({id:"menu-item-import",label:RED._("menu.label.import"),options:[
-            {id:"menu-item-import-clipboard",label:RED._("menu.label.clipboard"),onselect:"core:show-import-dialog"},
-            {id:"menu-item-import-library",label:RED._("menu.label.library"),options:[]}
-        ]});
-        menuOptions.push({id:"menu-item-export",label:RED._("menu.label.export"),disabled:true,options:[
-            {id:"menu-item-export-clipboard",label:RED._("menu.label.clipboard"),disabled:true,onselect:"core:show-export-dialog"},
-            {id:"menu-item-export-library",label:RED._("menu.label.library"),disabled:true,onselect:"core:library-export"}
-        ]});
-        menuOptions.push(null);
-        menuOptions.push({id:"menu-item-search",label:RED._("menu.label.search"),onselect:"core:search"});
-        menuOptions.push(null);
-        menuOptions.push({id:"menu-item-config-nodes",label:RED._("menu.label.displayConfig"),onselect:"core:show-config-tab"});
-        menuOptions.push({id:"menu-item-workspace",label:RED._("menu.label.flows"),options:[
-            {id:"menu-item-workspace-add",label:RED._("menu.label.add"),onselect:"core:add-flow"},
-            {id:"menu-item-workspace-edit",label:RED._("menu.label.rename"),onselect:"core:edit-flow"},
-            {id:"menu-item-workspace-delete",label:RED._("menu.label.delete"),onselect:"core:remove-flow"}
-        ]});
-        menuOptions.push({id:"menu-item-subflow",label:RED._("menu.label.subflows"), options: [
-            {id:"menu-item-subflow-create",label:RED._("menu.label.createSubflow"),onselect:"core:create-subflow"},
-            {id:"menu-item-subflow-convert",label:RED._("menu.label.selectionToSubflow"),disabled:true,onselect:"core:convert-to-subflow"},
-        ]});
-        menuOptions.push(null);
-        if (RED.settings.theme('palette.editable') !== false) {
-            menuOptions.push({id:"menu-item-edit-palette",label:RED._("menu.label.editPalette"),onselect:"core:manage-palette"});
-            menuOptions.push(null);
-        }
-
-        menuOptions.push({id:"menu-item-user-settings",label:RED._("menu.label.settings"),onselect:"core:show-user-settings"});
-        menuOptions.push(null);
-
-        menuOptions.push({id:"menu-item-keyboard-shortcuts",label:RED._("menu.label.keyboardShortcuts"),onselect:"core:show-help"});
-        menuOptions.push({id:"menu-item-help",
-            label: RED.settings.theme("menu.menu-item-help.label",RED._("menu.label.help")),
-            href: RED.settings.theme("menu.menu-item-help.url","http://nodered.org/docs")
-        });
-        menuOptions.push({id:"menu-item-node-red-version", label:"v"+RED.settings.version, onselect: "core:show-about" });
-
-
-        RED.view.init();
-        RED.userSettings.init();
-        RED.user.init();
-        RED.library.init();
-        RED.keyboard.init();
-        RED.palette.init();
-        if (RED.settings.theme('palette.editable') !== false) {
-            RED.palette.editor.init();
-        } else {
-            console.log("Palette editor disabled");
-        }
-
-        RED.sidebar.init();
-
-        if (RED.settings.theme("projects.enabled",false)) {
-            RED.projects.init();
-        } else {
-            console.log("Projects disabled");
-        }
-
-        RED.subflow.init();
-        RED.workspaces.init();
-        RED.clipboard.init();
-        RED.search.init();
-        RED.editor.init();
-        RED.diff.init();
-
-        RED.menu.init({id:"btn-sidemenu",options: menuOptions});
-
-        RED.deploy.init(RED.settings.theme("deployButton",null));
-        RED.notifications.init();
-
-        RED.actions.add("core:show-about", showAbout);
-        RED.nodes.init();
-        RED.comms.connect();
-
-        $("#main-container").show();
-        $(".header-toolbar").show();
-
-        loadNodeList();
-    }
-
-    $(function() {
-
-        if ((window.location.hostname !== "localhost") && (window.location.hostname !== "127.0.0.1")) {
-            document.title = document.title+" : "+window.location.hostname;
-        }
-
-        ace.require("ace/ext/language_tools");
-
-        RED.i18n.init(function() {
-            RED.settings.init(loadEditor);
-        })
-    });
-})();
+var RED = {};
 ;/**
  * Copyright JS Foundation and other contributors, http://js.foundation
  *
@@ -4667,6 +4182,811 @@ RED.validators = {
  * See the License for the specific language governing permissions and
  * limitations under the License.
  **/
+
+RED.utils = (function() {
+
+    function formatString(str) {
+        return str.replace(/\r?\n/g,"&crarr;").replace(/\t/g,"&rarr;");
+    }
+    function sanitize(m) {
+        return m.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+    }
+
+    function buildMessageSummaryValue(value) {
+        var result;
+        if (Array.isArray(value)) {
+            result = $('<span class="debug-message-object-value debug-message-type-meta"></span>').text('array['+value.length+']');
+        } else if (value === null) {
+            result = $('<span class="debug-message-object-value debug-message-type-null">null</span>');
+        } else if (typeof value === 'object') {
+            if (value.hasOwnProperty('type') && value.type === 'Buffer' && value.hasOwnProperty('data')) {
+                result = $('<span class="debug-message-object-value debug-message-type-meta"></span>').text('buffer['+value.length+']');
+            } else if (value.hasOwnProperty('type') && value.type === 'array' && value.hasOwnProperty('data')) {
+                result = $('<span class="debug-message-object-value debug-message-type-meta"></span>').text('array['+value.length+']');
+            } else {
+                result = $('<span class="debug-message-object-value debug-message-type-meta">object</span>');
+            }
+        } else if (typeof value === 'string') {
+            var subvalue;
+            if (value.length > 30) {
+                subvalue = sanitize(value.substring(0,30))+"&hellip;";
+            } else {
+                subvalue = sanitize(value);
+            }
+            result = $('<span class="debug-message-object-value debug-message-type-string"></span>').html('"'+formatString(subvalue)+'"');
+        } else {
+            result = $('<span class="debug-message-object-value debug-message-type-other"></span>').text(""+value);
+        }
+        return result;
+    }
+    function makeExpandable(el,onbuild,ontoggle,expand) {
+        el.addClass("debug-message-expandable");
+        el.prop('toggle',function() {
+            return function(state) {
+                var parent = el.parent();
+                if (parent.hasClass('collapsed')) {
+                    if (state) {
+                        if (onbuild && !parent.hasClass('built')) {
+                            onbuild();
+                            parent.addClass('built');
+                        }
+                        parent.removeClass('collapsed');
+                        return true;
+                    }
+                } else {
+                    if (!state) {
+                        parent.addClass('collapsed');
+                        return true;
+                    }
+                }
+                return false;
+            }
+        });
+        el.click(function(e) {
+            var parent = $(this).parent();
+            var currentState = !parent.hasClass('collapsed');
+            if ($(this).prop('toggle')(!currentState)) {
+                if (ontoggle) {
+                    ontoggle(!currentState);
+                }
+            }
+            // if (parent.hasClass('collapsed')) {
+            //     if (onbuild && !parent.hasClass('built')) {
+            //         onbuild();
+            //         parent.addClass('built');
+            //     }
+            //     if (ontoggle) {
+            //         ontoggle(true);
+            //     }
+            //     parent.removeClass('collapsed');
+            // } else {
+            //     parent.addClass('collapsed');
+            //     if (ontoggle) {
+            //         ontoggle(false);
+            //     }
+            // }
+            e.preventDefault();
+        });
+        if (expand) {
+            el.click();
+        }
+
+    }
+
+    var pinnedPaths = {};
+    var formattedPaths = {};
+
+    function addMessageControls(obj,sourceId,key,msg,rootPath,strippedKey) {
+        if (!pinnedPaths.hasOwnProperty(sourceId)) {
+            pinnedPaths[sourceId] = {}
+        }
+        var tools = $('<span class="debug-message-tools"></span>').appendTo(obj);
+        var copyTools = $('<span class="debug-message-tools-copy button-group"></span>').appendTo(tools);
+        if (!!key) {
+            var copyPath = $('<button class="editor-button editor-button-small"><i class="fa fa-terminal"></i></button>').appendTo(copyTools).click(function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                RED.clipboard.copyText(key,copyPath,"clipboard.copyMessagePath");
+            })
+        }
+        var copyPayload = $('<button class="editor-button editor-button-small"><i class="fa fa-clipboard"></i></button>').appendTo(copyTools).click(function(e) {
+            e.preventDefault();
+            e.stopPropagation();
+            RED.clipboard.copyText(msg,copyPayload,"clipboard.copyMessageValue");
+        })
+        if (strippedKey !== '') {
+            var isPinned = pinnedPaths[sourceId].hasOwnProperty(strippedKey);
+
+            var pinPath = $('<button class="editor-button editor-button-small debug-message-tools-pin"><i class="fa fa-map-pin"></i></button>').appendTo(tools).click(function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (pinnedPaths[sourceId].hasOwnProperty(strippedKey)) {
+                    delete pinnedPaths[sourceId][strippedKey];
+                    $(this).removeClass("selected");
+                    obj.removeClass("debug-message-row-pinned");
+                } else {
+                    var rootedPath = "$"+(strippedKey[0] === '['?"":".")+strippedKey;
+                    pinnedPaths[sourceId][strippedKey] = normalisePropertyExpression(rootedPath);
+                    $(this).addClass("selected");
+                    obj.addClass("debug-message-row-pinned");
+                }
+            }).toggleClass("selected",isPinned);
+            obj.toggleClass("debug-message-row-pinned",isPinned);
+        }
+    }
+    function checkExpanded(strippedKey,expandPaths,minRange,maxRange) {
+        if (expandPaths && expandPaths.length > 0) {
+            if (strippedKey === '' && minRange === undefined) {
+                return true;
+            }
+            for (var i=0;i<expandPaths.length;i++) {
+                var p = expandPaths[i];
+                if (p.indexOf(strippedKey) === 0 && (p[strippedKey.length] === "." ||  p[strippedKey.length] === "[") ) {
+
+                    if (minRange !== undefined && p[strippedKey.length] === "[") {
+                        var subkey = p.substring(strippedKey.length);
+                        var m = (/\[(\d+)\]/.exec(subkey));
+                        if (m) {
+                            var index = parseInt(m[1]);
+                            return minRange<=index && index<=maxRange;
+                        }
+                    } else {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    function formatNumber(element,obj,sourceId,path,cycle,initialFormat) {
+        var format = (formattedPaths[sourceId] && formattedPaths[sourceId][path] && formattedPaths[sourceId][path]['number']) || initialFormat || "dec";
+        if (cycle) {
+            if (format === 'dec') {
+                if ((obj.toString().length===13) && (obj<=2147483647000)) {
+                    format = 'dateMS';
+                } else if ((obj.toString().length===10) && (obj<=2147483647)) {
+                    format = 'dateS';
+                } else {
+                    format = 'hex'
+                }
+            } else if (format === 'dateMS' || format == 'dateS') {
+                format = 'hex';
+            } else {
+                format = 'dec';
+            }
+            formattedPaths[sourceId] = formattedPaths[sourceId]||{};
+            formattedPaths[sourceId][path] = formattedPaths[sourceId][path]||{};
+            formattedPaths[sourceId][path]['number'] = format;
+        } else if (initialFormat !== undefined){
+            formattedPaths[sourceId] = formattedPaths[sourceId]||{};
+            formattedPaths[sourceId][path] = formattedPaths[sourceId][path]||{};
+            formattedPaths[sourceId][path]['number'] = format;
+        }
+        if (format === 'dec') {
+            element.text(""+obj);
+        } else if (format === 'dateMS') {
+            element.text((new Date(obj)).toISOString());
+        } else if (format === 'dateS') {
+            element.text((new Date(obj*1000)).toISOString());
+        } else if (format === 'hex') {
+            element.text("0x"+(obj).toString(16));
+        }
+    }
+
+    function formatBuffer(element,button,sourceId,path,cycle) {
+        var format = (formattedPaths[sourceId] && formattedPaths[sourceId][path] && formattedPaths[sourceId][path]['buffer']) || "raw";
+        if (cycle) {
+            if (format === 'raw') {
+                format = 'string';
+            } else {
+                format = 'raw';
+            }
+            formattedPaths[sourceId] = formattedPaths[sourceId]||{};
+            formattedPaths[sourceId][path] = formattedPaths[sourceId][path]||{};
+            formattedPaths[sourceId][path]['buffer'] = format;
+        }
+        if (format === 'raw') {
+            button.text('raw');
+            element.removeClass('debug-message-buffer-string').addClass('debug-message-buffer-raw');
+        } else if (format === 'string') {
+            button.text('string');
+            element.addClass('debug-message-buffer-string').removeClass('debug-message-buffer-raw');
+        }
+    }
+
+    function buildMessageElement(obj,options) {
+        options = options || {};
+        var key = options.key;
+        var typeHint = options.typeHint;
+        var hideKey = options.hideKey;
+        var path = options.path;
+        var sourceId = options.sourceId;
+        var rootPath = options.rootPath;
+        var expandPaths = options.expandPaths;
+        var ontoggle = options.ontoggle;
+        var exposeApi = options.exposeApi;
+
+        var subElements = {};
+        var i;
+        var e;
+        var entryObj;
+        var expandableHeader;
+        var header;
+        var headerHead;
+        var value;
+        var strippedKey;
+        if (path !== undefined && rootPath !== undefined) {
+             strippedKey = path.substring(rootPath.length+(path[rootPath.length]==="."?1:0));
+        }
+        var element = $('<span class="debug-message-element"></span>');
+        element.collapse = function() {
+            element.find(".debug-message-expandable").parent().addClass("collapsed");
+        }
+        header = $('<span class="debug-message-row"></span>').appendTo(element);
+        if (sourceId) {
+            addMessageControls(header,sourceId,path,obj,rootPath,strippedKey);
+        }
+        if (!key) {
+            element.addClass("debug-message-top-level");
+            if (sourceId) {
+                var pinned = pinnedPaths[sourceId];
+                expandPaths = [];
+                if (pinned) {
+                    for (var pinnedPath in pinned) {
+                        if (pinned.hasOwnProperty(pinnedPath)) {
+                            try {
+                                var res = getMessageProperty({$:obj},pinned[pinnedPath]);
+                                if (res !== undefined) {
+                                    expandPaths.push(pinnedPath);
+                                }
+                            } catch(err) {
+                            }
+                        }
+                    }
+                    expandPaths.sort();
+                }
+                element.clearPinned = function() {
+                    element.find(".debug-message-row-pinned").removeClass("debug-message-row-pinned");
+                    pinnedPaths[sourceId] = {};
+                }
+            }
+        } else {
+            if (!hideKey) {
+                $('<span class="debug-message-object-key"></span>').text(key).appendTo(header);
+                $('<span>: </span>').appendTo(header);
+            }
+        }
+        entryObj = $('<span class="debug-message-object-value"></span>').appendTo(header);
+
+        var isArray = Array.isArray(obj);
+        var isArrayObject = false;
+        if (obj && typeof obj === 'object' && obj.hasOwnProperty('type') && obj.hasOwnProperty('data') && ((obj.__encoded__ && obj.type === 'array') || obj.type === 'Buffer')) {
+            isArray = true;
+            isArrayObject = true;
+        }
+
+        if (obj === null || obj === undefined) {
+            $('<span class="debug-message-type-null">'+obj+'</span>').appendTo(entryObj);
+        } else if (typeof obj === 'string') {
+            if (/[\t\n\r]/.test(obj)) {
+                element.addClass('collapsed');
+                $('<i class="fa fa-caret-right debug-message-object-handle"></i> ').prependTo(header);
+                makeExpandable(header, function() {
+                    $('<span class="debug-message-type-meta debug-message-object-type-header"></span>').text(typeHint||'string').appendTo(header);
+                    var row = $('<div class="debug-message-object-entry collapsed"></div>').appendTo(element);
+                    $('<pre class="debug-message-type-string"></pre>').text(obj).appendTo(row);
+                },function(state) {if (ontoggle) { ontoggle(path,state);}}, checkExpanded(strippedKey,expandPaths));
+            }
+            e = $('<span class="debug-message-type-string debug-message-object-header"></span>').html('"'+formatString(sanitize(obj))+'"').appendTo(entryObj);
+            if (/^#[0-9a-f]{6}$/i.test(obj)) {
+                $('<span class="debug-message-type-string-swatch"></span>').css('backgroundColor',obj).appendTo(e);
+            }
+
+        } else if (typeof obj === 'number') {
+            e = $('<span class="debug-message-type-number"></span>').appendTo(entryObj);
+
+            if (Number.isInteger(obj) && (obj >= 0)) { // if it's a +ve integer
+                e.addClass("debug-message-type-number-toggle");
+                e.click(function(evt) {
+                    evt.preventDefault();
+                    formatNumber($(this), obj, sourceId, path, true);
+                });
+            }
+            formatNumber(e,obj,sourceId,path,false,typeHint==='hex'?'hex':undefined);
+
+        } else if (isArray) {
+            element.addClass('collapsed');
+
+            var originalLength = obj.length;
+            if (typeHint) {
+                var m = /\[(\d+)\]/.exec(typeHint);
+                if (m) {
+                    originalLength = parseInt(m[1]);
+                }
+            }
+            var data = obj;
+            var type = 'array';
+            if (isArrayObject) {
+                data = obj.data;
+                if (originalLength === undefined) {
+                    originalLength = data.length;
+                }
+                if (data.__encoded__) {
+                    data = data.data;
+                }
+                type = obj.type.toLowerCase();
+            } else if (/buffer/.test(typeHint)) {
+                type = 'buffer';
+            }
+            var fullLength = data.length;
+
+                if (originalLength > 0) {
+                $('<i class="fa fa-caret-right debug-message-object-handle"></i> ').prependTo(header);
+                var arrayRows = $('<div class="debug-message-array-rows"></div>').appendTo(element);
+                element.addClass('debug-message-buffer-raw');
+            }
+            if (key) {
+                headerHead = $('<span class="debug-message-type-meta"></span>').text(typeHint||(type+'['+originalLength+']')).appendTo(entryObj);
+            } else {
+                headerHead = $('<span class="debug-message-object-header"></span>').appendTo(entryObj);
+                $('<span>[ </span>').appendTo(headerHead);
+                var arrayLength = Math.min(originalLength,10);
+                for (i=0;i<arrayLength;i++) {
+                    buildMessageSummaryValue(data[i]).appendTo(headerHead);
+                    if (i < arrayLength-1) {
+                        $('<span>, </span>').appendTo(headerHead);
+                    }
+                }
+                if (originalLength > arrayLength) {
+                    $('<span> &hellip;</span>').appendTo(headerHead);
+                }
+                if (arrayLength === 0) {
+                    $('<span class="debug-message-type-meta">empty</span>').appendTo(headerHead);
+                }
+                $('<span> ]</span>').appendTo(headerHead);
+            }
+            if (originalLength > 0) {
+
+                makeExpandable(header,function() {
+                    if (!key) {
+                        headerHead = $('<span class="debug-message-type-meta debug-message-object-type-header"></span>').text(typeHint||(type+'['+originalLength+']')).appendTo(header);
+                    }
+                    if (type === 'buffer') {
+                        var stringRow = $('<div class="debug-message-string-rows"></div>').appendTo(element);
+                        var sr = $('<div class="debug-message-object-entry collapsed"></div>').appendTo(stringRow);
+                        var stringEncoding = "";
+                        try {
+                            stringEncoding = String.fromCharCode.apply(null, new Uint16Array(data))
+                        } catch(err) {
+                            console.log(err);
+                        }
+                        $('<pre class="debug-message-type-string"></pre>').text(stringEncoding).appendTo(sr);
+                        var bufferOpts = $('<span class="debug-message-buffer-opts"></span>').appendTo(headerHead);
+                        var switchFormat = $('<a href="#"></a>').addClass('selected').text('raw').appendTo(bufferOpts).click(function(e) {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            formatBuffer(element,$(this),sourceId,path,true);
+                        });
+                        formatBuffer(element,switchFormat,sourceId,path,false);
+
+                    }
+                    var row;
+                    if (fullLength <= 10) {
+                        for (i=0;i<fullLength;i++) {
+                            row = $('<div class="debug-message-object-entry collapsed"></div>').appendTo(arrayRows);
+                            subElements[path+"["+i+"]"] = buildMessageElement(
+                                data[i],
+                                {
+                                    key: ""+i,
+                                    typeHint: type==='buffer'?'hex':false,
+                                    hideKey: false,
+                                    path: path+"["+i+"]",
+                                    sourceId: sourceId,
+                                    rootPath: rootPath,
+                                    expandPaths: expandPaths,
+                                    ontoggle: ontoggle,
+                                    exposeApi: exposeApi
+                                }
+                            ).appendTo(row);
+                        }
+                    } else {
+                        for (i=0;i<fullLength;i+=10) {
+                            var minRange = i;
+                            row = $('<div class="debug-message-object-entry collapsed"></div>').appendTo(arrayRows);
+                            header = $('<span></span>').appendTo(row);
+                            $('<i class="fa fa-caret-right debug-message-object-handle"></i> ').appendTo(header);
+                            makeExpandable(header, (function() {
+                                var min = minRange;
+                                var max = Math.min(fullLength-1,(minRange+9));
+                                var parent = row;
+                                return function() {
+                                    for (var i=min;i<=max;i++) {
+                                        var row = $('<div class="debug-message-object-entry collapsed"></div>').appendTo(parent);
+                                        subElements[path+"["+i+"]"] = buildMessageElement(
+                                            data[i],
+                                            {
+                                                key: ""+i,
+                                                typeHint: type==='buffer'?'hex':false,
+                                                hideKey: false,
+                                                path: path+"["+i+"]",
+                                                sourceId: sourceId,
+                                                rootPath: rootPath,
+                                                expandPaths: expandPaths,
+                                                ontoggle: ontoggle,
+                                                exposeApi: exposeApi
+
+                                            }
+                                        ).appendTo(row);
+                                    }
+                                }
+                            })(),
+                            (function() { var path = path+"["+i+"]"; return function(state) {if (ontoggle) { ontoggle(path,state);}}})(),
+                            checkExpanded(strippedKey,expandPaths,minRange,Math.min(fullLength-1,(minRange+9))));
+                            $('<span class="debug-message-object-key"></span>').html("["+minRange+" &hellip; "+Math.min(fullLength-1,(minRange+9))+"]").appendTo(header);
+                        }
+                        if (fullLength < originalLength) {
+                             $('<div class="debug-message-object-entry collapsed"><span class="debug-message-object-key">['+fullLength+' &hellip; '+originalLength+']</span></div>').appendTo(arrayRows);
+                        }
+                    }
+                },
+                function(state) {if (ontoggle) { ontoggle(path,state);}},
+                checkExpanded(strippedKey,expandPaths));
+            }
+        } else if (typeof obj === 'object') {
+            element.addClass('collapsed');
+            var keys = Object.keys(obj);
+            if (key || keys.length > 0) {
+                $('<i class="fa fa-caret-right debug-message-object-handle"></i> ').prependTo(header);
+                makeExpandable(header, function() {
+                    if (!key) {
+                        $('<span class="debug-message-type-meta debug-message-object-type-header"></span>').text('object').appendTo(header);
+                    }
+                    for (i=0;i<keys.length;i++) {
+                        var row = $('<div class="debug-message-object-entry collapsed"></div>').appendTo(element);
+                        var newPath = path;
+                        if (newPath !== undefined) {
+                            if (/^[a-zA-Z_$][0-9a-zA-Z_$]*$/.test(keys[i])) {
+                                newPath += (newPath.length > 0?".":"")+keys[i];
+                            } else {
+                                newPath += "[\""+keys[i].replace(/"/,"\\\"")+"\"]"
+                            }
+                        }
+                        subElements[newPath] = buildMessageElement(
+                            obj[keys[i]],
+                            {
+                                key: keys[i],
+                                typeHint: false,
+                                hideKey: false,
+                                path: newPath,
+                                sourceId: sourceId,
+                                rootPath: rootPath,
+                                expandPaths: expandPaths,
+                                ontoggle: ontoggle,
+                                exposeApi: exposeApi
+
+                            }
+                        ).appendTo(row);
+                    }
+                    if (keys.length === 0) {
+                        $('<div class="debug-message-object-entry debug-message-type-meta collapsed"></div>').text("empty").appendTo(element);
+                    }
+                },
+                function(state) {if (ontoggle) { ontoggle(path,state);}},
+                checkExpanded(strippedKey,expandPaths));
+            }
+            if (key) {
+                $('<span class="debug-message-type-meta"></span>').text('object').appendTo(entryObj);
+            } else {
+                headerHead = $('<span class="debug-message-object-header"></span>').appendTo(entryObj);
+                $('<span>{ </span>').appendTo(headerHead);
+                var keysLength = Math.min(keys.length,5);
+                for (i=0;i<keysLength;i++) {
+                    $('<span class="debug-message-object-key"></span>').text(keys[i]).appendTo(headerHead);
+                    $('<span>: </span>').appendTo(headerHead);
+                    buildMessageSummaryValue(obj[keys[i]]).appendTo(headerHead);
+                    if (i < keysLength-1) {
+                        $('<span>, </span>').appendTo(headerHead);
+                    }
+                }
+                if (keys.length > keysLength) {
+                    $('<span> &hellip;</span>').appendTo(headerHead);
+                }
+                if (keysLength === 0) {
+                    $('<span class="debug-message-type-meta">empty</span>').appendTo(headerHead);
+                }
+                $('<span> }</span>').appendTo(headerHead);
+            }
+        } else {
+            $('<span class="debug-message-type-other"></span>').text(""+obj).appendTo(entryObj);
+        }
+        if (exposeApi) {
+            element.prop('expand', function() { return function(targetPath, state) {
+                if (path === targetPath) {
+                    if (header.prop('toggle')) {
+                        header.prop('toggle')(state);
+                    }
+                } else if (subElements[targetPath] && subElements[targetPath].prop('expand') ) {
+                    subElements[targetPath].prop('expand')(targetPath,state);
+                } else {
+                    for (var p in subElements) {
+                        if (subElements.hasOwnProperty(p)) {
+                            if (targetPath.indexOf(p) === 0) {
+                                if (subElements[p].prop('expand') ) {
+                                    subElements[p].prop('expand')(targetPath,state);
+                                }
+                                break;
+                            }
+                        }
+                    }
+                }
+            }});
+        }
+        return element;
+    }
+
+    function normalisePropertyExpression(str) {
+        // This must be kept in sync with validatePropertyExpression
+        // in editor/js/ui/utils.js
+
+        var length = str.length;
+        if (length === 0) {
+            throw new Error("Invalid property expression: zero-length");
+        }
+        var parts = [];
+        var start = 0;
+        var inString = false;
+        var inBox = false;
+        var quoteChar;
+        var v;
+        for (var i=0;i<length;i++) {
+            var c = str[i];
+            if (!inString) {
+                if (c === "'" || c === '"') {
+                    if (i != start) {
+                        throw new Error("Invalid property expression: unexpected "+c+" at position "+i);
+                    }
+                    inString = true;
+                    quoteChar = c;
+                    start = i+1;
+                } else if (c === '.') {
+                    if (i===0) {
+                        throw new Error("Invalid property expression: unexpected . at position 0");
+                    }
+                    if (start != i) {
+                        v = str.substring(start,i);
+                        if (/^\d+$/.test(v)) {
+                            parts.push(parseInt(v));
+                        } else {
+                            parts.push(v);
+                        }
+                    }
+                    if (i===length-1) {
+                        throw new Error("Invalid property expression: unterminated expression");
+                    }
+                    // Next char is first char of an identifier: a-z 0-9 $ _
+                    if (!/[a-z0-9\$\_]/i.test(str[i+1])) {
+                        throw new Error("Invalid property expression: unexpected "+str[i+1]+" at position "+(i+1));
+                    }
+                    start = i+1;
+                } else if (c === '[') {
+                    if (i === 0) {
+                        throw new Error("Invalid property expression: unexpected "+c+" at position "+i);
+                    }
+                    if (start != i) {
+                        parts.push(str.substring(start,i));
+                    }
+                    if (i===length-1) {
+                        throw new Error("Invalid property expression: unterminated expression");
+                    }
+                    // Next char is either a quote or a number
+                    if (!/["'\d]/.test(str[i+1])) {
+                        throw new Error("Invalid property expression: unexpected "+str[i+1]+" at position "+(i+1));
+                    }
+                    start = i+1;
+                    inBox = true;
+                } else if (c === ']') {
+                    if (!inBox) {
+                        throw new Error("Invalid property expression: unexpected "+c+" at position "+i);
+                    }
+                    if (start != i) {
+                        v = str.substring(start,i);
+                        if (/^\d+$/.test(v)) {
+                            parts.push(parseInt(v));
+                        } else {
+                            throw new Error("Invalid property expression: unexpected array expression at position "+start);
+                        }
+                    }
+                    start = i+1;
+                    inBox = false;
+                } else if (c === ' ') {
+                    throw new Error("Invalid property expression: unexpected ' ' at position "+i);
+                }
+            } else {
+                if (c === quoteChar) {
+                    if (i-start === 0) {
+                        throw new Error("Invalid property expression: zero-length string at position "+start);
+                    }
+                    parts.push(str.substring(start,i));
+                    // If inBox, next char must be a ]. Otherwise it may be [ or .
+                    if (inBox && !/\]/.test(str[i+1])) {
+                        throw new Error("Invalid property expression: unexpected array expression at position "+start);
+                    } else if (!inBox && i+1!==length && !/[\[\.]/.test(str[i+1])) {
+                        throw new Error("Invalid property expression: unexpected "+str[i+1]+" expression at position "+(i+1));
+                    }
+                    start = i+1;
+                    inString = false;
+                }
+            }
+
+        }
+        if (inBox || inString) {
+            throw new Error("Invalid property expression: unterminated expression");
+        }
+        if (start < length) {
+            parts.push(str.substring(start));
+        }
+        return parts;
+    }
+
+    function validatePropertyExpression(str) {
+        try {
+            var parts = normalisePropertyExpression(str);
+            return true;
+        } catch(err) {
+            return false;
+        }
+    }
+
+    function getMessageProperty(msg,expr) {
+        var result = null;
+        var msgPropParts;
+
+        if (typeof expr === 'string') {
+            if (expr.indexOf('msg.')===0) {
+                expr = expr.substring(4);
+            }
+            msgPropParts = normalisePropertyExpression(expr);
+        } else {
+            msgPropParts = expr;
+        }
+        var m;
+        msgPropParts.reduce(function(obj, key) {
+            result = (typeof obj[key] !== "undefined" ? obj[key] : undefined);
+            if (result === undefined && obj.hasOwnProperty('type') && obj.hasOwnProperty('data')&& obj.hasOwnProperty('length')) {
+                result = (typeof obj.data[key] !== "undefined" ? obj.data[key] : undefined);
+            }
+            return result;
+        }, msg);
+        return result;
+    }
+
+    function separateIconPath(icon) {
+        var result = {module: "", file: ""};
+        if (icon) {
+            var index = icon.indexOf('/');
+            if (index !== -1) {
+                result.module = icon.slice(0, index);
+                result.file = icon.slice(index + 1);
+            } else {
+                result.file = icon;
+            }
+        }
+        return result;
+    }
+
+    function getDefaultNodeIcon(def,node) {
+        var icon_url;
+        if (node && node.type === "subflow") {
+            icon_url = "node-red/subflow.png";
+        } else if (typeof def.icon === "function") {
+            try {
+                icon_url = def.icon.call(node);
+            } catch(err) {
+                console.log("Definition error: "+def.type+".icon",err);
+                icon_url = "arrow-in.png";
+            }
+        } else {
+            icon_url = def.icon;
+        }
+
+        var iconPath = separateIconPath(icon_url);
+        if (!iconPath.module) {
+            if (def.set) {
+                iconPath.module = def.set.module;
+            } else {
+                // Handle subflow instance nodes that don't have def.set
+                iconPath.module = "node-red";
+            }
+        }
+        return iconPath;
+    }
+
+    function isIconExists(iconPath) {
+        var iconSets = RED.nodes.getIconSets();
+        var iconFileList = iconSets[iconPath.module];
+        if (iconFileList && iconFileList.indexOf(iconPath.file) !== -1) {
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    function getNodeIcon(def,node) {
+        if (def.category === 'config') {
+            return "icons/node-red/cog.png"
+        } else if (node && node.type === 'tab') {
+            return "icons/node-red/subflow.png"
+        } else if (node && node.type === 'unknown') {
+            return "icons/node-red/alert.png"
+        } else if (node && node.icon) {
+            var iconPath = separateIconPath(node.icon);
+            if (isIconExists(iconPath)) {
+                return "icons/" + node.icon;
+            }
+        }
+
+        var iconPath = getDefaultNodeIcon(def, node);
+        if (def.category === 'subflows') {
+            if (!isIconExists(iconPath)) {
+                return "icons/node-red/subflow.png";
+            }
+        }
+        return "icons/"+iconPath.module+"/"+iconPath.file;
+    }
+
+    function getNodeLabel(node,defaultLabel) {
+        defaultLabel = defaultLabel||"";
+        var l;
+        if (node.type === 'tab') {
+            l = node.label || defaultLabel
+        } else {
+            l = node._def.label;
+            try {
+                l = (typeof l === "function" ? l.call(node) : l)||defaultLabel;
+            } catch(err) {
+                console.log("Definition error: "+node.type+".label",err);
+                l = defaultLabel;
+            }
+        }
+        return RED.text.bidi.enforceTextDirectionWithUCC(l);
+    }
+
+    function addSpinnerOverlay(container,contain) {
+        var spinner = $('<div class="projects-dialog-spinner "><img src="red/images/spin.svg"/></div>').appendTo(container);
+        if (contain) {
+            spinner.addClass('projects-dialog-spinner-contain');
+        }
+        return spinner;
+    }
+
+    return {
+        createObjectElement: buildMessageElement,
+        getMessageProperty: getMessageProperty,
+        normalisePropertyExpression: normalisePropertyExpression,
+        validatePropertyExpression: validatePropertyExpression,
+        separateIconPath: separateIconPath,
+        getDefaultNodeIcon: getDefaultNodeIcon,
+        getNodeIcon: getNodeIcon,
+        getNodeLabel: getNodeLabel,
+        addSpinnerOverlay: addSpinnerOverlay
+    }
+})();
+;/**
+ * Copyright JS Foundation and other contributors, http://js.foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ **/
 (function($) {
 
 /**
@@ -4999,6 +5319,137 @@ RED.validators = {
  * See the License for the specific language governing permissions and
  * limitations under the License.
  **/
+(function($) {
+    $.widget( "nodered.checkboxSet", {
+        _create: function() {
+            var that = this;
+            this.uiElement = this.element.wrap( "<span>" ).parent();
+            this.uiElement.addClass("red-ui-checkboxSet");
+            if (this.options.parent) {
+                this.parent = this.options.parent;
+                this.parent.checkboxSet('addChild',this.element);
+            }
+            this.children = [];
+            this.partialFlag = false;
+            this.stateValue = 0;
+            var initialState = this.element.prop('checked');
+            this.options = [
+                $('<span class="red-ui-checkboxSet-option hide"><i class="fa fa-square-o"></i></span>').appendTo(this.uiElement),
+                $('<span class="red-ui-checkboxSet-option hide"><i class="fa fa-check-square-o"></i></span>').appendTo(this.uiElement),
+                $('<span class="red-ui-checkboxSet-option hide"><i class="fa fa-minus-square-o"></i></span>').appendTo(this.uiElement)
+            ];
+            if (initialState) {
+                this.options[1].show();
+            } else {
+                this.options[0].show();
+            }
+
+            this.element.change(function() {
+                if (this.checked) {
+                    that.options[0].hide();
+                    that.options[1].show();
+                    that.options[2].hide();
+                } else {
+                    that.options[1].hide();
+                    that.options[0].show();
+                    that.options[2].hide();
+                }
+                var isChecked = this.checked;
+                that.children.forEach(function(child) {
+                    child.checkboxSet('state',isChecked,false,true);
+                })
+            })
+            this.uiElement.click(function(e) {
+                e.stopPropagation();
+                // state returns null for a partial state. Clicking on that should
+                // result in false.
+                that.state((that.state()===false)?true:false);
+            })
+            if (this.parent) {
+                this.parent.checkboxSet('updateChild',this);
+            }
+        },
+        _destroy: function() {
+            if (this.parent) {
+                this.parent.checkboxSet('removeChild',this.element);
+            }
+        },
+        addChild: function(child) {
+            var that = this;
+            this.children.push(child);
+        },
+        removeChild: function(child) {
+            var index = this.children.indexOf(child);
+            if (index > -1) {
+                this.children.splice(index,1);
+            }
+        },
+        updateChild: function(child) {
+            var checkedCount = 0;
+            this.children.forEach(function(c,i) {
+                if (c.checkboxSet('state') === true) {
+                    checkedCount++;
+                }
+            });
+            if (checkedCount === 0) {
+
+                this.state(false,true);
+            } else if (checkedCount === this.children.length) {
+                this.state(true,true);
+            } else {
+                this.state(null,true);
+            }
+        },
+        disable: function() {
+            this.uiElement.addClass('disabled');
+        },
+        state: function(state,suppressEvent,suppressParentUpdate) {
+
+            if (arguments.length === 0) {
+                return this.partialFlag?null:this.element.is(":checked");
+            } else {
+                this.partialFlag = (state === null);
+                var trueState = this.partialFlag||state;
+                this.element.prop('checked',trueState);
+                if (state === true) {
+                    this.options[0].hide();
+                    this.options[1].show();
+                    this.options[2].hide();
+                } else if (state === false) {
+                    this.options[2].hide();
+                    this.options[1].hide();
+                    this.options[0].show();
+                } else if (state === null) {
+                    this.options[0].hide();
+                    this.options[1].hide();
+                    this.options[2].show();
+                }
+                if (!suppressEvent) {
+                    this.element.trigger('change',null);
+                }
+                if (!suppressParentUpdate && this.parent) {
+                    this.parent.checkboxSet('updateChild',this);
+                }
+            }
+        }
+    })
+
+})(jQuery);
+;/**
+ * Copyright JS Foundation and other contributors, http://js.foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ **/
 RED.menu = (function() {
 
     var menuItems = {};
@@ -5249,6 +5700,87 @@ RED.menu = (function() {
         removeItem: removeItem,
         setAction: setAction
         //TODO: add an api for replacing a submenu - see library.js:loadFlowLibrary
+    }
+})();
+;/**
+ * Copyright JS Foundation and other contributors, http://js.foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ **/
+
+
+RED.panels = (function() {
+
+    function createPanel(options) {
+        var container = options.container || $("#"+options.id);
+        var children = container.children();
+        if (children.length !== 2) {
+            throw new Error("Container must have exactly two children");
+        }
+
+        container.addClass("red-ui-panels");
+        var separator = $('<div class="red-ui-panels-separator"></div>').insertAfter(children[0]);
+        var startPosition;
+        var panelHeights = [];
+        var modifiedHeights = false;
+        var panelRatio;
+
+        separator.draggable({
+                axis: "y",
+                containment: container,
+                scroll: false,
+                start:function(event,ui) {
+                    var height = container.height();
+                    startPosition = ui.position.top;
+                    panelHeights = [$(children[0]).height(),$(children[1]).height()];
+                },
+                drag: function(event,ui) {
+                    var height = container.height();
+                    var delta = ui.position.top-startPosition;
+                    var newHeights = [panelHeights[0]+delta,panelHeights[1]-delta];
+                    $(children[0]).height(newHeights[0]);
+                    $(children[1]).height(newHeights[1]);
+                    if (options.resize) {
+                        options.resize(newHeights[0],newHeights[1]);
+                    }
+                    ui.position.top -= delta;
+                    panelRatio = newHeights[0]/height;
+                },
+                stop:function(event,ui) {
+                    modifiedHeights = true;
+                }
+        });
+
+        return {
+            resize: function(height) {
+                var panelHeights = [$(children[0]).height(),$(children[1]).height()];
+                container.height(height);
+                if (modifiedHeights) {
+                    var topPanelHeight = panelRatio*height;
+                    var bottomPanelHeight = height - topPanelHeight - 48;
+                    panelHeights = [topPanelHeight,bottomPanelHeight];
+                    $(children[0]).height(panelHeights[0]);
+                    $(children[1]).height(panelHeights[1]);
+                }
+                if (options.resize) {
+                    options.resize(panelHeights[0],panelHeights[1]);
+                }
+            }
+        }
+    }
+
+    return {
+        create: createPanel
     }
 })();
 ;/**
@@ -5893,6 +6425,167 @@ RED.tabs = (function() {
  * See the License for the specific language governing permissions and
  * limitations under the License.
  **/
+
+RED.stack = (function() {
+    function createStack(options) {
+        var container = options.container;
+        container.addClass("red-ui-stack");
+        var contentHeight = 0;
+        var entries = [];
+
+        var visible = true;
+        // TODO: make this a singleton function - and watch out for stacks no longer
+        //       in the DOM
+        var resizeStack = function() {
+            if (entries.length > 0) {
+                var headerHeight = 0;
+                entries.forEach(function(entry) {
+                    headerHeight += entry.header.outerHeight();
+                });
+
+                var height = container.innerHeight();
+                contentHeight = height - headerHeight - (entries.length-1);
+                entries.forEach(function(e) {
+                    e.contentWrap.height(contentHeight);
+                });
+            }
+        }
+        if (options.fill && options.singleExpanded) {
+            $(window).resize(resizeStack);
+            $(window).focus(resizeStack);
+        }
+        return {
+            add: function(entry) {
+                entries.push(entry);
+                entry.container = $('<div class="palette-category">').appendTo(container);
+                if (!visible) {
+                    entry.container.hide();
+                }
+                var header = $('<div class="palette-header"></div>').appendTo(entry.container);
+                entry.header = header;
+                entry.contentWrap = $('<div></div>',{style:"position:relative"}).appendTo(entry.container);
+                if (options.fill) {
+                    entry.contentWrap.css("height",contentHeight);
+                }
+                entry.content = $('<div></div>').appendTo(entry.contentWrap);
+                if (entry.collapsible !== false) {
+                    header.click(function() {
+                        if (options.singleExpanded) {
+                            if (!entry.isExpanded()) {
+                                for (var i=0;i<entries.length;i++) {
+                                    if (entries[i].isExpanded()) {
+                                        entries[i].collapse();
+                                    }
+                                }
+                                entry.expand();
+                            }
+                        } else {
+                            entry.toggle();
+                        }
+                    });
+                    var icon = $('<i class="fa fa-angle-down"></i>').appendTo(header);
+
+                    if (entry.expanded) {
+                        entry.container.addClass("palette-category-expanded");
+                        icon.addClass("expanded");
+                    } else {
+                        entry.contentWrap.hide();
+                    }
+                } else {
+                    $('<i style="opacity: 0.5;" class="fa fa-angle-down expanded"></i>').appendTo(header);
+                    header.css("cursor","default");
+                }
+                entry.title = $('<span></span>').html(entry.title).appendTo(header);
+
+
+
+                entry.toggle = function() {
+                    if (entry.isExpanded()) {
+                        entry.collapse();
+                        return false;
+                    } else {
+                        entry.expand();
+                        return true;
+                    }
+                };
+                entry.expand = function() {
+                    if (!entry.isExpanded()) {
+                        if (entry.onexpand) {
+                            entry.onexpand.call(entry);
+                        }
+                        if (options.singleExpanded) {
+                            entries.forEach(function(e) {
+                                if (e !== entry) {
+                                    e.collapse();
+                                }
+                            })
+                        }
+
+                        icon.addClass("expanded");
+                        entry.container.addClass("palette-category-expanded");
+                        entry.contentWrap.slideDown(200);
+                        return true;
+                    }
+                };
+                entry.collapse = function() {
+                    if (entry.isExpanded()) {
+                        icon.removeClass("expanded");
+                        entry.container.removeClass("palette-category-expanded");
+                        entry.contentWrap.slideUp(200);
+                        return true;
+                    }
+                };
+                entry.isExpanded = function() {
+                    return entry.container.hasClass("palette-category-expanded");
+                };
+                if (options.fill && options.singleExpanded) {
+                    resizeStack();
+                }
+                return entry;
+            },
+
+            hide: function() {
+                visible = false;
+                entries.forEach(function(entry) {
+                    entry.container.hide();
+                });
+                return this;
+            },
+
+            show: function() {
+                visible = true;
+                entries.forEach(function(entry) {
+                    entry.container.show();
+                });
+                return this;
+            },
+            resize: function() {
+                if (resizeStack) {
+                    resizeStack();
+                }
+            }
+        }
+    }
+
+    return {
+        create: createStack
+    }
+})();
+;/**
+ * Copyright JS Foundation and other contributors, http://js.foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ **/
 (function($) {
     var allOptions = {
         msg: {value:"msg",label:"msg.",validate:RED.utils.validatePropertyExpression},
@@ -6389,6 +7082,41 @@ RED.tabs = (function() {
         }
     });
 })(jQuery);
+;RED.actions = (function() {
+    var actions = {
+
+    }
+
+    function addAction(name,handler) {
+        actions[name] = handler;
+    }
+    function removeAction(name) {
+        delete actions[name];
+    }
+    function getAction(name) {
+        return actions[name];
+    }
+    function invokeAction(name) {
+        if (actions.hasOwnProperty(name)) {
+            actions[name]();
+        }
+    }
+    function listActions() {
+        var result = [];
+        Object.keys(actions).forEach(function(action) {
+            var shortcut = RED.keyboard.getShortcut(action);
+            result.push({id:action,scope:shortcut?shortcut.scope:undefined,key:shortcut?shortcut.key:undefined,user:shortcut?shortcut.user:undefined})
+        })
+        return result;
+    }
+    return {
+        add: addAction,
+        remove: removeAction,
+        get: getAction,
+        invoke: invokeAction,
+        list: listActions
+    }
+})();
 ;/**
  * Copyright JS Foundation and other contributors, http://js.foundation
  *
@@ -6984,6 +7712,2199 @@ RED.deploy = (function () {
     }
   }
 })()
+;RED.diff = (function() {
+
+    var currentDiff = {};
+    var diffVisible = false;
+    var diffList;
+
+    function init() {
+
+        // RED.actions.add("core:show-current-diff",showLocalDiff);
+        RED.actions.add("core:show-remote-diff",showRemoteDiff);
+        // RED.keyboard.add("*","ctrl-shift-l","core:show-current-diff");
+        // RED.keyboard.add("*","ctrl-shift-r","core:show-remote-diff");
+
+
+        // RED.actions.add("core:show-test-flow-diff-1",function(){showTestFlowDiff(1)});
+        // RED.keyboard.add("*","ctrl-shift-f 1","core:show-test-flow-diff-1");
+        //
+        // RED.actions.add("core:show-test-flow-diff-2",function(){showTestFlowDiff(2)});
+        // RED.keyboard.add("*","ctrl-shift-f 2","core:show-test-flow-diff-2");
+        // RED.actions.add("core:show-test-flow-diff-3",function(){showTestFlowDiff(3)});
+        // RED.keyboard.add("*","ctrl-shift-f 3","core:show-test-flow-diff-3");
+
+    }
+    function createDiffTable(container,CurrentDiff) {
+        var diffList = $('<ol class="node-dialog-view-diff-diff"></ol>').appendTo(container);
+        diffList.editableList({
+            addButton: false,
+            height: "auto",
+            scrollOnAdd: false,
+            addItem: function(container,i,object) {
+                var localDiff = object.diff;
+                var remoteDiff = object.remoteDiff;
+                var tab = object.tab.n;
+                var def = object.def;
+                var conflicts = CurrentDiff.conflicts;
+
+                var tabDiv = $('<div>',{class:"node-diff-tab"}).appendTo(container);
+                tabDiv.addClass('collapsed');
+                var titleRow = $('<div>',{class:"node-diff-tab-title"}).appendTo(tabDiv);
+                var nodesDiv = $('<div>').appendTo(tabDiv);
+                var originalCell = $('<div>',{class:"node-diff-node-entry-cell"}).appendTo(titleRow);
+                var localCell = $('<div>',{class:"node-diff-node-entry-cell node-diff-node-local"}).appendTo(titleRow);
+                var remoteCell;
+                var selectState;
+
+                if (remoteDiff) {
+                    remoteCell = $('<div>',{class:"node-diff-node-entry-cell node-diff-node-remote"}).appendTo(titleRow);
+                }
+                $('<span class="node-diff-chevron"><i class="fa fa-angle-down"></i></span>').appendTo(originalCell);
+                createNodeIcon(tab,def).appendTo(originalCell);
+                var tabForLabel = (object.newTab || object.tab).n;
+                var titleSpan = $('<span>',{class:"node-diff-tab-title-meta"}).appendTo(originalCell);
+                if (tabForLabel.type === 'tab') {
+                    titleSpan.text(tabForLabel.label||tabForLabel.id);
+                } else if (tab.type === 'subflow') {
+                    titleSpan.text((tabForLabel.name||tabForLabel.id));
+                } else {
+                    titleSpan.text(RED._("diff.globalNodes"));
+                }
+                var flowStats = {
+                    local: {
+                        addedCount:0,
+                        deletedCount:0,
+                        changedCount:0,
+                        unchangedCount: 0
+                    },
+                    remote: {
+                        addedCount:0,
+                        deletedCount:0,
+                        changedCount:0,
+                        unchangedCount: 0
+                    },
+                    conflicts: 0
+                }
+                if (object.newTab || object.remoteTab) {
+                    var localTabNode = {
+                        node: localDiff.newConfig.all[tab.id],
+                        all: localDiff.newConfig.all,
+                        diff: localDiff
+                    }
+                    var remoteTabNode;
+                    if (remoteDiff) {
+                        remoteTabNode = {
+                            node:remoteDiff.newConfig.all[tab.id]||null,
+                            all: remoteDiff.newConfig.all,
+                            diff: remoteDiff
+                        }
+                    }
+                    if (tab.type !== undefined) {
+                        var div = $("<div>",{class:"node-diff-node-entry node-diff-node-props collapsed"}).appendTo(nodesDiv);
+                        var row = $("<div>",{class:"node-diff-node-entry-header"}).appendTo(div);
+                        var originalNodeDiv = $("<div>",{class:"node-diff-node-entry-cell"}).appendTo(row);
+                        var localNodeDiv = $("<div>",{class:"node-diff-node-entry-cell node-diff-node-local"}).appendTo(row);
+                        var localChanged = false;
+                        var remoteChanged = false;
+
+                        if (!localDiff.newConfig.all[tab.id]) {
+                            localNodeDiv.addClass("node-diff-empty");
+                        } else if (localDiff.added[tab.id]) {
+                            localNodeDiv.addClass("node-diff-node-added");
+                            localChanged = true;
+                            $('<span class="node-diff-status"><i class="fa fa-plus-square"></i> <span data-i18n="diff.type.added"></span></span>').appendTo(localNodeDiv);
+                        } else if (localDiff.changed[tab.id]) {
+                            localNodeDiv.addClass("node-diff-node-changed");
+                            localChanged = true;
+                            $('<span class="node-diff-status"><i class="fa fa-square"></i> <span data-i18n="diff.type.changed"></span></span>').appendTo(localNodeDiv);
+                        } else {
+                            localNodeDiv.addClass("node-diff-node-unchanged");
+                            $('<span class="node-diff-status"><i class="fa fa-square-o"></i> <span data-i18n="diff.type.unchanged"></span></span>').appendTo(localNodeDiv);
+                        }
+
+                        var remoteNodeDiv;
+                        if (remoteDiff) {
+                            remoteNodeDiv = $("<div>",{class:"node-diff-node-entry-cell node-diff-node-remote"}).appendTo(row);
+                            if (!remoteDiff.newConfig.all[tab.id]) {
+                                remoteNodeDiv.addClass("node-diff-empty");
+                                if (remoteDiff.deleted[tab.id]) {
+                                    remoteChanged = true;
+                                }
+                            } else if (remoteDiff.added[tab.id]) {
+                                remoteNodeDiv.addClass("node-diff-node-added");
+                                remoteChanged = true;
+                                $('<span class="node-diff-status"><i class="fa fa-plus-square"></i> <span data-i18n="diff.type.added"></span></span>').appendTo(remoteNodeDiv);
+                            } else if (remoteDiff.changed[tab.id]) {
+                                remoteNodeDiv.addClass("node-diff-node-changed");
+                                remoteChanged = true;
+                                $('<span class="node-diff-status"><i class="fa fa-square"></i> <span data-i18n="diff.type.changed"></span></span>').appendTo(remoteNodeDiv);
+                            } else {
+                                remoteNodeDiv.addClass("node-diff-node-unchanged");
+                                $('<span class="node-diff-status"><i class="fa fa-square-o"></i> <span data-i18n="diff.type.unchanged"></span></span>').appendTo(remoteNodeDiv);
+                            }
+                        }
+                        $('<span class="node-diff-chevron"><i class="fa fa-angle-down"></i></span>').appendTo(originalNodeDiv);
+                        $('<span>').text(RED._("diff.flowProperties")).appendTo(originalNodeDiv);
+
+                        row.click(function(evt) {
+                            evt.preventDefault();
+                            $(this).parent().toggleClass('collapsed');
+                        });
+
+                        createNodePropertiesTable(def,tab,localTabNode,remoteTabNode,conflicts).appendTo(div);
+                        selectState = "";
+                        if (conflicts[tab.id]) {
+                            flowStats.conflicts++;
+
+                            if (!localNodeDiv.hasClass("node-diff-empty")) {
+                                $('<span class="node-diff-node-conflict"><span class="node-diff-status"><i class="fa fa-exclamation"></i></span></span>').prependTo(localNodeDiv);
+                            }
+                            if (!remoteNodeDiv.hasClass("node-diff-empty")) {
+                                $('<span class="node-diff-node-conflict"><span class="node-diff-status"><i class="fa fa-exclamation"></i></span></span>').prependTo(remoteNodeDiv);
+                            }
+                            div.addClass("node-diff-node-entry-conflict");
+                        } else {
+                            selectState = CurrentDiff.resolutions[tab.id];
+                        }
+                        // Tab properties row
+                        createNodeConflictRadioBoxes(tab,div,localNodeDiv,remoteNodeDiv,true,!conflicts[tab.id],selectState,CurrentDiff);
+                    }
+                }
+                // var stats = $('<span>',{class:"node-diff-tab-stats"}).appendTo(titleRow);
+                var localNodeCount = 0;
+                var remoteNodeCount = 0;
+                var seen = {};
+                object.tab.nodes.forEach(function(node) {
+                    seen[node.id] = true;
+                    createNodeDiffRow(node,flowStats,CurrentDiff).appendTo(nodesDiv)
+                });
+                if (object.newTab) {
+                    localNodeCount = object.newTab.nodes.length;
+                    object.newTab.nodes.forEach(function(node) {
+                        if (!seen[node.id]) {
+                            seen[node.id] = true;
+                            createNodeDiffRow(node,flowStats,CurrentDiff).appendTo(nodesDiv)
+                        }
+                    });
+                }
+                if (object.remoteTab) {
+                    remoteNodeCount = object.remoteTab.nodes.length;
+                    object.remoteTab.nodes.forEach(function(node) {
+                        if (!seen[node.id]) {
+                            createNodeDiffRow(node,flowStats,CurrentDiff).appendTo(nodesDiv)
+                        }
+                    });
+                }
+                titleRow.click(function(evt) {
+                    // if (titleRow.parent().find(".node-diff-node-entry:not(.hide)").length > 0) {
+                    titleRow.parent().toggleClass('collapsed');
+                    if ($(this).parent().hasClass('collapsed')) {
+                        $(this).parent().find('.node-diff-node-entry').addClass('collapsed');
+                        $(this).parent().find('.debug-message-element').addClass('collapsed');
+                    }
+                    // }
+                })
+
+                if (localDiff.deleted[tab.id]) {
+                    $('<span class="node-diff-node-deleted"><span class="node-diff-status"><i class="fa fa-minus-square"></i> <span data-i18n="diff.type.flowDeleted"></span></span></span>').appendTo(localCell);
+                } else if (object.newTab) {
+                    if (localDiff.added[tab.id]) {
+                        $('<span class="node-diff-node-added"><span class="node-diff-status"><i class="fa fa-plus-square"></i> <span data-i18n="diff.type.flowAdded"></span></span></span>').appendTo(localCell);
+                    } else {
+                        if (tab.id) {
+                            if (localDiff.changed[tab.id]) {
+                                flowStats.local.changedCount++;
+                            } else {
+                                flowStats.local.unchangedCount++;
+                            }
+                        }
+                        var localStats = $('<span>',{class:"node-diff-tab-stats"}).appendTo(localCell);
+                        $('<span class="node-diff-status"></span>').text(RED._('diff.nodeCount',{count:localNodeCount})).appendTo(localStats);
+
+                        if (flowStats.conflicts + flowStats.local.addedCount + flowStats.local.changedCount + flowStats.local.deletedCount > 0) {
+                            $('<span class="node-diff-status"> [ </span>').appendTo(localStats);
+                            if (flowStats.conflicts > 0) {
+                                $('<span class="node-diff-node-conflict"><span class="node-diff-status"><i class="fa fa-exclamation"></i> '+flowStats.conflicts+'</span></span>').appendTo(localStats);
+                            }
+                            if (flowStats.local.addedCount > 0) {
+                                $('<span class="node-diff-node-added"><span class="node-diff-status"><i class="fa fa-plus-square"></i> '+flowStats.local.addedCount+'</span></span>').appendTo(localStats);
+                            }
+                            if (flowStats.local.changedCount > 0) {
+                                $('<span class="node-diff-node-changed"><span class="node-diff-status"><i class="fa fa-square"></i> '+flowStats.local.changedCount+'</span></span>').appendTo(localStats);
+                            }
+                            if (flowStats.local.deletedCount > 0) {
+                                $('<span class="node-diff-node-deleted"><span class="node-diff-status"><i class="fa fa-minus-square"></i> '+flowStats.local.deletedCount+'</span></span>').appendTo(localStats);
+                            }
+                            $('<span class="node-diff-status"> ] </span>').appendTo(localStats);
+                        }
+
+                    }
+                } else {
+                    localCell.addClass("node-diff-empty");
+                }
+
+                if (remoteDiff) {
+                    if (remoteDiff.deleted[tab.id]) {
+                        $('<span class="node-diff-node-deleted"><span class="node-diff-status"><i class="fa fa-minus-square"></i> <span data-i18n="diff.type.flowDeleted"></span></span></span>').appendTo(remoteCell);
+                    } else if (object.remoteTab) {
+                        if (remoteDiff.added[tab.id]) {
+                            $('<span class="node-diff-node-added"><span class="node-diff-status"><i class="fa fa-plus-square"></i> <span data-i18n="diff.type.flowAdded"></span></span></span>').appendTo(remoteCell);
+                        } else {
+                            if (tab.id) {
+                                if (remoteDiff.changed[tab.id]) {
+                                    flowStats.remote.changedCount++;
+                                } else {
+                                    flowStats.remote.unchangedCount++;
+                                }
+                            }
+                            var remoteStats = $('<span>',{class:"node-diff-tab-stats"}).appendTo(remoteCell);
+                            $('<span class="node-diff-status"></span>').text(RED._('diff.nodeCount',{count:remoteNodeCount})).appendTo(remoteStats);
+                            if (flowStats.conflicts + flowStats.remote.addedCount + flowStats.remote.changedCount + flowStats.remote.deletedCount > 0) {
+                                $('<span class="node-diff-status"> [ </span>').appendTo(remoteStats);
+                                if (flowStats.conflicts > 0) {
+                                    $('<span class="node-diff-node-conflict"><span class="node-diff-status"><i class="fa fa-exclamation"></i> '+flowStats.conflicts+'</span></span>').appendTo(remoteStats);
+                                }
+                                if (flowStats.remote.addedCount > 0) {
+                                    $('<span class="node-diff-node-added"><span class="node-diff-status"><i class="fa fa-plus-square"></i> '+flowStats.remote.addedCount+'</span></span>').appendTo(remoteStats);
+                                }
+                                if (flowStats.remote.changedCount > 0) {
+                                    $('<span class="node-diff-node-changed"><span class="node-diff-status"><i class="fa fa-square"></i> '+flowStats.remote.changedCount+'</span></span>').appendTo(remoteStats);
+                                }
+                                if (flowStats.remote.deletedCount > 0) {
+                                    $('<span class="node-diff-node-deleted"><span class="node-diff-status"><i class="fa fa-minus-square"></i> '+flowStats.remote.deletedCount+'</span></span>').appendTo(remoteStats);
+                                }
+                                $('<span class="node-diff-status"> ] </span>').appendTo(remoteStats);
+                            }
+                        }
+                    } else {
+                        remoteCell.addClass("node-diff-empty");
+                    }
+                    selectState = "";
+                    if (flowStats.conflicts > 0) {
+                        titleRow.addClass("node-diff-node-entry-conflict");
+                    } else {
+                        selectState = CurrentDiff.resolutions[tab.id];
+                    }
+                    if (tab.id) {
+                        var hide = !(flowStats.conflicts > 0 &&(localDiff.deleted[tab.id] || remoteDiff.deleted[tab.id]));
+                        // Tab parent row
+                        createNodeConflictRadioBoxes(tab,titleRow,localCell,remoteCell, false, hide, selectState, CurrentDiff);
+                    }
+                }
+
+                if (tabDiv.find(".node-diff-node-entry").length === 0) {
+                    tabDiv.addClass("node-diff-tab-empty");
+                }
+                container.i18n();
+            }
+        });
+        return diffList;
+    }
+    function buildDiffPanel(container,diff,options) {
+        var diffPanel = $('<div class="node-dialog-view-diff-panel"></div>').appendTo(container);
+        var diffHeaders = $('<div class="node-dialog-view-diff-headers"></div>').appendTo(diffPanel);
+        if (options.mode === "merge") {
+            diffPanel.addClass("node-dialog-view-diff-panel-merge");
+        }
+        var diffList = createDiffTable(diffPanel, diff);
+
+        var localDiff = diff.localDiff;
+        var remoteDiff = diff.remoteDiff;
+        var conflicts = diff.conflicts;
+
+        var currentConfig = localDiff.currentConfig;
+        var newConfig = localDiff.newConfig;
+
+
+        if (remoteDiff !== undefined) {
+            diffPanel.addClass('node-diff-three-way');
+            var localTitle = options.oldRevTitle || RED._('diff.local');
+            var remoteTitle = options.newRevTitle || RED._('diff.remote');
+            $('<div></div>').text(localTitle).appendTo(diffHeaders);
+            $('<div></div>').text(remoteTitle).appendTo(diffHeaders);
+        } else {
+            diffPanel.removeClass('node-diff-three-way');
+        }
+
+        return {
+            list: diffList,
+            finish: function() {
+                var el = {
+                    diff: localDiff,
+                    def: {
+                        category: 'config',
+                        color: '#f0f0f0'
+                    },
+                    tab: {
+                        n: {},
+                        nodes: currentConfig.globals
+                    },
+                    newTab: {
+                        n: {},
+                        nodes: newConfig.globals
+                    }
+                };
+                if (remoteDiff !== undefined) {
+                    el.remoteTab = {
+                        n:{},
+                        nodes:remoteDiff.newConfig.globals
+                    };
+                    el.remoteDiff = remoteDiff;
+                }
+                diffList.editableList('addItem',el);
+
+                var seenTabs = {};
+
+                currentConfig.tabOrder.forEach(function(tabId) {
+                    var tab = currentConfig.tabs[tabId];
+                    var el = {
+                        diff: localDiff,
+                        def: RED.nodes.getType('tab'),
+                        tab:tab
+                    };
+                    if (newConfig.tabs.hasOwnProperty(tabId)) {
+                        el.newTab = newConfig.tabs[tabId];
+                    }
+                    if (remoteDiff !== undefined) {
+                        el.remoteTab = remoteDiff.newConfig.tabs[tabId];
+                        el.remoteDiff = remoteDiff;
+                    }
+                    seenTabs[tabId] = true;
+                    diffList.editableList('addItem',el)
+                });
+                newConfig.tabOrder.forEach(function(tabId) {
+                    if (!seenTabs[tabId]) {
+                        seenTabs[tabId] = true;
+                        var tab = newConfig.tabs[tabId];
+                        var el = {
+                            diff: localDiff,
+                            def: RED.nodes.getType('tab'),
+                            tab:tab,
+                            newTab: tab
+                        };
+                        if (remoteDiff !== undefined) {
+                            el.remoteDiff = remoteDiff;
+                        }
+                        diffList.editableList('addItem',el)
+                    }
+                });
+                if (remoteDiff !== undefined) {
+                    remoteDiff.newConfig.tabOrder.forEach(function(tabId) {
+                        if (!seenTabs[tabId]) {
+                            var tab = remoteDiff.newConfig.tabs[tabId];
+                            // TODO how to recognise this is a remotely added flow
+                            var el = {
+                                diff: localDiff,
+                                remoteDiff: remoteDiff,
+                                def: RED.nodes.getType('tab'),
+                                tab:tab,
+                                remoteTab:tab
+                            };
+                            diffList.editableList('addItem',el)
+                        }
+                    });
+                }
+                var subflowId;
+                for (subflowId in currentConfig.subflows) {
+                    if (currentConfig.subflows.hasOwnProperty(subflowId)) {
+                        seenTabs[subflowId] = true;
+                        el = {
+                            diff: localDiff,
+                            def: {
+                                defaults:{},
+                                icon:"subflow.png",
+                                category: "subflows",
+                                color: "#da9"
+                            },
+                            tab:currentConfig.subflows[subflowId]
+                        }
+                        if (newConfig.subflows.hasOwnProperty(subflowId)) {
+                            el.newTab = newConfig.subflows[subflowId];
+                        }
+                        if (remoteDiff !== undefined) {
+                            el.remoteTab = remoteDiff.newConfig.subflows[subflowId];
+                            el.remoteDiff = remoteDiff;
+                        }
+                        diffList.editableList('addItem',el)
+                    }
+                }
+                for (subflowId in newConfig.subflows) {
+                    if (newConfig.subflows.hasOwnProperty(subflowId) && !seenTabs[subflowId]) {
+                        seenTabs[subflowId] = true;
+                        el = {
+                            diff: localDiff,
+                            def: {
+                                defaults:{},
+                                icon:"subflow.png",
+                                category: "subflows",
+                                color: "#da9"
+                            },
+                            tab:newConfig.subflows[subflowId],
+                            newTab:newConfig.subflows[subflowId]
+                        }
+                        if (remoteDiff !== undefined) {
+                            el.remoteDiff = remoteDiff;
+                        }
+                        diffList.editableList('addItem',el)
+                    }
+                }
+                if (remoteDiff !== undefined) {
+                    for (subflowId in remoteDiff.newConfig.subflows) {
+                        if (remoteDiff.newConfig.subflows.hasOwnProperty(subflowId) && !seenTabs[subflowId]) {
+                            el = {
+                                diff: localDiff,
+                                remoteDiff: remoteDiff,
+                                def: {
+                                    defaults:{},
+                                    icon:"subflow.png",
+                                    category: "subflows",
+                                    color: "#da9"
+                                },
+                                tab:remoteDiff.newConfig.subflows[subflowId],
+                                remoteTab: remoteDiff.newConfig.subflows[subflowId]
+                            }
+                            diffList.editableList('addItem',el)
+                        }
+                    }
+                }
+            }
+        };
+    }
+    function formatWireProperty(wires,allNodes) {
+        var result = $("<div>",{class:"node-diff-property-wires"})
+        var list = $("<ol></ol>");
+        var c = 0;
+        wires.forEach(function(p,i) {
+            var port = $("<li>").appendTo(list);
+            if (p && p.length > 0) {
+                $("<span>").text(i+1).appendTo(port);
+                var links = $("<ul>").appendTo(port);
+                p.forEach(function(d) {
+                    c++;
+                    var entry = $("<li>").appendTo(links);
+                    var node = allNodes[d];
+                    if (node) {
+                        var def = RED.nodes.getType(node.type)||{};
+                        createNode(node,def).appendTo(entry);
+                    } else {
+                        entry.text(d);
+                    }
+                })
+            } else {
+                port.text('none');
+            }
+        })
+        if (c === 0) {
+            result.text("none");
+        } else {
+            list.appendTo(result);
+        }
+        return result;
+    }
+    function createNodeIcon(node,def) {
+        var nodeDiv = $("<div>",{class:"node-diff-node-entry-node"});
+        var colour = def.color;
+        var icon_url = RED.utils.getNodeIcon(def,node);
+        if (node.type === 'tab') {
+            colour = "#C0DEED";
+        }
+        nodeDiv.css('backgroundColor',colour);
+
+        var iconContainer = $('<div/>',{class:"palette_icon_container"}).appendTo(nodeDiv);
+        $('<div/>',{class:"palette_icon",style:"background-image: url("+icon_url+")"}).appendTo(iconContainer);
+
+        return nodeDiv;
+    }
+    function createNode(node,def) {
+        var nodeTitleDiv = $("<div>",{class:"node-diff-node-entry-title"})
+        createNodeIcon(node,def).appendTo(nodeTitleDiv);
+        var contentDiv = $('<div>',{class:"node-diff-node-description"}).appendTo(nodeTitleDiv);
+        var nodeLabel = node.label || node.name || node.id;
+        $('<span>',{class:"node-diff-node-label"}).text(nodeLabel).appendTo(contentDiv);
+        return nodeTitleDiv;
+    }
+    function createNodeDiffRow(node,stats,CurrentDiff) {
+        var localDiff = CurrentDiff.localDiff;
+        var remoteDiff = CurrentDiff.remoteDiff;
+        var conflicted = CurrentDiff.conflicts[node.id];
+
+        var hasChanges = false; // exists in original and local/remote but with changes
+        var unChanged = true; // existing in original,local,remote unchanged
+        var localChanged = false;
+
+        if (localDiff.added[node.id]) {
+            stats.local.addedCount++;
+            unChanged = false;
+        }
+        if (remoteDiff && remoteDiff.added[node.id]) {
+            stats.remote.addedCount++;
+            unChanged = false;
+        }
+        if (localDiff.deleted[node.id]) {
+            stats.local.deletedCount++;
+            unChanged = false;
+        }
+        if (remoteDiff && remoteDiff.deleted[node.id]) {
+            stats.remote.deletedCount++;
+            unChanged = false;
+        }
+        if (localDiff.changed[node.id]) {
+            stats.local.changedCount++;
+            hasChanges = true;
+            unChanged = false;
+        }
+        if (remoteDiff && remoteDiff.changed[node.id]) {
+            stats.remote.changedCount++;
+            hasChanges = true;
+            unChanged = false;
+        }
+        // console.log(node.id,localDiff.added[node.id],remoteDiff.added[node.id],localDiff.deleted[node.id],remoteDiff.deleted[node.id],localDiff.changed[node.id],remoteDiff.changed[node.id])
+        var def = RED.nodes.getType(node.type);
+        if (def === undefined) {
+            if (/^subflow:/.test(node.type)) {
+                def = {
+                    icon:"subflow.png",
+                    category: "subflows",
+                    color: "#da9",
+                    defaults:{name:{value:""}}
+                }
+            } else {
+                def = {};
+            }
+        }
+        var div = $("<div>",{class:"node-diff-node-entry collapsed"});
+        var row = $("<div>",{class:"node-diff-node-entry-header"}).appendTo(div);
+
+        var originalNodeDiv = $("<div>",{class:"node-diff-node-entry-cell"}).appendTo(row);
+        var localNodeDiv = $("<div>",{class:"node-diff-node-entry-cell node-diff-node-local"}).appendTo(row);
+        var remoteNodeDiv;
+        var chevron;
+        if (remoteDiff) {
+            remoteNodeDiv = $("<div>",{class:"node-diff-node-entry-cell node-diff-node-remote"}).appendTo(row);
+        }
+        $('<span class="node-diff-chevron"><i class="fa fa-angle-down"></i></span>').appendTo(originalNodeDiv);
+
+        if (unChanged) {
+            stats.local.unchangedCount++;
+            createNode(node,def).appendTo(originalNodeDiv);
+            localNodeDiv.addClass("node-diff-node-unchanged");
+            $('<span class="node-diff-status"><i class="fa fa-square-o"></i> <span data-i18n="diff.type.unchanged"></span></span>').appendTo(localNodeDiv);
+            if (remoteDiff) {
+                stats.remote.unchangedCount++;
+                remoteNodeDiv.addClass("node-diff-node-unchanged");
+                $('<span class="node-diff-status"><i class="fa fa-square-o"></i> <span data-i18n="diff.type.unchanged"></span></span>').appendTo(remoteNodeDiv);
+            }
+            div.addClass("node-diff-node-unchanged");
+        } else if (localDiff.added[node.id]) {
+            localNodeDiv.addClass("node-diff-node-added");
+            if (remoteNodeDiv) {
+                remoteNodeDiv.addClass("node-diff-empty");
+            }
+            $('<span class="node-diff-status"><i class="fa fa-plus-square"></i> <span data-i18n="diff.type.added"></span></span>').appendTo(localNodeDiv);
+            createNode(node,def).appendTo(originalNodeDiv);
+        } else if (remoteDiff && remoteDiff.added[node.id]) {
+            localNodeDiv.addClass("node-diff-empty");
+            remoteNodeDiv.addClass("node-diff-node-added");
+            $('<span class="node-diff-status"><i class="fa fa-plus-square"></i> <span data-i18n="diff.type.added"></span></span>').appendTo(remoteNodeDiv);
+            createNode(node,def).appendTo(originalNodeDiv);
+        } else {
+            createNode(node,def).appendTo(originalNodeDiv);
+            if (localDiff.moved[node.id]) {
+                var localN = localDiff.newConfig.all[node.id];
+                if (!localDiff.deleted[node.z] && node.z !== localN.z && node.z !== "" && !localDiff.newConfig.all[node.z]) {
+                    localNodeDiv.addClass("node-diff-empty");
+                } else {
+                    localNodeDiv.addClass("node-diff-node-moved");
+                    var localMovedMessage = "";
+                    if (node.z === localN.z) {
+                        localMovedMessage = RED._("diff.type.movedFrom",{id:(localDiff.currentConfig.all[node.id].z||'global')});
+                    } else {
+                        localMovedMessage = RED._("diff.type.movedTo",{id:(localN.z||'global')});
+                    }
+                    $('<span class="node-diff-status"><i class="fa fa-caret-square-o-right"></i> '+localMovedMessage+'</span>').appendTo(localNodeDiv);
+                }
+                localChanged = true;
+            } else if (localDiff.deleted[node.z]) {
+                localNodeDiv.addClass("node-diff-empty");
+                localChanged = true;
+            } else if (localDiff.deleted[node.id]) {
+                localNodeDiv.addClass("node-diff-node-deleted");
+                $('<span class="node-diff-status"><i class="fa fa-minus-square"></i> <span data-i18n="diff.type.deleted"></span></span>').appendTo(localNodeDiv);
+                localChanged = true;
+            } else if (localDiff.changed[node.id]) {
+                if (localDiff.newConfig.all[node.id].z !== node.z) {
+                    localNodeDiv.addClass("node-diff-empty");
+                } else {
+                    localNodeDiv.addClass("node-diff-node-changed");
+                    $('<span class="node-diff-status"><i class="fa fa-square"></i> <span data-i18n="diff.type.changed"></span></span>').appendTo(localNodeDiv);
+                    localChanged = true;
+                }
+            } else {
+                if (localDiff.newConfig.all[node.id].z !== node.z) {
+                    localNodeDiv.addClass("node-diff-empty");
+                } else {
+                    stats.local.unchangedCount++;
+                    localNodeDiv.addClass("node-diff-node-unchanged");
+                    $('<span class="node-diff-status"><i class="fa fa-square-o"></i> <span data-i18n="diff.type.unchanged"></span></span>').appendTo(localNodeDiv);
+                }
+            }
+
+            if (remoteDiff) {
+                if (remoteDiff.moved[node.id]) {
+                    var remoteN = remoteDiff.newConfig.all[node.id];
+                    if (!remoteDiff.deleted[node.z] && node.z !== remoteN.z && node.z !== "" && !remoteDiff.newConfig.all[node.z]) {
+                        remoteNodeDiv.addClass("node-diff-empty");
+                    } else {
+                        remoteNodeDiv.addClass("node-diff-node-moved");
+                        var remoteMovedMessage = "";
+                        if (node.z === remoteN.z) {
+                            remoteMovedMessage = RED._("diff.type.movedFrom",{id:(remoteDiff.currentConfig.all[node.id].z||'global')});
+                        } else {
+                            remoteMovedMessage = RED._("diff.type.movedTo",{id:(remoteN.z||'global')});
+                        }
+                        $('<span class="node-diff-status"><i class="fa fa-caret-square-o-right"></i> '+remoteMovedMessage+'</span>').appendTo(remoteNodeDiv);
+                    }
+                } else if (remoteDiff.deleted[node.z]) {
+                    remoteNodeDiv.addClass("node-diff-empty");
+                } else if (remoteDiff.deleted[node.id]) {
+                    remoteNodeDiv.addClass("node-diff-node-deleted");
+                    $('<span class="node-diff-status"><i class="fa fa-minus-square"></i> <span data-i18n="diff.type.deleted"></span></span>').appendTo(remoteNodeDiv);
+                } else if (remoteDiff.changed[node.id]) {
+                    if (remoteDiff.newConfig.all[node.id].z !== node.z) {
+                        remoteNodeDiv.addClass("node-diff-empty");
+                    } else {
+                        remoteNodeDiv.addClass("node-diff-node-changed");
+                        $('<span class="node-diff-status"><i class="fa fa-square"></i> <span data-i18n="diff.type.changed"></span></span>').appendTo(remoteNodeDiv);
+                    }
+                } else {
+                    if (remoteDiff.newConfig.all[node.id].z !== node.z) {
+                        remoteNodeDiv.addClass("node-diff-empty");
+                    } else {
+                        stats.remote.unchangedCount++;
+                        remoteNodeDiv.addClass("node-diff-node-unchanged");
+                        $('<span class="node-diff-status"><i class="fa fa-square-o"></i> <span data-i18n="diff.type.unchanged"></span></span>').appendTo(remoteNodeDiv);
+                    }
+                }
+            }
+        }
+        var localNode = {
+            node: localDiff.newConfig.all[node.id],
+            all: localDiff.newConfig.all,
+            diff: localDiff
+        };
+        var remoteNode;
+        if (remoteDiff) {
+            remoteNode = {
+                node:remoteDiff.newConfig.all[node.id]||null,
+                all: remoteDiff.newConfig.all,
+                diff: remoteDiff
+            }
+        }
+        createNodePropertiesTable(def,node,localNode,remoteNode).appendTo(div);
+
+        var selectState = "";
+
+        if (conflicted) {
+            stats.conflicts++;
+            if (!localNodeDiv.hasClass("node-diff-empty")) {
+                $('<span class="node-diff-node-conflict"><span class="node-diff-status"><i class="fa fa-exclamation"></i></span></span>').prependTo(localNodeDiv);
+            }
+            if (!remoteNodeDiv.hasClass("node-diff-empty")) {
+                $('<span class="node-diff-node-conflict"><span class="node-diff-status"><i class="fa fa-exclamation"></i></span></span>').prependTo(remoteNodeDiv);
+            }
+            div.addClass("node-diff-node-entry-conflict");
+        } else {
+            selectState = CurrentDiff.resolutions[node.id];
+        }
+        // Node row
+        createNodeConflictRadioBoxes(node,div,localNodeDiv,remoteNodeDiv,false,!conflicted,selectState,CurrentDiff);
+        row.click(function(evt) {
+            $(this).parent().toggleClass('collapsed');
+        });
+
+        return div;
+    }
+    function createNodePropertiesTable(def,node,localNodeObj,remoteNodeObj) {
+        var propertyElements = {};
+        var localNode = localNodeObj.node;
+        var remoteNode;
+        if (remoteNodeObj) {
+            remoteNode = remoteNodeObj.node;
+        }
+
+        var nodePropertiesDiv = $("<div>",{class:"node-diff-node-entry-properties"});
+        var nodePropertiesTable = $("<table>").appendTo(nodePropertiesDiv);
+        var nodePropertiesTableCols = $('<colgroup><col/><col/></colgroup>').appendTo(nodePropertiesTable);
+        if (remoteNode !== undefined) {
+            $("<col/>").appendTo(nodePropertiesTableCols);
+        }
+        var nodePropertiesTableBody = $("<tbody>").appendTo(nodePropertiesTable);
+
+        var row;
+        var localCell, remoteCell;
+        var element;
+        var currentValue, localValue, remoteValue;
+        var localChanged = false;
+        var remoteChanged = false;
+        var localChanges = 0;
+        var remoteChanges = 0;
+        var conflict = false;
+        var status;
+
+        row = $("<tr>").appendTo(nodePropertiesTableBody);
+        $("<td>",{class:"node-diff-property-cell-label"}).text("id").appendTo(row);
+        localCell = $("<td>",{class:"node-diff-property-cell node-diff-node-local"}).appendTo(row);
+        if (localNode) {
+            localCell.addClass("node-diff-node-unchanged");
+            $('<span class="node-diff-status"></span>').appendTo(localCell);
+            element = $('<span class="node-diff-element"></span>').appendTo(localCell);
+            propertyElements['local.id'] = RED.utils.createObjectElement(localNode.id).appendTo(element);
+        } else {
+            localCell.addClass("node-diff-empty");
+        }
+        if (remoteNode !== undefined) {
+            remoteCell = $("<td>",{class:"node-diff-property-cell node-diff-node-remote"}).appendTo(row);
+            remoteCell.addClass("node-diff-node-unchanged");
+            if (remoteNode) {
+                $('<span class="node-diff-status"></span>').appendTo(remoteCell);
+                element = $('<span class="node-diff-element"></span>').appendTo(remoteCell);
+                propertyElements['remote.id'] = RED.utils.createObjectElement(remoteNode.id).appendTo(element);
+            } else {
+                remoteCell.addClass("node-diff-empty");
+            }
+        }
+
+
+        if (node.hasOwnProperty('x')) {
+            if (localNode) {
+                if (localNode.x !== node.x || localNode.y !== node.y) {
+                    localChanged = true;
+                    localChanges++;
+                }
+            }
+            if (remoteNode) {
+                if (remoteNode.x !== node.x || remoteNode.y !== node.y) {
+                    remoteChanged = true;
+                    remoteChanges++;
+                }
+            }
+            if ( (remoteChanged && localChanged && (localNode.x !== remoteNode.x || localNode.y !== remoteNode.y)) ||
+                (!localChanged && remoteChanged && localNodeObj.diff.deleted[node.id]) ||
+                (localChanged && !remoteChanged && remoteNodeObj.diff.deleted[node.id])
+            ) {
+                conflict = true;
+            }
+            row = $("<tr>").appendTo(nodePropertiesTableBody);
+            $("<td>",{class:"node-diff-property-cell-label"}).text("position").appendTo(row);
+            localCell = $("<td>",{class:"node-diff-property-cell node-diff-node-local"}).appendTo(row);
+            if (localNode) {
+                localCell.addClass("node-diff-node-"+(localChanged?"changed":"unchanged"));
+                $('<span class="node-diff-status">'+(localChanged?'<i class="fa fa-square"></i>':'')+'</span>').appendTo(localCell);
+                element = $('<span class="node-diff-element"></span>').appendTo(localCell);
+                propertyElements['local.position'] = RED.utils.createObjectElement({x:localNode.x,y:localNode.y},
+                    {
+                        path: "position",
+                        exposeApi: true,
+                        ontoggle: function(path,state) {
+                            if (propertyElements['remote.'+path]) {
+                                propertyElements['remote.'+path].prop('expand')(path,state)
+                            }
+                        }
+                    }
+                ).appendTo(element);
+            } else {
+                localCell.addClass("node-diff-empty");
+            }
+
+            if (remoteNode !== undefined) {
+                remoteCell = $("<td>",{class:"node-diff-property-cell node-diff-node-remote"}).appendTo(row);
+                remoteCell.addClass("node-diff-node-"+(remoteChanged?"changed":"unchanged"));
+                if (remoteNode) {
+                    $('<span class="node-diff-status">'+(remoteChanged?'<i class="fa fa-square"></i>':'')+'</span>').appendTo(remoteCell);
+                    element = $('<span class="node-diff-element"></span>').appendTo(remoteCell);
+                    propertyElements['remote.position'] = RED.utils.createObjectElement({x:remoteNode.x,y:remoteNode.y},
+                        {
+                            path: "position",
+                            exposeApi: true,
+                            ontoggle: function(path,state) {
+                                if (propertyElements['local.'+path]) {
+                                    propertyElements['local.'+path].prop('expand')(path,state);
+                                }
+                            }
+                        }
+                    ).appendTo(element);
+                } else {
+                    remoteCell.addClass("node-diff-empty");
+                }
+            }
+        }
+        //
+        localChanged = remoteChanged = conflict = false;
+        if (node.hasOwnProperty('wires')) {
+            currentValue = JSON.stringify(node.wires);
+            if (localNode) {
+                localValue = JSON.stringify(localNode.wires);
+                if (currentValue !== localValue) {
+                    localChanged = true;
+                    localChanges++;
+                }
+            }
+            if (remoteNode) {
+                remoteValue = JSON.stringify(remoteNode.wires);
+                if (currentValue !== remoteValue) {
+                    remoteChanged = true;
+                    remoteChanges++;
+                }
+            }
+            if ( (remoteChanged && localChanged && (localValue !== remoteValue)) ||
+                (!localChanged && remoteChanged && localNodeObj.diff.deleted[node.id]) ||
+                (localChanged && !remoteChanged && remoteNodeObj.diff.deleted[node.id])
+            ){
+                conflict = true;
+            }
+            row = $("<tr>").appendTo(nodePropertiesTableBody);
+            $("<td>",{class:"node-diff-property-cell-label"}).text("wires").appendTo(row);
+            localCell = $("<td>",{class:"node-diff-property-cell node-diff-node-local"}).appendTo(row);
+            if (localNode) {
+                if (!conflict) {
+                    localCell.addClass("node-diff-node-"+(localChanged?"changed":"unchanged"));
+                    $('<span class="node-diff-status">'+(localChanged?'<i class="fa fa-square"></i>':'')+'</span>').appendTo(localCell);
+                } else {
+                    localCell.addClass("node-diff-node-conflict");
+                    $('<span class="node-diff-status"><i class="fa fa-exclamation"></i></span>').appendTo(localCell);
+                }
+                formatWireProperty(localNode.wires,localNodeObj.all).appendTo(localCell);
+            } else {
+                localCell.addClass("node-diff-empty");
+            }
+
+            if (remoteNode !== undefined) {
+                remoteCell = $("<td>",{class:"node-diff-property-cell node-diff-node-remote"}).appendTo(row);
+                if (remoteNode) {
+                    if (!conflict) {
+                        remoteCell.addClass("node-diff-node-"+(remoteChanged?"changed":"unchanged"));
+                        $('<span class="node-diff-status">'+(remoteChanged?'<i class="fa fa-square"></i>':'')+'</span>').appendTo(remoteCell);
+                    } else {
+                        remoteCell.addClass("node-diff-node-conflict");
+                        $('<span class="node-diff-status"><i class="fa fa-exclamation"></i></span>').appendTo(remoteCell);
+                    }
+                    formatWireProperty(remoteNode.wires,remoteNodeObj.all).appendTo(remoteCell);
+                } else {
+                    remoteCell.addClass("node-diff-empty");
+                }
+            }
+        }
+
+        var properties = Object.keys(node).filter(function(p) { return p!='inputLabels'&&p!='outputLabels'&&p!='z'&&p!='wires'&&p!=='x'&&p!=='y'&&p!=='id'&&p!=='type'&&(!def.defaults||!def.defaults.hasOwnProperty(p))});
+        if (def.defaults) {
+            properties = properties.concat(Object.keys(def.defaults));
+        }
+        if (node.type !== 'tab') {
+            properties = properties.concat(['inputLabels','outputLabels']);
+        }
+        properties.forEach(function(d) {
+            localChanged = false;
+            remoteChanged = false;
+            conflict = false;
+            currentValue = JSON.stringify(node[d]);
+            if (localNode) {
+                localValue = JSON.stringify(localNode[d]);
+                if (currentValue !== localValue) {
+                    localChanged = true;
+                    localChanges++;
+                }
+            }
+            if (remoteNode) {
+                remoteValue = JSON.stringify(remoteNode[d]);
+                if (currentValue !== remoteValue) {
+                    remoteChanged = true;
+                    remoteChanges++;
+                }
+            }
+
+            if ( (remoteChanged && localChanged && (localValue !== remoteValue)) ||
+                (!localChanged &&  remoteChanged && localNodeObj.diff.deleted[node.id]) ||
+                (localChanged && !remoteChanged && remoteNodeObj.diff.deleted[node.id])
+            ){
+                conflict = true;
+            }
+
+            row = $("<tr>").appendTo(nodePropertiesTableBody);
+            var propertyNameCell = $("<td>",{class:"node-diff-property-cell-label"}).text(d).appendTo(row);
+            localCell = $("<td>",{class:"node-diff-property-cell node-diff-node-local"}).appendTo(row);
+            if (localNode) {
+                if (!conflict) {
+                    localCell.addClass("node-diff-node-"+(localChanged?"changed":"unchanged"));
+                    $('<span class="node-diff-status">'+(localChanged?'<i class="fa fa-square"></i>':'')+'</span>').appendTo(localCell);
+                } else {
+                    localCell.addClass("node-diff-node-conflict");
+                    $('<span class="node-diff-status"><i class="fa fa-exclamation"></i></span>').appendTo(localCell);
+                }
+                element = $('<span class="node-diff-element"></span>').appendTo(localCell);
+                propertyElements['local.'+d] = RED.utils.createObjectElement(localNode[d],
+                    {
+                        path: d,
+                        exposeApi: true,
+                        ontoggle: function(path,state) {
+                            if (propertyElements['remote.'+d]) {
+                                propertyElements['remote.'+d].prop('expand')(path,state)
+                            }
+                        }
+                    }
+                ).appendTo(element);
+            } else {
+                localCell.addClass("node-diff-empty");
+            }
+            if (remoteNode !== undefined) {
+                remoteCell = $("<td>",{class:"node-diff-property-cell node-diff-node-remote"}).appendTo(row);
+                if (remoteNode) {
+                    if (!conflict) {
+                        remoteCell.addClass("node-diff-node-"+(remoteChanged?"changed":"unchanged"));
+                        $('<span class="node-diff-status">'+(remoteChanged?'<i class="fa fa-square"></i>':'')+'</span>').appendTo(remoteCell);
+                    } else {
+                        remoteCell.addClass("node-diff-node-conflict");
+                        $('<span class="node-diff-status"><i class="fa fa-exclamation"></i></span>').appendTo(remoteCell);
+                    }
+                    element = $('<span class="node-diff-element"></span>').appendTo(remoteCell);
+                    propertyElements['remote.'+d] = RED.utils.createObjectElement(remoteNode[d],
+                        {
+                            path: d,
+                            exposeApi: true,
+                            ontoggle: function(path,state) {
+                                if (propertyElements['local.'+d]) {
+                                    propertyElements['local.'+d].prop('expand')(path,state)
+                                }
+                            }
+                        }
+                    ).appendTo(element);
+                } else {
+                    remoteCell.addClass("node-diff-empty");
+                }
+            }
+            if (localNode && remoteNode && typeof localNode[d] === "string") {
+                if (/\n/.test(localNode[d]) || /\n/.test(remoteNode[d])) {
+                    $('<button class="editor-button editor-button-small node-diff-text-diff-button"><i class="fa fa-file-o"> <i class="fa fa-caret-left"></i> <i class="fa fa-caret-right"></i> <i class="fa fa-file-o"></i></button>').click(function() {
+                        showTextDiff(localNode[d],remoteNode[d]);
+                    }).appendTo(propertyNameCell);
+                }
+            }
+
+
+        });
+        return nodePropertiesDiv;
+    }
+    function createNodeConflictRadioBoxes(node,row,localDiv,remoteDiv,propertiesTable,hide,state,diff) {
+        var safeNodeId = "node-diff-selectbox-"+node.id.replace(/\./g,'-')+(propertiesTable?"-props":"");
+        var className = "";
+        if (node.z||propertiesTable) {
+            className = "node-diff-selectbox-tab-"+(propertiesTable?node.id:node.z).replace(/\./g,'-');
+        }
+        var titleRow = !propertiesTable && (node.type === 'tab' || node.type === 'subflow');
+        var changeHandler = function(evt) {
+            var className;
+            if (node.type === undefined) {
+                // TODO: handle globals
+            } else if (titleRow) {
+                className = "node-diff-selectbox-tab-"+node.id.replace(/\./g,'-');
+                $("."+className+"-"+this.value).prop('checked',true);
+                if (this.value === 'local') {
+                    $("."+className+"-"+this.value).closest(".node-diff-node-entry").addClass("node-diff-select-local");
+                    $("."+className+"-"+this.value).closest(".node-diff-node-entry").removeClass("node-diff-select-remote");
+                } else {
+                    $("."+className+"-"+this.value).closest(".node-diff-node-entry").removeClass("node-diff-select-local");
+                    $("."+className+"-"+this.value).closest(".node-diff-node-entry").addClass("node-diff-select-remote");
+                }
+            } else {
+                // Individual node or properties table
+                var parentId = "node-diff-selectbox-"+(propertiesTable?node.id:node.z).replace(/\./g,'-');
+                $('#'+parentId+"-local").prop('checked',false);
+                $('#'+parentId+"-remote").prop('checked',false);
+                var titleRowDiv = $('#'+parentId+"-local").closest(".node-diff-tab").find(".node-diff-tab-title");
+                titleRowDiv.removeClass("node-diff-select-local");
+                titleRowDiv.removeClass("node-diff-select-remote");
+            }
+            if (this.value === 'local') {
+                row.removeClass("node-diff-select-remote");
+                row.addClass("node-diff-select-local");
+            } else if (this.value === 'remote') {
+                row.addClass("node-diff-select-remote");
+                row.removeClass("node-diff-select-local");
+            }
+            refreshConflictHeader(diff);
+        }
+
+        var localSelectDiv = $('<label>',{class:"node-diff-selectbox",for:safeNodeId+"-local"}).click(function(e) { e.stopPropagation();}).appendTo(localDiv);
+        var localRadio = $('<input>',{id:safeNodeId+"-local",type:'radio',value:"local",name:safeNodeId,class:className+"-local"+(titleRow?"":" node-diff-select-node")}).data('node-id',node.id).change(changeHandler).appendTo(localSelectDiv);
+        var remoteSelectDiv = $('<label>',{class:"node-diff-selectbox",for:safeNodeId+"-remote"}).click(function(e) { e.stopPropagation();}).appendTo(remoteDiv);
+        var remoteRadio = $('<input>',{id:safeNodeId+"-remote",type:'radio',value:"remote",name:safeNodeId,class:className+"-remote"+(titleRow?"":" node-diff-select-node")}).data('node-id',node.id).change(changeHandler).appendTo(remoteSelectDiv);
+        if (state === 'local') {
+            localRadio.prop('checked',true);
+        } else if (state === 'remote') {
+            remoteRadio.prop('checked',true);
+        }
+        if (hide||localDiv.hasClass("node-diff-empty") || remoteDiv.hasClass("node-diff-empty")) {
+            localSelectDiv.hide();
+            remoteSelectDiv.hide();
+        }
+
+    }
+    function refreshConflictHeader(currentDiff) {
+        var resolutionCount = 0;
+        $(".node-diff-selectbox>input:checked").each(function() {
+            if (currentDiff.conflicts[$(this).data('node-id')]) {
+                resolutionCount++;
+            }
+            currentDiff.resolutions[$(this).data('node-id')] = $(this).val();
+        })
+        var conflictCount = Object.keys(currentDiff.conflicts).length;
+        if (conflictCount - resolutionCount === 0) {
+            $("#node-diff-toolbar-resolved-conflicts").html('<span class="node-diff-node-added"><span class="node-diff-status"><i class="fa fa-check"></i></span></span> '+RED._("diff.unresolvedCount",{count:conflictCount - resolutionCount}));
+        } else {
+            $("#node-diff-toolbar-resolved-conflicts").html('<span class="node-diff-node-conflict"><span class="node-diff-status"><i class="fa fa-exclamation"></i></span></span> '+RED._("diff.unresolvedCount",{count:conflictCount - resolutionCount}));
+        }
+        if (conflictCount === resolutionCount) {
+            $("#node-diff-view-diff-merge").removeClass('disabled');
+            $("#node-diff-view-resolve-diff").removeClass('disabled');
+        }
+    }
+    function getRemoteDiff(callback) {
+        $.ajax({
+            headers: {
+                "Accept":"application/json",
+            },
+            cache: false,
+            url: 'flows',
+            success: function(nodes) {
+                var localFlow = RED.nodes.createCompleteNodeSet();
+                var originalFlow = RED.nodes.originalFlow();
+                var remoteFlow = nodes.flows;
+                var localDiff = generateDiff(originalFlow,localFlow);
+                var remoteDiff = generateDiff(originalFlow,remoteFlow);
+                remoteDiff.rev = nodes.rev;
+                callback(resolveDiffs(localDiff,remoteDiff))
+            }
+        });
+
+    }
+    // function showLocalDiff() {
+    //     var nns = RED.nodes.createCompleteNodeSet();
+    //     var originalFlow = RED.nodes.originalFlow();
+    //     var diff = generateDiff(originalFlow,nns);
+    //     showDiff(diff);
+    // }
+    function showRemoteDiff(diff) {
+        if (diff === undefined) {
+            getRemoteDiff(showRemoteDiff);
+        } else {
+            showDiff(diff,{mode:'merge'});
+        }
+    }
+    function parseNodes(nodeList) {
+        var tabOrder = [];
+        var tabs = {};
+        var subflows = {};
+        var globals = [];
+        var all = {};
+
+        nodeList.forEach(function(node) {
+            all[node.id] = node;
+            if (node.type === 'tab') {
+                tabOrder.push(node.id);
+                tabs[node.id] = {n:node,nodes:[]};
+            } else if (node.type === 'subflow') {
+                subflows[node.id] = {n:node,nodes:[]};
+            }
+        });
+
+        nodeList.forEach(function(node) {
+            if (node.type !== 'tab' && node.type !== 'subflow') {
+                if (tabs[node.z]) {
+                    tabs[node.z].nodes.push(node);
+                } else if (subflows[node.z]) {
+                    subflows[node.z].nodes.push(node);
+                } else {
+                    globals.push(node);
+                }
+            }
+        });
+
+        return {
+            all: all,
+            tabOrder: tabOrder,
+            tabs: tabs,
+            subflows: subflows,
+            globals: globals
+        }
+    }
+    function generateDiff(currentNodes,newNodes) {
+        var currentConfig = parseNodes(currentNodes);
+        var newConfig = parseNodes(newNodes);
+        var added = {};
+        var deleted = {};
+        var changed = {};
+        var moved = {};
+
+        Object.keys(currentConfig.all).forEach(function(id) {
+            var node = RED.nodes.workspace(id)||RED.nodes.subflow(id)||RED.nodes.node(id);
+            if (!newConfig.all.hasOwnProperty(id)) {
+                deleted[id] = true;
+            } else if (JSON.stringify(currentConfig.all[id]) !== JSON.stringify(newConfig.all[id])) {
+                changed[id] = true;
+
+                if (currentConfig.all[id].z !== newConfig.all[id].z) {
+                    moved[id] = true;
+                }
+            }
+        });
+        Object.keys(newConfig.all).forEach(function(id) {
+            if (!currentConfig.all.hasOwnProperty(id)) {
+                added[id] = true;
+            }
+        });
+
+        return {
+            currentConfig: currentConfig,
+            newConfig: newConfig,
+            added: added,
+            deleted: deleted,
+            changed: changed,
+            moved: moved
+        }
+    }
+    function resolveDiffs(localDiff,remoteDiff) {
+        var conflicted = {};
+        var resolutions = {};
+
+        var diff = {
+            localDiff: localDiff,
+            remoteDiff: remoteDiff,
+            conflicts: conflicted,
+            resolutions: resolutions
+        }
+        var seen = {};
+        var id,node;
+        for (id in localDiff.currentConfig.all) {
+            if (localDiff.currentConfig.all.hasOwnProperty(id)) {
+                seen[id] = true;
+                var localNode = localDiff.newConfig.all[id];
+                if (localDiff.changed[id] && remoteDiff.deleted[id]) {
+                    conflicted[id] = true;
+                } else if (localDiff.deleted[id] && remoteDiff.changed[id]) {
+                    conflicted[id] = true;
+                } else if (localDiff.changed[id] && remoteDiff.changed[id]) {
+                    var remoteNode = remoteDiff.newConfig.all[id];
+                    if (JSON.stringify(localNode) !== JSON.stringify(remoteNode)) {
+                        conflicted[id] = true;
+                    }
+                }
+                if (!conflicted[id]) {
+                    if (remoteDiff.added[id]||remoteDiff.changed[id]||remoteDiff.deleted[id]) {
+                        resolutions[id] = 'remote';
+                    } else {
+                        resolutions[id] = 'local';
+                    }
+                }
+            }
+        }
+        for (id in localDiff.added) {
+            if (localDiff.added.hasOwnProperty(id)) {
+                node = localDiff.newConfig.all[id];
+                if (remoteDiff.deleted[node.z]) {
+                    conflicted[id] = true;
+                    // conflicted[node.z] = true;
+                } else {
+                    resolutions[id] = 'local';
+                }
+            }
+        }
+        for (id in remoteDiff.added) {
+            if (remoteDiff.added.hasOwnProperty(id)) {
+                node = remoteDiff.newConfig.all[id];
+                if (localDiff.deleted[node.z]) {
+                    conflicted[id] = true;
+                    // conflicted[node.z] = true;
+                } else {
+                    resolutions[id] = 'remote';
+                }
+            }
+        }
+        // console.log(diff.resolutions);
+        // console.log(conflicted);
+        return diff;
+    }
+
+    function showDiff(diff,options) {
+        if (diffVisible) {
+            return;
+        }
+        options = options || {};
+        var mode = options.mode || 'merge';
+
+        var localDiff = diff.localDiff;
+        var remoteDiff = diff.remoteDiff;
+        var conflicts = diff.conflicts;
+        // currentDiff = diff;
+
+        var trayOptions = {
+            title: options.title||"Review Changes", //TODO: nls
+            width: Infinity,
+            overlay: true,
+            buttons: [
+                {
+                    text: RED._((options.mode === 'merge')?"common.label.cancel":"common.label.close"),
+                    click: function() {
+                        RED.tray.close();
+                    }
+                }
+            ],
+            resize: function(dimensions) {
+                // trayWidth = dimensions.width;
+            },
+            open: function(tray) {
+                var trayBody = tray.find('.editor-tray-body');
+                var toolbar = $('<div class="node-diff-toolbar">'+
+                    '<span><span id="node-diff-toolbar-resolved-conflicts"></span></span> '+
+                    '</div>').prependTo(trayBody);
+                var diffContainer = $('<div class="node-diff-container"></div>').appendTo(trayBody);
+                var diffTable = buildDiffPanel(diffContainer,diff,options);
+                diffTable.list.hide();
+                if (remoteDiff) {
+                    $("#node-diff-view-diff-merge").show();
+                    if (Object.keys(conflicts).length === 0) {
+                        $("#node-diff-view-diff-merge").removeClass('disabled');
+                    } else {
+                        $("#node-diff-view-diff-merge").addClass('disabled');
+                    }
+                } else {
+                    $("#node-diff-view-diff-merge").hide();
+                }
+                refreshConflictHeader(diff);
+                // console.log("--------------");
+                // console.log(localDiff);
+                // console.log(remoteDiff);
+
+                setTimeout(function() {
+                    diffTable.finish();
+                    diffTable.list.show();
+                },300);
+                $("#sidebar-shade").show();
+            },
+            close: function() {
+                diffVisible = false;
+                $("#sidebar-shade").hide();
+
+            },
+            show: function() {
+
+            }
+        }
+        if (options.mode === 'merge') {
+            trayOptions.buttons.push(
+                {
+                    id: "node-diff-view-diff-merge",
+                    text: RED._("deploy.confirm.button.merge"),
+                    class: "primary disabled",
+                    click: function() {
+                        if (!$("#node-diff-view-diff-merge").hasClass('disabled')) {
+                            refreshConflictHeader(diff);
+                            mergeDiff(diff);
+                            RED.tray.close();
+                        }
+                    }
+                }
+            );
+        }
+
+        RED.tray.show(trayOptions);
+    }
+
+    function applyDiff(diff) {
+        var currentConfig = diff.localDiff.currentConfig;
+        var localDiff = diff.localDiff;
+        var remoteDiff = diff.remoteDiff;
+        var conflicts = diff.conflicts;
+        var resolutions = diff.resolutions;
+        var id;
+
+        for (id in conflicts) {
+            if (conflicts.hasOwnProperty(id)) {
+                if (!resolutions.hasOwnProperty(id)) {
+                    console.log(diff);
+                    throw new Error("No resolution for conflict on node",id);
+                }
+            }
+        }
+
+        var newConfig = [];
+        var node;
+        var nodeChangedStates = {};
+        var localChangedStates = {};
+        for (id in localDiff.newConfig.all) {
+            if (localDiff.newConfig.all.hasOwnProperty(id)) {
+                node = RED.nodes.node(id);
+                if (resolutions[id] === 'local') {
+                    if (node) {
+                        nodeChangedStates[id] = node.changed;
+                    }
+                    newConfig.push(localDiff.newConfig.all[id]);
+                } else if (resolutions[id] === 'remote') {
+                    if (!remoteDiff.deleted[id] && remoteDiff.newConfig.all.hasOwnProperty(id)) {
+                        if (node) {
+                            nodeChangedStates[id] = node.changed;
+                        }
+                        localChangedStates[id] = true;
+                        newConfig.push(remoteDiff.newConfig.all[id]);
+                    }
+                } else {
+                    console.log("Unresolved",id)
+                }
+            }
+        }
+        for (id in remoteDiff.added) {
+            if (remoteDiff.added.hasOwnProperty(id)) {
+                node = RED.nodes.node(id);
+                if (node) {
+                    nodeChangedStates[id] = node.changed;
+                }
+                if (!localDiff.added.hasOwnProperty(id)) {
+                    localChangedStates[id] = true;
+                    newConfig.push(remoteDiff.newConfig.all[id]);
+                }
+            }
+        }
+        return {
+            config: newConfig,
+            nodeChangedStates: nodeChangedStates,
+            localChangedStates: localChangedStates
+        }
+    }
+
+    function mergeDiff(diff) {
+        var appliedDiff = applyDiff(diff);
+
+        var newConfig = appliedDiff.config;
+        var nodeChangedStates = appliedDiff.nodeChangedStates;
+        var localChangedStates = appliedDiff.localChangedStates;
+
+        var historyEvent = {
+            t:"replace",
+            config: RED.nodes.createCompleteNodeSet(),
+            changed: nodeChangedStates,
+            dirty: RED.nodes.dirty(),
+            rev: RED.nodes.version()
+        }
+
+        RED.history.push(historyEvent);
+
+        RED.nodes.clear();
+        var imported = RED.nodes.import(newConfig);
+        imported[0].forEach(function(n) {
+            if (nodeChangedStates[n.id] || localChangedStates[n.id]) {
+                n.changed = true;
+            }
+        })
+
+        RED.nodes.version(diff.remoteDiff.rev);
+
+        RED.view.redraw(true);
+        RED.palette.refresh();
+        RED.workspaces.refresh();
+        RED.sidebar.config.refresh();
+    }
+    function showTestFlowDiff(index) {
+        if (index === 1) {
+            var localFlow = RED.nodes.createCompleteNodeSet();
+            var originalFlow = RED.nodes.originalFlow();
+            showTextDiff(JSON.stringify(localFlow,null,4),JSON.stringify(originalFlow,null,4))
+        } else if (index === 2) {
+            var local = "1\n2\n3\n4\n5\nA\n6\n7\n8\n9\n";
+            var remote = "1\nA\n2\n3\nD\nE\n6\n7\n8\n9\n";
+            showTextDiff(local,remote);
+        } else if (index === 3) {
+            var local =  "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22";
+            var remote = "1\nTWO\nTHREE\nEXTRA\n4\n5\n6\n7\n8\n9\n10\n11\n12\nTHIRTEEN\n14\n15\n16\n17\n18\n19\n20\n21\n22";
+            showTextDiff(local,remote);
+        }
+    }
+
+    function showTextDiff(textA,textB) {
+        var trayOptions = {
+            title: "Compare Changes", //TODO: nls
+            width: Infinity,
+            overlay: true,
+            buttons: [
+                {
+                    text: RED._("common.label.close"),
+                    click: function() {
+                        RED.tray.close();
+                    }
+                }
+            ],
+            resize: function(dimensions) {
+                // trayWidth = dimensions.width;
+            },
+            open: function(tray) {
+                var trayBody = tray.find('.editor-tray-body');
+                var diffPanel = $('<div class="node-text-diff"></div>').appendTo(trayBody);
+
+                var codeTable = $("<table>",{class:"node-text-diff-content"}).appendTo(diffPanel);
+                $('<colgroup><col width="50"><col width="50%"><col width="50"><col width="50%"></colgroup>').appendTo(codeTable);
+                var codeBody = $('<tbody>').appendTo(codeTable);
+                var diffSummary = diffText(textA||"",textB||"");
+                var aIndex = 0;
+                var bIndex = 0;
+                var diffLength = Math.max(diffSummary.a.length, diffSummary.b.length);
+
+                var diffLines = [];
+                var diffBlocks = [];
+                var currentBlock;
+                var blockLength = 0;
+                var blockType = 0;
+
+                for (var i=0;i<diffLength;i++) {
+                    var diffLine = diffSummary[i];
+                    var Adiff = (aIndex < diffSummary.a.length)?diffSummary.a[aIndex]:{type:2,line:""};
+                    var Bdiff = (bIndex < diffSummary.b.length)?diffSummary.b[bIndex]:{type:2,line:""};
+                    if (Adiff.type === 0 && Bdiff.type !== 0) {
+                        Adiff = {type:2,line:""};
+                        bIndex++;
+                    } else if (Bdiff.type === 0 && Adiff.type !== 0) {
+                        Bdiff = {type:2,line:""};
+                        aIndex++;
+                    } else {
+                        aIndex++;
+                        bIndex++;
+                    }
+                    diffLines.push({
+                        a: Adiff,
+                        b: Bdiff
+                    });
+                    if (currentBlock === undefined) {
+                        currentBlock = {start:i,end:i};
+                        blockLength = 0;
+                        blockType = (Adiff.type === 0 && Bdiff.type === 0)?0:1;
+                    } else {
+                        if (Adiff.type === 0 && Bdiff.type === 0) {
+                            // Unchanged line
+                            if (blockType === 0) {
+                                // still unchanged - extend the block
+                                currentBlock.end = i;
+                                blockLength++;
+                            } else if (blockType === 1) {
+                                // end of a change
+                                currentBlock.end = i;
+                                blockType = 2;
+                                blockLength = 0;
+                            } else if (blockType === 2) {
+                                // post-change unchanged
+                                currentBlock.end = i;
+                                blockLength++;
+                                if (blockLength === 8) {
+                                    currentBlock.end -= 5; // rollback the end
+                                    diffBlocks.push(currentBlock);
+                                    currentBlock = {start:i-5,end:i-5};
+                                    blockType = 0;
+                                    blockLength = 0;
+                                }
+                            }
+                        } else {
+                            // in a change
+                            currentBlock.end = i;
+                            blockLength++;
+                            if (blockType === 0) {
+                                if (currentBlock.end > 3) {
+                                    currentBlock.end -= 3;
+                                    currentBlock.empty = true;
+                                    diffBlocks.push(currentBlock);
+                                    currentBlock = {start:i-3,end:i-3};
+                                }
+                                blockType = 1;
+                            } else if (blockType === 2) {
+                                // we were in unchanged, but hit a change again
+                                blockType = 1;
+                            }
+                        }
+                    }
+                }
+                if (blockType === 0) {
+                    currentBlock.empty = true;
+                }
+                currentBlock.end = diffLength;
+                diffBlocks.push(currentBlock);
+                // console.table(diffBlocks);
+                var diffRow;
+                for (var b = 0; b<diffBlocks.length; b++) {
+                    currentBlock = diffBlocks[b];
+                    if (currentBlock.empty) {
+                        diffRow = createExpandLine(currentBlock.start,currentBlock.end,diffLines).appendTo(codeBody);
+                    } else {
+                        for (var i=currentBlock.start;i<currentBlock.end;i++) {
+                            var row = createDiffLine(diffLines[i]).appendTo(codeBody);
+                            if (i === currentBlock.start) {
+                                row.addClass("start-block");
+                            } else if (i === currentBlock.end-1) {
+                                row.addClass("end-block");
+                            }
+                        }
+                    }
+                }
+
+            },
+            close: function() {
+                diffVisible = false;
+
+            },
+            show: function() {
+
+            }
+        }
+        RED.tray.show(trayOptions);
+    }
+
+    function createExpandLine(start,end,diffLines) {
+        diffRow = $('<tr class="node-text-diff-header node-text-diff-expand">');
+        var content = $('<td colspan="4"> <i class="fa fa-arrows-v"></i> </td>').appendTo(diffRow);
+        var label = $('<span></span>').appendTo(content);
+        if (end < diffLines.length-1) {
+            label.text("@@ -"+(diffLines[end-1].a.i+1)+" +"+(diffLines[end-1].b.i+1));
+        }
+        diffRow.click(function(evt) {
+            // console.log(start,end,diffLines.length);
+            if (end - start > 20) {
+                var startPos = $(this).offset();
+                // console.log(startPos);
+                if (start > 0) {
+                    for (var i=start;i<start+10;i++) {
+                        createDiffLine(diffLines[i]).addClass("unchanged").insertBefore($(this));
+                    }
+                    start += 10;
+                }
+                if (end < diffLines.length-1) {
+                    for (var i=end-1;i>end-11;i--) {
+                        createDiffLine(diffLines[i]).addClass("unchanged").insertAfter($(this));
+                    }
+                    end -= 10;
+                }
+                if (end < diffLines.length-1) {
+                    label.text("@@ -"+(diffLines[end-1].a.i+1)+" +"+(diffLines[end-1].b.i+1));
+                }
+                var endPos = $(this).offset();
+                var delta = endPos.top - startPos.top;
+                $(".node-text-diff").scrollTop($(".node-text-diff").scrollTop() + delta);
+            } else {
+                for (var i=start;i<end;i++) {
+                    createDiffLine(diffLines[i]).addClass("unchanged").insertBefore($(this));
+                }
+                $(this).remove();
+            }
+        });
+        return diffRow;
+    }
+
+    function createDiffLine(diffLine) {
+        var diffRow = $('<tr>');
+        var Adiff = diffLine.a;
+        var Bdiff = diffLine.b;
+        //console.log(diffLine);
+        var cellNo = $('<td class="lineno">').text(Adiff.type === 2?"":Adiff.i).appendTo(diffRow);
+        var cellLine = $('<td class="linetext">').text(Adiff.line).appendTo(diffRow);
+        if (Adiff.type === 2) {
+            cellNo.addClass('blank');
+            cellLine.addClass('blank');
+        } else if (Adiff.type === 4) {
+            cellNo.addClass('added');
+            cellLine.addClass('added');
+        } else if (Adiff.type === 1) {
+            cellNo.addClass('removed');
+            cellLine.addClass('removed');
+        }
+        cellNo = $('<td class="lineno">').text(Bdiff.type === 2?"":Bdiff.i).appendTo(diffRow);
+        cellLine = $('<td class="linetext">').text(Bdiff.line).appendTo(diffRow);
+        if (Bdiff.type === 2) {
+            cellNo.addClass('blank');
+            cellLine.addClass('blank');
+        } else if (Bdiff.type === 4) {
+            cellNo.addClass('added');
+            cellLine.addClass('added');
+        } else if (Bdiff.type === 1) {
+            cellNo.addClass('removed');
+            cellLine.addClass('removed');
+        }
+        return diffRow;
+    }
+
+    function diffText(string1, string2,ignoreWhitespace) {
+        var lines1 = string1.split(/\r?\n/);
+        var lines2 = string2.split(/\r?\n/);
+        var i = lines1.length;
+        var j = lines2.length;
+        var k;
+        var m;
+        var diffSummary = {a:[],b:[]};
+        var diffMap = [];
+        for (k = 0; k < i + 1; k++) {
+            diffMap[k] = [];
+            for (m = 0; m < j + 1; m++) {
+                diffMap[k][m] = 0;
+            }
+        }
+        var c = 0;
+        for (k = i - 1; k >= 0; k--) {
+            for (m = j - 1; m >=0; m--) {
+                c++;
+                if (compareLines(lines1[k],lines2[m],ignoreWhitespace) !== 1) {
+                    diffMap[k][m] = diffMap[k+1][m+1]+1;
+                } else {
+                    diffMap[k][m] = Math.max(diffMap[(k + 1)][m], diffMap[k][(m + 1)]);
+                }
+            }
+        }
+        //console.log(c);
+        k = 0;
+        m = 0;
+
+        while ((k < i) && (m < j)) {
+            var n = compareLines(lines1[k],lines2[m],ignoreWhitespace);
+            if (n !== 1) {
+                var d = 0;
+                if (n===0) {
+                    d = 0;
+                } else if (n==2) {
+                    d = 3;
+                }
+                diffSummary.a.push({i:k+1,j:m+1,line:lines1[k],type:d});
+                diffSummary.b.push({i:m+1,j:k+1,line:lines2[m],type:d});
+                k++;
+                m++;
+            } else if (diffMap[(k + 1)][m] >= diffMap[k][(m + 1)]) {
+                diffSummary.a.push({i:k+1,line:lines1[k],type:1});
+                k++;
+            } else {
+                diffSummary.b.push({i:m+1,line:lines2[m],type:4});
+                m++;
+            }
+        }
+        while ((k < i) || (m < j)) {
+            if (k == i) {
+                diffSummary.b.push({i:m+1,line:lines2[m],type:4});
+                m++;
+            } else if (m == j) {
+                diffSummary.a.push({i:k+1,line:lines1[k],type:1});
+                k++;
+            }
+        }
+        return diffSummary;
+    }
+
+    function compareLines(string1, string2, ignoreWhitespace) {
+        if (ignoreWhitespace) {
+            if (string1 === string2) {
+                return 0;
+            }
+            return string1.trim() === string2.trime() ? 2 : 1;
+        }
+        return string1 === string2 ? 0 : 1;
+    }
+
+    function createUnifiedDiffTable(files,commitOptions) {
+        var diffPanel = $('<div></div>');
+        files.forEach(function(file) {
+            var hunks = file.hunks;
+            var isBinary = file.binary;
+            var codeTable = $("<table>",{class:"node-text-diff-content"}).appendTo(diffPanel);
+            $('<colgroup><col width="50"><col width="50"><col width="100%"></colgroup>').appendTo(codeTable);
+            var codeBody = $('<tbody>').appendTo(codeTable);
+
+            var diffFileRow = $('<tr class="node-text-diff-file-header">').appendTo(codeBody);
+            var content = $('<td colspan="3"></td>').appendTo(diffFileRow);
+
+            var chevron = $('<i class="node-diff-chevron fa fa-angle-down"></i>').appendTo(content);
+            diffFileRow.click(function(e) {
+                diffFileRow.toggleClass("collapsed");
+                var isCollapsed = diffFileRow.hasClass("collapsed");
+                diffFileRow.nextUntil(".node-text-diff-file-header").toggle(!isCollapsed);
+            })
+            var label = $('<span class="filename"></span>').text(file.file).appendTo(content);
+
+            var conflictHeader;
+            var unresolvedConflicts = 0;
+            var resolvedConflicts = 0;
+            var conflictResolutions = {};
+            if (commitOptions.project.files && commitOptions.project.files.flow === file.file) {
+                if (commitOptions.unmerged) {
+                    $('<span style="float: right;"><span id="node-diff-toolbar-resolved-conflicts"></span></span>').appendTo(content);
+                }
+                var diffRow = $('<tr class="node-text-diff-header">').appendTo(codeBody);
+                var flowDiffContent = $('<td class="flow-diff" colspan="3"></td>').appendTo(diffRow);
+
+                var projectName = commitOptions.project.name;
+                var filename = commitOptions.project.files.flow;
+                var commonVersionUrl = "projects/"+projectName+"/files/"+commitOptions.commonRev+"/"+filename;
+                var oldVersionUrl = "projects/"+projectName+"/files/"+commitOptions.oldRev+"/"+filename;
+                var newVersionUrl = "projects/"+projectName+"/files/"+commitOptions.newRev+"/"+filename;
+                var promises = [$.Deferred(),$.Deferred(),$.Deferred()];
+                if (commitOptions.commonRev) {
+                    var commonVersionUrl = "projects/"+projectName+"/files/"+commitOptions.commonRev+"/"+filename;
+                    $.ajax({dataType: "json",url: commonVersionUrl}).then(function(data) { promises[0].resolve(data); }).fail(function() { promises[0].resolve(null);})
+                } else {
+                    promises[0].resolve(null);
+                }
+
+                $.ajax({dataType: "json",url: oldVersionUrl}).then(function(data) { promises[1].resolve(data); }).fail(function() { promises[1].resolve({content:"[]"});})
+                $.ajax({dataType: "json",url: newVersionUrl}).then(function(data) { promises[2].resolve(data); }).fail(function() { promises[2].resolve({content:"[]"});})
+                $.when.apply($,promises).always(function(commonVersion, oldVersion,newVersion) {
+                    var commonFlow;
+                    var oldFlow;
+                    var newFlow;
+                    if (commonVersion) {
+                        try {
+                            commonFlow = JSON.parse(commonVersion.content||"[]");
+                        } catch(err) {
+                            console.log("Common Version doesn't contain valid JSON:",commonVersionUrl);
+                            console.log(err);
+                            return;
+                        }
+                    }
+                    try {
+                        oldFlow = JSON.parse(oldVersion.content||"[]");
+                    } catch(err) {
+                        console.log("Old Version doesn't contain valid JSON:",oldVersionUrl);
+                        console.log(err);
+                        return;
+                    }
+                    if (!commonFlow) {
+                        commonFlow = oldFlow;
+                    }
+                    try {
+                        newFlow = JSON.parse(newVersion.content||"[]");
+                    } catch(err) {
+                        console.log("New Version doesn't contain valid JSON:",newFlow);
+                        console.log(err);
+                        return;
+                    }
+                    var localDiff = generateDiff(commonFlow,oldFlow);
+                    var remoteDiff = generateDiff(commonFlow,newFlow);
+                    commitOptions.currentDiff = resolveDiffs(localDiff,remoteDiff);
+                    var diffTable = buildDiffPanel(flowDiffContent,commitOptions.currentDiff,{
+                        title: filename,
+                        mode: commitOptions.commonRev?'merge':'view',
+                        oldRevTitle: commitOptions.oldRevTitle,
+                        newRevTitle: commitOptions.newRevTitle
+                    });
+                    diffTable.list.hide();
+                    refreshConflictHeader(commitOptions.currentDiff);
+                    setTimeout(function() {
+                        diffTable.finish();
+                        diffTable.list.show();
+                    },300);
+                    // var flowDiffRow = $("<tr>").insertAfter(diffRow);
+                    // var content = $('<td colspan="3"></td>').appendTo(flowDiffRow);
+                    // currentDiff = diff;
+                    // var diffTable = buildDiffPanel(content,diff,{mode:"view"}).finish();
+                });
+
+
+
+            } else
+
+            if (isBinary) {
+                var diffBinaryRow = $('<tr class="node-text-diff-header">').appendTo(codeBody);
+                var binaryContent = $('<td colspan="3"></td>').appendTo(diffBinaryRow);
+                $('<span></span>').text("Cannot show binary file contents").appendTo(binaryContent);
+
+            } else {
+                if (commitOptions.unmerged) {
+                    conflictHeader = $('<span style="float: right;"><span>'+resolvedConflicts+'</span> of <span>'+unresolvedConflicts+'</span> conflicts resolved</span>').appendTo(content);
+                }
+                hunks.forEach(function(hunk) {
+                    var diffRow = $('<tr class="node-text-diff-header">').appendTo(codeBody);
+                    var content = $('<td colspan="3"></td>').appendTo(diffRow);
+                    var label = $('<span></span>').text(hunk.header).appendTo(content);
+                    var isConflict = hunk.conflict;
+                    var localLine = hunk.localStartLine;
+                    var remoteLine = hunk.remoteStartLine;
+                    if (isConflict) {
+                        unresolvedConflicts++;
+                    }
+
+                    hunk.lines.forEach(function(lineText,lineNumber) {
+                        // if (lineText[0] === '\\' || lineText === "") {
+                        //     // Comment line - bail out of this hunk
+                        //     break;
+                        // }
+
+                        var actualLineNumber = hunk.diffStart + lineNumber;
+                        var isMergeHeader = isConflict && /^\+\+(<<<<<<<|=======$|>>>>>>>)/.test(lineText);
+                        var diffRow = $('<tr>').appendTo(codeBody);
+                        var localLineNo = $('<td class="lineno">').appendTo(diffRow);
+                        var remoteLineNo;
+                        if (!isMergeHeader) {
+                            remoteLineNo = $('<td class="lineno">').appendTo(diffRow);
+                        } else {
+                            localLineNo.attr('colspan',2);
+                        }
+                        var line = $('<td class="linetext">').appendTo(diffRow);
+                        var prefixStart = 0;
+                        var prefixEnd = 1;
+                        if (isConflict) {
+                            prefixEnd = 2;
+                        }
+                        if (!isMergeHeader) {
+                            var changeMarker = lineText[0];
+                            if (isConflict && !commitOptions.unmerged && changeMarker === ' ') {
+                                changeMarker = lineText[1];
+                            }
+                            $('<span class="prefix">').text(changeMarker).appendTo(line);
+                            var handledlLine = false;
+                            if (isConflict && commitOptions.unmerged) {
+                                $('<span class="prefix">').text(lineText[1]).appendTo(line);
+                                if (lineText[0] === '+') {
+                                    localLineNo.text(localLine++);
+                                    handledlLine = true;
+                                }
+                                if (lineText[1] === '+') {
+                                    remoteLineNo.text(remoteLine++);
+                                    handledlLine = true;
+                                }
+                            } else {
+                                if (lineText[0] === '+' || (isConflict && lineText[1] === '+')) {
+                                    localLineNo.addClass("added");
+                                    remoteLineNo.addClass("added");
+                                    line.addClass("added");
+                                    remoteLineNo.text(remoteLine++);
+                                    handledlLine = true;
+                                } else if (lineText[0] === '-' || (isConflict && lineText[1] === '-')) {
+                                    localLineNo.addClass("removed");
+                                    remoteLineNo.addClass("removed");
+                                    line.addClass("removed");
+                                    localLineNo.text(localLine++);
+                                    handledlLine = true;
+                                }
+                            }
+                            if (!handledlLine) {
+                                line.addClass("unchanged");
+                                if (localLine > 0 && lineText[0] !== '\\' && lineText !== "") {
+                                    localLineNo.text(localLine++);
+                                }
+                                if (remoteLine > 0 && lineText[0] !== '\\' && lineText !== "") {
+                                    remoteLineNo.text(remoteLine++);
+                                }
+                            }
+                            $('<span>').text(lineText.substring(prefixEnd)).appendTo(line);
+                        } else {
+                            diffRow.addClass("mergeHeader");
+                            var isSeparator = /^\+\+=======$/.test(lineText);
+                            if (!isSeparator) {
+                                var isOurs = /^..<<<<<<</.test(lineText);
+                                if (isOurs) {
+                                    $('<span>').text("<<<<<<< Local Changes").appendTo(line);
+                                    hunk.localChangeStart = actualLineNumber;
+                                } else {
+                                    hunk.remoteChangeEnd = actualLineNumber;
+                                    $('<span>').text(">>>>>>> Remote Changes").appendTo(line);
+
+                                }
+                                diffRow.addClass("mergeHeader-"+(isOurs?"ours":"theirs"));
+                                $('<button class="editor-button editor-button-small" style="float: right; margin-right: 20px;"><i class="fa fa-angle-double-'+(isOurs?"down":"up")+'"></i> use '+(isOurs?"local":"remote")+' changes</button>')
+                                    .appendTo(line)
+                                    .click(function(evt) {
+                                        evt.preventDefault();
+                                        resolvedConflicts++;
+                                        var addedRows;
+                                        var midRow;
+                                        if (isOurs) {
+                                            addedRows = diffRow.nextUntil(".mergeHeader-separator");
+                                            midRow = addedRows.last().next();
+                                            midRow.nextUntil(".mergeHeader").remove();
+                                            midRow.next().remove();
+                                        } else {
+                                            addedRows = diffRow.prevUntil(".mergeHeader-separator");
+                                            midRow = addedRows.last().prev();
+                                            midRow.prevUntil(".mergeHeader").remove();
+                                            midRow.prev().remove();
+                                        }
+                                        midRow.remove();
+                                        diffRow.remove();
+                                        addedRows.find(".linetext").addClass('added');
+                                        conflictHeader.empty();
+                                        $('<span><span>'+resolvedConflicts+'</span> of <span>'+unresolvedConflicts+'</span> conflicts resolved</span>').appendTo(conflictHeader);
+
+                                        conflictResolutions[file.file] = conflictResolutions[file.file] || {};
+                                        conflictResolutions[file.file][hunk.localChangeStart] = {
+                                            changeStart: hunk.localChangeStart,
+                                            separator: hunk.changeSeparator,
+                                            changeEnd: hunk.remoteChangeEnd,
+                                            selection: isOurs?"A":"B"
+                                        }
+                                        if (commitOptions.resolveConflict) {
+                                            commitOptions.resolveConflict({
+                                                conflicts: unresolvedConflicts,
+                                                resolved: resolvedConflicts,
+                                                resolutions: conflictResolutions
+                                            });
+                                        }
+                                    })
+                            } else {
+                                hunk.changeSeparator = actualLineNumber;
+                                diffRow.addClass("mergeHeader-separator");
+                            }
+                        }
+                    });
+                });
+            }
+        });
+        return diffPanel;
+    }
+
+    function showCommitDiff(options) {
+        var commit = parseCommitDiff(options.commit);
+        var trayOptions = {
+            title: "View Commit Changes", //TODO: nls
+            width: Infinity,
+            overlay: true,
+            buttons: [
+                {
+                    text: RED._("common.label.close"),
+                    click: function() {
+                        RED.tray.close();
+                    }
+                }
+            ],
+            resize: function(dimensions) {
+                // trayWidth = dimensions.width;
+            },
+            open: function(tray) {
+                var trayBody = tray.find('.editor-tray-body');
+                var diffPanel = $('<div class="node-text-diff"></div>').appendTo(trayBody);
+
+                var codeTable = $("<table>",{class:"node-text-diff-content"}).appendTo(diffPanel);
+                $('<colgroup><col width="50"><col width="50"><col width="100%"></colgroup>').appendTo(codeTable);
+                var codeBody = $('<tbody>').appendTo(codeTable);
+
+                var diffRow = $('<tr class="node-text-diff-commit-header">').appendTo(codeBody);
+                var content = $('<td colspan="3"></td>').appendTo(diffRow);
+
+                $("<h3>").text(commit.title).appendTo(content);
+                $('<div class="commit-body"></div>').text(commit.comment).appendTo(content);
+                var summary = $('<div class="commit-summary"></div>').appendTo(content);
+                $('<div style="float: right">').text("Commit "+commit.sha).appendTo(summary);
+                $('<div>').text((commit.authorName||commit.author)+" - "+options.date).appendTo(summary);
+
+                if (commit.files) {
+                    createUnifiedDiffTable(commit.files,options).appendTo(diffPanel);
+                }
+
+
+            },
+            close: function() {
+                diffVisible = false;
+            },
+            show: function() {
+
+            }
+        }
+        RED.tray.show(trayOptions);
+    }
+    function showUnifiedDiff(options) {
+        var diff = options.diff;
+        var title = options.title;
+        var files = parseUnifiedDiff(diff);
+
+        var currentResolution;
+        if (options.unmerged) {
+            options.resolveConflict = function(results) {
+                currentResolution = results;
+                if (results.conflicts === results.resolved) {
+                    $("#node-diff-view-resolve-diff").removeClass('disabled');
+                }
+            }
+        }
+
+        var trayOptions = {
+            title: title||"Compare Changes", //TODO: nls
+            width: Infinity,
+            overlay: true,
+            buttons: [
+                {
+                    text: RED._((options.unmerged)?"common.label.cancel":"common.label.close"),
+                    click: function() {
+                        if (options.oncancel) {
+                            options.oncancel();
+                        }
+                        RED.tray.close();
+                    }
+                }
+            ],
+            resize: function(dimensions) {
+                // trayWidth = dimensions.width;
+            },
+            open: function(tray) {
+                var trayBody = tray.find('.editor-tray-body');
+                var diffPanel = $('<div class="node-text-diff"></div>').appendTo(trayBody);
+                createUnifiedDiffTable(files,options).appendTo(diffPanel);
+            },
+            close: function() {
+                diffVisible = false;
+            },
+            show: function() {
+
+            }
+        }
+        if (options.unmerged) {
+            trayOptions.buttons.push(
+                {
+                    id: "node-diff-view-resolve-diff",
+                    text: "Save conflict resolution",
+                    class: "primary disabled",
+                    click: function() {
+                        if (!$("#node-diff-view-resolve-diff").hasClass('disabled')) {
+                            if (options.currentDiff) {
+                                // This is a flow file. Need to apply the diff
+                                // and generate the new flow.
+                                var result = applyDiff(options.currentDiff);
+                                currentResolution = {
+                                    resolutions:{}
+                                };
+                                currentResolution.resolutions[options.project.files.flow] = JSON.stringify(result.config,"",4);
+                            }
+                            if (options.onresolve) {
+                                options.onresolve(currentResolution);
+                            }
+                            RED.tray.close();
+                        }
+                    }
+                }
+            );
+        }
+        RED.tray.show(trayOptions);
+    }
+
+    function parseCommitDiff(diff) {
+        var result = {};
+        var lines = diff.split("\n");
+        var comment = [];
+        for (var i=0;i<lines.length;i++) {
+            if (/^commit /.test(lines[i])) {
+                result.sha = lines[i].substring(7);
+            } else if (/^Author: /.test(lines[i])) {
+                result.author = lines[i].substring(8);
+                var m = /^(.*) <(.*)>$/.exec(result.author);
+                if (m) {
+                    result.authorName = m[1];
+                    result.authorEmail = m[2];
+                }
+            } else if (/^Date: /.test(lines[i])) {
+                result.date = lines[i].substring(8);
+            } else if (/^    /.test(lines[i])) {
+                if (!result.title) {
+                    result.title = lines[i].substring(4);
+                } else {
+                    if (lines[i].length !== 4 || comment.length > 0) {
+                        comment.push(lines[i].substring(4));
+                    }
+                }
+            } else if (/^diff /.test(lines[i])) {
+                result.files = parseUnifiedDiff(lines.slice(i));
+                break;
+            }
+         }
+         result.comment = comment.join("\n");
+         return result;
+    }
+    function parseUnifiedDiff(diff) {
+        var lines;
+        if (Array.isArray(diff)) {
+            lines = diff;
+        } else {
+            lines = diff.split("\n");
+        }
+        var diffHeader = /^diff (?:(?:--git a\/(.*) b\/(.*))|(?:--cc (.*)))$/;
+        var fileHeader = /^\+\+\+ b\/(.*)\t?/;
+        var binaryFile = /^Binary files /;
+        var hunkHeader = /^@@ -((\d+)(,(\d+))?) \+((\d+)(,(\d+))?) @@ ?(.*)$/;
+        var conflictHunkHeader = /^@+ -((\d+)(,(\d+))?) -((\d+)(,(\d+))?) \+((\d+)(,(\d+))?) @+/;
+        var files = [];
+        var currentFile;
+        var hunks = [];
+        var currentHunk;
+        for (var i=0;i<lines.length;i++) {
+            var line = lines[i];
+            var diffLine = diffHeader.exec(line);
+            if (diffLine) {
+                if (currentHunk) {
+                    currentFile.hunks.push(currentHunk);
+                    files.push(currentFile);
+                }
+                currentHunk = null;
+                currentFile = {
+                    file: diffLine[1]||diffLine[3],
+                    hunks: []
+                }
+            } else if (binaryFile.test(line)) {
+                if (currentFile) {
+                    currentFile.binary = true;
+                }
+            } else {
+                var fileLine = fileHeader.exec(line);
+                if (fileLine) {
+                    currentFile.file = fileLine[1];
+                } else {
+                    var hunkLine = hunkHeader.exec(line);
+                    if (hunkLine) {
+                        if (currentHunk) {
+                            currentFile.hunks.push(currentHunk);
+                        }
+                        currentHunk = {
+                            header: line,
+                            localStartLine: hunkLine[2],
+                            localLength: hunkLine[4]||1,
+                            remoteStartLine: hunkLine[6],
+                            remoteLength: hunkLine[8]||1,
+                            lines: [],
+                            conflict: false
+                        }
+                        continue;
+                    }
+                    hunkLine = conflictHunkHeader.exec(line);
+                    if (hunkLine) {
+                        if (currentHunk) {
+                            currentFile.hunks.push(currentHunk);
+                        }
+                        currentHunk = {
+                            header: line,
+                            localStartLine: hunkLine[2],
+                            localLength: hunkLine[4]||1,
+                            remoteStartLine: hunkLine[6],
+                            remoteLength: hunkLine[8]||1,
+                            diffStart: parseInt(hunkLine[10]),
+                            lines: [],
+                            conflict: true
+                        }
+                        continue;
+                    }
+                    if (currentHunk) {
+                        currentHunk.lines.push(line);
+                    }
+                }
+            }
+        }
+        if (currentHunk) {
+            currentFile.hunks.push(currentHunk);
+        }
+        files.push(currentFile);
+        return files;
+    }
+
+    return {
+        init: init,
+        getRemoteDiff: getRemoteDiff,
+        showRemoteDiff: showRemoteDiff,
+        showUnifiedDiff: showUnifiedDiff,
+        showCommitDiff: showCommitDiff,
+        mergeDiff: mergeDiff
+    }
+})();
 ;/**
  * Copyright JS Foundation and other contributors, http://js.foundation
  *
@@ -17374,6 +20295,336 @@ RED.search = (function() {
     };
 
 })();
+;RED.typeSearch = (function() {
+
+    var shade;
+
+    var disabled = false;
+    var dialog = null;
+    var searchInput;
+    var searchResults;
+    var searchResultsDiv;
+    var selected = -1;
+    var visible = false;
+
+    var activeFilter = "";
+    var addCallback;
+    var cancelCallback;
+
+    var typesUsed = {};
+
+    function search(val) {
+        activeFilter = val.toLowerCase();
+        var visible = searchResults.editableList('filter');
+        searchResults.editableList('sort');
+        setTimeout(function() {
+            selected = 0;
+            searchResults.children().removeClass('selected');
+            searchResults.children(":visible:first").addClass('selected');
+        },100);
+
+    }
+
+    function ensureSelectedIsVisible() {
+        var selectedEntry = searchResults.find("li.selected");
+        if (selectedEntry.length === 1) {
+            var scrollWindow = searchResults.parent();
+            var scrollHeight = scrollWindow.height();
+            var scrollOffset = scrollWindow.scrollTop();
+            var y = selectedEntry.position().top;
+            var h = selectedEntry.height();
+            if (y+h > scrollHeight) {
+                scrollWindow.animate({scrollTop: '-='+(scrollHeight-(y+h)-10)},50);
+            } else if (y<0) {
+                scrollWindow.animate({scrollTop: '+='+(y-10)},50);
+            }
+        }
+    }
+
+    function createDialog() {
+        //shade = $('<div>',{class:"red-ui-type-search-shade"}).appendTo("#main-container");
+        dialog = $("<div>",{id:"red-ui-type-search",class:"red-ui-search red-ui-type-search"}).appendTo("#main-container");
+        var searchDiv = $("<div>",{class:"red-ui-search-container"}).appendTo(dialog);
+        searchInput = $('<input type="text">').attr("placeholder",RED._("search.addNode")).appendTo(searchDiv).searchBox({
+            delay: 50,
+            change: function() {
+                search($(this).val());
+            }
+        });
+        searchInput.on('keydown',function(evt) {
+            var children = searchResults.children(":visible");
+            if (children.length > 0) {
+                if (evt.keyCode === 40) {
+                    // Down
+                    if (selected < children.length-1) {
+                        if (selected > -1) {
+                            $(children[selected]).removeClass('selected');
+                        }
+                        selected++;
+                    }
+                    $(children[selected]).addClass('selected');
+                    ensureSelectedIsVisible();
+                    evt.preventDefault();
+                } else if (evt.keyCode === 38) {
+                    // Up
+                    if (selected > 0) {
+                        if (selected < children.length) {
+                            $(children[selected]).removeClass('selected');
+                        }
+                        selected--;
+                    }
+                    $(children[selected]).addClass('selected');
+                    ensureSelectedIsVisible();
+                    evt.preventDefault();
+                } else if (evt.keyCode === 13) {
+                    // Enter
+                    var index = Math.max(0,selected);
+                    if (index < children.length) {
+                        // TODO: dips into editableList impl details
+                        confirm($(children[index]).find(".red-ui-editableList-item-content").data('data'));
+                    }
+                }
+            }
+        });
+
+        searchResultsDiv = $("<div>",{class:"red-ui-search-results-container"}).appendTo(dialog);
+        searchResults = $('<ol>',{id:"search-result-list", style:"position: absolute;top: 0;bottom: 0;left: 0;right: 0;"}).appendTo(searchResultsDiv).editableList({
+            addButton: false,
+            filter: function(data) {
+                if (activeFilter === "" ) {
+                    return true;
+                }
+                if (data.recent || data.common) {
+                    return false;
+                }
+                return (activeFilter==="")||(data.index.indexOf(activeFilter) > -1);
+            },
+            sort: function(A,B) {
+                if (activeFilter === "") {
+                    return A.i - B.i;
+                }
+                var Ai = A.index.indexOf(activeFilter);
+                var Bi = B.index.indexOf(activeFilter);
+                if (Ai === -1) {
+                    return 1;
+                }
+                if (Bi === -1) {
+                    return -1;
+                }
+                if (Ai === Bi) {
+                    return sortTypeLabels(A,B);
+                }
+                return Ai-Bi;
+            },
+            addItem: function(container,i,object) {
+                var def = object.def;
+                object.index = object.type.toLowerCase();
+                if (object.separator) {
+                    container.addClass("red-ui-search-result-separator")
+                }
+                var div = $('<a>',{href:'#',class:"red-ui-search-result"}).appendTo(container);
+
+                var nodeDiv = $('<div>',{class:"red-ui-search-result-node"}).appendTo(div);
+                var colour = def.color;
+                var icon_url = RED.utils.getNodeIcon(def);
+                nodeDiv.css('backgroundColor',colour);
+
+                var iconContainer = $('<div/>',{class:"palette_icon_container"}).appendTo(nodeDiv);
+                $('<div/>',{class:"palette_icon",style:"background-image: url("+icon_url+")"}).appendTo(iconContainer);
+
+                if (def.inputs > 0) {
+                    $('<div/>',{class:"red-ui-search-result-node-port"}).appendTo(nodeDiv);
+                }
+                if (def.outputs > 0) {
+                    $('<div/>',{class:"red-ui-search-result-node-port red-ui-search-result-node-output"}).appendTo(nodeDiv);
+                }
+
+                var contentDiv = $('<div>',{class:"red-ui-search-result-description"}).appendTo(div);
+
+                var label = object.label;
+                object.index += "|"+label.toLowerCase();
+
+                $('<div>',{class:"red-ui-search-result-node-label"}).text(label).appendTo(contentDiv);
+
+                div.click(function(evt) {
+                    evt.preventDefault();
+                    confirm(object);
+                });
+            },
+            scrollOnAdd: false
+        });
+
+    }
+    function confirm(def) {
+        hide();
+        typesUsed[def.type] = Date.now();
+        addCallback(def.type);
+    }
+
+    function handleMouseActivity(evt) {
+        if (visible) {
+            var t = $(evt.target);
+            while (t.prop('nodeName').toLowerCase() !== 'body') {
+                if (t.attr('id') === 'red-ui-type-search') {
+                    return;
+                }
+                t = t.parent();
+            }
+            hide(true);
+            if (cancelCallback) {
+                cancelCallback();
+            }
+        }
+    }
+    function show(opts) {
+        if (!visible) {
+            RED.keyboard.add("*","escape",function(){
+                hide();
+                if (cancelCallback) {
+                    cancelCallback();
+                }
+            });
+            if (dialog === null) {
+                createDialog();
+            }
+            visible = true;
+            setTimeout(function() {
+                $(document).on('mousedown.type-search',handleMouseActivity);
+                $(document).on('mouseup.type-search',handleMouseActivity);
+                $(document).on('click.type-search',handleMouseActivity);
+            },200);
+        } else {
+            dialog.hide();
+            searchResultsDiv.hide();
+        }
+        refreshTypeList();
+        addCallback = opts.add;
+        closeCallback = opts.close;
+        RED.events.emit("type-search:open");
+        //shade.show();
+        dialog.css({left:opts.x+"px",top:opts.y+"px"}).show();
+        searchResultsDiv.slideDown(300);
+        setTimeout(function() {
+            searchResultsDiv.find(".red-ui-editableList-container").scrollTop(0);
+            searchInput.focus();
+        },100);
+    }
+    function hide(fast) {
+        if (visible) {
+            RED.keyboard.remove("escape");
+            visible = false;
+            if (dialog !== null) {
+                searchResultsDiv.slideUp(fast?50:200,function() {
+                    dialog.hide();
+                    searchInput.searchBox('value','');
+                });
+                //shade.hide();
+            }
+            RED.events.emit("type-search:close");
+            RED.view.focus();
+            $(document).off('mousedown.type-search');
+            $(document).off('mouseup.type-search');
+            $(document).off('click.type-search');
+        }
+    }
+
+    function getTypeLabel(type, def) {
+        var label = type;
+        if (typeof def.paletteLabel !== "undefined") {
+            try {
+                label = (typeof def.paletteLabel === "function" ? def.paletteLabel.call(def) : def.paletteLabel)||"";
+                label += " ("+type+")";
+            } catch(err) {
+                console.log("Definition error: "+type+".paletteLabel",err);
+            }
+        }
+        return label;
+    }
+    function sortTypeLabels(a,b) {
+        var al = a.label.toLowerCase();
+        var bl = b.label.toLowerCase();
+        if (al < bl) {
+            return -1;
+        } else if (al === bl) {
+            return 0;
+        } else {
+            return 1;
+        }
+    }
+    function refreshTypeList() {
+        var i;
+        searchResults.editableList('empty');
+        searchInput.searchBox('value','');
+        selected = -1;
+        var common = [
+            'inject','debug','function','change','switch'
+        ];
+
+        var recentlyUsed = Object.keys(typesUsed);
+        recentlyUsed.sort(function(a,b) {
+            return typesUsed[b]-typesUsed[a];
+        });
+        recentlyUsed = recentlyUsed.filter(function(t) {
+            return common.indexOf(t) === -1;
+        });
+
+        var items = [];
+        RED.nodes.registry.getNodeTypes().forEach(function(t) {
+            var def = RED.nodes.getType(t);
+            if (def.category !== 'config' && t !== 'unknown' && t !== 'tab') {
+                items.push({type:t,def: def, label:getTypeLabel(t,def)});
+            }
+        });
+        items.sort(sortTypeLabels);
+
+        var commonCount = 0;
+        var item;
+        var index = 0;
+        for(i=0;i<common.length;i++) {
+            var itemDef = RED.nodes.getType(common[i]);
+            if (itemDef) {
+                item = {
+                    type: common[i],
+                    common: true,
+                    def: itemDef,
+                    i: index++
+                };
+                item.label = getTypeLabel(item.type,item.def);
+                if (i === common.length-1) {
+                    item.separator = true;
+                }
+                searchResults.editableList('addItem', item);
+            }
+        }
+        for(i=0;i<Math.min(5,recentlyUsed.length);i++) {
+            item = {
+                type:recentlyUsed[i],
+                def: RED.nodes.getType(recentlyUsed[i]),
+                recent: true,
+                i: index++
+            };
+            item.label = getTypeLabel(item.type,item.def);
+            if (i === recentlyUsed.length-1) {
+                item.separator = true;
+            }
+            searchResults.editableList('addItem', item);
+        }
+        for (i=0;i<items.length;i++) {
+            items[i].i = index++;
+            searchResults.editableList('addItem', items[i]);
+        }
+        setTimeout(function() {
+            selected = 0;
+            searchResults.children(":first").addClass('selected');
+        },100);
+    }
+
+    return {
+        show: show,
+        hide: hide
+    };
+
+})();
 ;/**
  * Copyright JS Foundation and other contributors, http://js.foundation
  *
@@ -18003,6 +21254,5949 @@ RED.subflow = (function() {
         refresh: refresh,
         removeInput: removeSubflowInput,
         removeOutput: removeSubflowOutput
+    }
+})();
+;/**
+ * Copyright JS Foundation and other contributors, http://js.foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ **/
+
+RED.userSettings = (function() {
+
+    var trayWidth = 700;
+    var settingsVisible = false;
+
+    var panes = [];
+
+    function addPane(options) {
+        panes.push(options);
+    }
+
+    function show(initialTab) {
+        if (settingsVisible) {
+            return;
+        }
+        if (!RED.user.hasPermission("settings.write")) {
+            RED.notify(RED._("user.errors.settings"),"error");
+            return;
+        }
+        settingsVisible = true;
+        var tabContainer;
+
+        var trayOptions = {
+            title: RED._("menu.label.userSettings"),
+            buttons: [
+                {
+                    id: "node-dialog-ok",
+                    text: RED._("common.label.close"),
+                    class: "primary",
+                    click: function() {
+                        RED.tray.close();
+                    }
+                }
+            ],
+            resize: function(dimensions) {
+                trayWidth = dimensions.width;
+            },
+            open: function(tray) {
+                var trayBody = tray.find('.editor-tray-body');
+                var settingsContent = $('<div></div>').appendTo(trayBody);
+                var tabContainer = $('<div></div>',{id:"user-settings-tabs-container"}).appendTo(settingsContent);
+
+                $('<ul></ul>',{id:"user-settings-tabs"}).appendTo(tabContainer);
+                var settingsTabs = RED.tabs.create({
+                    id: "user-settings-tabs",
+                    vertical: true,
+                    onchange: function(tab) {
+                        setTimeout(function() {
+                            $("#user-settings-tabs-content").children().hide();
+                            $("#" + tab.id).show();
+                            if (tab.pane.focus) {
+                                tab.pane.focus();
+                            }
+                        },50);
+                    }
+                });
+                var tabContents = $('<div></div>',{id:"user-settings-tabs-content"}).appendTo(settingsContent);
+
+                panes.forEach(function(pane) {
+                    settingsTabs.addTab({
+                        id: "user-settings-tab-"+pane.id,
+                        label: pane.title,
+                        pane: pane
+                    });
+                    pane.get().hide().appendTo(tabContents);
+                });
+                settingsContent.i18n();
+                settingsTabs.activateTab("user-settings-tab-"+(initialTab||'view'))
+                $("#sidebar-shade").show();
+            },
+            close: function() {
+                settingsVisible = false;
+                panes.forEach(function(pane) {
+                    if (pane.close) {
+                        pane.close();
+                    }
+                });
+                $("#sidebar-shade").hide();
+
+            },
+            show: function() {}
+        }
+        if (trayWidth !== null) {
+            trayOptions.width = trayWidth;
+        }
+        RED.tray.show(trayOptions);
+    }
+
+    var viewSettings = [
+        {
+            title: "menu.label.view.grid",
+            options: [
+                {setting:"view-show-grid",oldSetting:"menu-menu-item-view-show-grid",label:"menu.label.view.showGrid",toggle:true,onchange:"core:toggle-show-grid"},
+                {setting:"view-snap-grid",oldSetting:"menu-menu-item-view-snap-grid",label:"menu.label.view.snapGrid",toggle:true,onchange:"core:toggle-snap-grid"},
+                {setting:"view-grid-size",label:"menu.label.view.gridSize",type:"number",default: 20, onchange:RED.view.gridSize}
+            ]
+        },
+        {
+            title: "menu.label.nodes",
+            options: [
+                {setting:"view-node-status",oldSetting:"menu-menu-item-status",label:"menu.label.displayStatus",default: true, toggle:true,onchange:"core:toggle-status"}
+            ]
+        },
+        {
+            title: "menu.label.other",
+            options: [
+                {setting:"view-show-tips",oldSettings:"menu-menu-item-show-tips",label:"menu.label.showTips",toggle:true,default:true,onchange:"core:toggle-show-tips"}
+            ]
+        }
+    ];
+
+    var allSettings = {};
+
+    function createViewPane() {
+
+        var pane = $('<div id="user-settings-tab-view" class="node-help"></div>');
+
+        var currentEditorSettings = RED.settings.get('editor') || {};
+        currentEditorSettings.view = currentEditorSettings.view || {};
+
+        viewSettings.forEach(function(section) {
+            $('<h3></h3>').text(RED._(section.title)).appendTo(pane);
+            section.options.forEach(function(opt) {
+                var initialState = currentEditorSettings.view[opt.setting];
+                var row = $('<div class="user-settings-row"></div>').appendTo(pane);
+                var input;
+                if (opt.toggle) {
+                    input = $('<label for="user-settings-'+opt.setting+'"><input id="user-settings-'+opt.setting+'" type="checkbox"> '+RED._(opt.label)+'</label>').appendTo(row).find("input");
+                    input.prop('checked',initialState);
+                } else {
+                    $('<label for="user-settings-'+opt.setting+'">'+RED._(opt.label)+'</label>').appendTo(row);
+                    $('<input id="user-settings-'+opt.setting+'" type="'+(opt.type||"text")+'">').appendTo(row).val(initialState);
+                }
+            });
+        })
+        return pane;
+    }
+
+    function setSelected(id, value) {
+        var opt = allSettings[id];
+        var currentEditorSettings = RED.settings.get('editor') || {};
+        currentEditorSettings.view = currentEditorSettings.view || {};
+        currentEditorSettings.view[opt.setting] = value;
+        RED.settings.set('editor', currentEditorSettings);
+        var callback = opt.onchange;
+        if (typeof callback === 'string') {
+            callback = RED.actions.get(callback);
+        }
+        if (callback) {
+            callback.call(opt,value);
+        }
+    }
+    function toggle(id) {
+        var opt = allSettings[id];
+        var currentEditorSettings = RED.settings.get('editor') || {};
+        currentEditorSettings.view = currentEditorSettings.view || {};
+        setSelected(id,!currentEditorSettings.view[opt.setting]);
+    }
+
+
+    function init() {
+        RED.actions.add("core:show-user-settings",show);
+        RED.actions.add("core:show-help", function() { show('keyboard')});
+
+        addPane({
+            id:'view',
+            title: RED._("menu.label.view.view"),
+            get: createViewPane,
+            close: function() {
+                viewSettings.forEach(function(section) {
+                    section.options.forEach(function(opt) {
+                        var input = $("#user-settings-"+opt.setting);
+                        if (opt.toggle) {
+                            setSelected(opt.setting,input.prop('checked'));
+                        } else {
+                            setSelected(opt.setting,input.val());
+                        }
+                    });
+                })
+            }
+        })
+
+        var currentEditorSettings = RED.settings.get('editor') || {};
+        currentEditorSettings.view = currentEditorSettings.view || {};
+        var editorSettingsChanged = false;
+        viewSettings.forEach(function(section) {
+            section.options.forEach(function(opt) {
+                if (opt.oldSetting) {
+                    var oldValue = RED.settings.get(opt.oldSetting);
+                    if (oldValue !== undefined && oldValue !== null) {
+                        currentEditorSettings.view[opt.setting] = oldValue;
+                        editorSettingsChanged = true;
+                        RED.settings.remove(opt.oldSetting);
+                    }
+                }
+                allSettings[opt.setting] = opt;
+                if (opt.onchange) {
+                    var value = currentEditorSettings.view[opt.setting];
+                    if ((value === null || value === undefined) && opt.hasOwnProperty('default')) {
+                        value = opt.default;
+                        currentEditorSettings.view[opt.setting] = value;
+                        editorSettingsChanged = true;
+                    }
+
+                    var callback = opt.onchange;
+                    if (typeof callback === 'string') {
+                        callback = RED.actions.get(callback);
+                    }
+                    if (callback) {
+                        callback.call(opt,value);
+                    }
+                }
+            });
+        });
+        if (editorSettingsChanged) {
+            RED.settings.set('editor',currentEditorSettings);
+        }
+
+    }
+    return {
+        init: init,
+        toggle: toggle,
+        show: show,
+        add: addPane
+    };
+})();
+;/**
+ * Copyright JS Foundation and other contributors, http://js.foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ **/
+RED.projects = (function() {
+
+    var dialog;
+    var dialogBody;
+
+    var activeProject;
+    function reportUnexpectedError(error) {
+        var notification;
+        if (error.error === 'git_missing_user') {
+            notification = RED.notify("<p>You Git client is not configured with a username/email.</p>",{
+                fixed: true,
+                type:'error',
+                buttons: [
+                    {
+                        text: "Cancel",
+                        click: function() {
+                            notification.close();
+                        }
+                    },
+                    {
+                        text: "Configure Git client",
+                        click: function() {
+                            RED.userSettings.show('gitconfig');
+                            notification.close();
+                        }
+                    }
+                ]
+            })
+        } else {
+            console.log(error);
+            notification = RED.notify("<p>An unexpected error occurred:</p><p>"+error.message+"</p><small>code: "+error.error+"</small>",{
+                fixed: true,
+                modal: true,
+                type: 'error',
+                buttons: [
+                    {
+                        text: "Close",
+                        click: function() {
+                            notification.close();
+                        }
+                    }
+                ]
+            })
+        }
+    }
+    var screens = {};
+    function initScreens() {
+        var migrateProjectHeader = $('<div class="projects-dialog-screen-start-hero"></div>');
+        $('<span><i class="fa fa-files-o fa-2x"></i> &nbsp; &nbsp; <i class="fa fa-long-arrow-right fa-2x"></i> &nbsp; &nbsp; <i class="fa fa-archive fa-2x"></i></span>').appendTo(migrateProjectHeader)
+        $('<hr>').appendTo(migrateProjectHeader);
+
+        var createProjectOptions = {};
+
+        screens = {
+            'welcome': {
+                content: function(options) {
+
+                    var container = $('<div class="projects-dialog-screen-start"></div>');
+
+                    migrateProjectHeader.appendTo(container);
+
+                    var body = $('<div class="projects-dialog-screen-start-body"></div>').appendTo(container);
+                    $('<p>').text("Hello! We have introduced 'projects' to Node-RED.").appendTo(body);
+                    $('<p>').text("This is a new way for you to manage your flow files and includes version control of your flows.").appendTo(body);
+                    $('<p>').text("To get started you can create your first project or clone an existing project from a git repository.").appendTo(body);
+                    $('<p>').text("If you are not sure, you can skip this for now. You will still be able to create your first project from the 'Projects' menu at any time.").appendTo(body);
+
+                    var row = $('<div style="text-align: center"></div>').appendTo(body);
+                    var createAsEmpty = $('<button data-type="empty" class="editor-button projects-dialog-screen-create-type"><i class="fa fa-archive fa-2x"></i><i style="position: absolute;" class="fa fa-asterisk"></i><br/>Create Project</button>').appendTo(row);
+                    var createAsClone = $('<button data-type="clone" class="editor-button projects-dialog-screen-create-type"><i class="fa fa-archive fa-2x"></i><i style="position: absolute;" class="fa fa-git"></i><br/>Clone Repository</button>').appendTo(row);
+
+                    createAsEmpty.click(function(e) {
+                        e.preventDefault();
+                        createProjectOptions = {
+                            action: "create"
+                        }
+                        show('git-config');
+                    })
+
+                    createAsClone.click(function(e) {
+                        e.preventDefault();
+                        createProjectOptions = {
+                            action: "clone"
+                        }
+                        show('git-config');
+                    })
+
+                    return container;
+                },
+                buttons: [
+                    {
+                        // id: "clipboard-dialog-cancel",
+                        text: "Not right now",
+                        click: function() {
+                            createProjectOptions = {};
+                            $( this ).dialog( "close" );
+                        }
+                    }
+                ]
+            },
+            'git-config': (function() {
+                var gitUsernameInput;
+                var gitEmailInput;
+                return {
+                    content: function(options) {
+                        var isGlobalConfig = false;
+                        var existingGitSettings = RED.settings.get('git');
+                        if (existingGitSettings && existingGitSettings.user) {
+                            existingGitSettings = existingGitSettings.user;
+                        } else if (RED.settings.git && RED.settings.git.globalUser) {
+                            isGlobalConfig = true;
+                            existingGitSettings = RED.settings.git.globalUser;
+                        }
+
+                        var validateForm = function() {
+                            var name = gitUsernameInput.val().trim();
+                            var email = gitEmailInput.val().trim();
+                            var valid = name.length > 0 && email.length > 0;
+                            $("#projects-dialog-git-config").prop('disabled',!valid).toggleClass('disabled ui-button-disabled ui-state-disabled',!valid);
+
+                        }
+
+                        var container = $('<div class="projects-dialog-screen-start"></div>');
+                        migrateProjectHeader.appendTo(container);
+                        var body = $('<div class="projects-dialog-screen-start-body"></div>').appendTo(container);
+
+                        $('<p>').text("Setup your version control client").appendTo(body);
+                        $('<p>').text("Node-RED uses the open source tool Git for version control. It tracks changes to your project files and lets you push them to remote repositories.").appendTo(body);
+                        $('<p>').text("When you commit a set of changes, Git records who made the changes with a username and email address. The Username can be anything you want - it does not need to be your real name.").appendTo(body);
+
+                        if (isGlobalConfig) {
+                            $('<p>').text("Your Git client is already configured with the details below.").appendTo(body);
+                        }
+                        $('<p>').text("You can change these settings later under the 'Git config' tab of the settings dialog.").appendTo(body);
+
+                        var row = $('<div class="form-row"></div>').appendTo(body);
+                        $('<label for="">Username</label>').appendTo(row);
+                        gitUsernameInput = $('<input type="text">').val((existingGitSettings&&existingGitSettings.name)||"").appendTo(row);
+                        // $('<div style="position:relative;"></div>').text("This does not need to be your real name").appendTo(row);
+                        gitUsernameInput.on("change keyup paste",validateForm);
+
+                        row = $('<div class="form-row"></div>').appendTo(body);
+                        $('<label for="">Email</label>').appendTo(row);
+                        gitEmailInput = $('<input type="text">').val((existingGitSettings&&existingGitSettings.email)||"").appendTo(row);
+                        gitEmailInput.on("change keyup paste",validateForm);
+                        // $('<div style="position:relative;"></div>').text("Something something email").appendTo(row);
+                        setTimeout(function() {
+                            gitUsernameInput.focus();
+                            validateForm();
+                        },50);
+                        return container;
+                    },
+                    buttons: [
+                        {
+                            // id: "clipboard-dialog-cancel",
+                            text: "Back",
+                            click: function() {
+                                show('welcome');
+                            }
+                        },
+                        {
+                            id: "projects-dialog-git-config",
+                            text: "Next", // TODO: nls
+                            class: "primary",
+                            click: function() {
+                                var currentGitSettings = RED.settings.get('git') || {};
+                                currentGitSettings.user = currentGitSettings.user || {};
+                                currentGitSettings.user.name = gitUsernameInput.val();
+                                currentGitSettings.user.email = gitEmailInput.val();
+                                RED.settings.set('git', currentGitSettings);
+                                if (createProjectOptions.action === "create") {
+                                    show('project-details');
+                                } else if (createProjectOptions.action === "clone") {
+                                    show('clone-project');
+                                }
+                            }
+                        }
+                    ]
+                };
+            })(),
+            'project-details': (function() {
+                var projectNameInput;
+                var projectSummaryInput;
+                return {
+                    content: function(options) {
+                        var projectList = null;
+                        var projectNameValid;
+
+                        var pendingFormValidation = false;
+                        $.getJSON("projects", function(data) {
+                            projectList = {};
+                            data.projects.forEach(function(p) {
+                                projectList[p] = true;
+                                if (pendingFormValidation) {
+                                    pendingFormValidation = false;
+                                    validateForm();
+                                }
+                            })
+                        });
+                        var container = $('<div class="projects-dialog-screen-start"></div>');
+                        migrateProjectHeader.appendTo(container);
+                        var body = $('<div class="projects-dialog-screen-start-body"></div>').appendTo(container);
+
+                        $('<p>').text("Create your project").appendTo(body);
+                        $('<p>').text("A project is maintained as a Git repository. It makes it much easier to share your flows with others and to collaborate on them.").appendTo(body);
+                        $('<p>').text("You can create multiple projects and quickly switch between them from the editor.").appendTo(body);
+                        $('<p>').text("To begin, your project needs a name and an optional description.").appendTo(body);
+
+                        var validateForm = function() {
+                            var projectName = projectNameInput.val();
+                            var valid = true;
+                            if (projectNameInputChanged) {
+                                if (projectList === null) {
+                                    pendingFormValidation = true;
+                                    return;
+                                }
+                                projectNameStatus.empty();
+                                if (!/^[a-zA-Z0-9\-_]+$/.test(projectName) || projectList[projectName]) {
+                                    projectNameInput.addClass("input-error");
+                                    $('<i style="margin-top: 8px;" class="fa fa-exclamation-triangle"></i>').appendTo(projectNameStatus);
+                                    projectNameValid = false;
+                                    valid = false;
+                                    if (projectList[projectName]) {
+                                        projectNameSublabel.text("Project already exists");
+                                    } else {
+                                        projectNameSublabel.text("Must contain only A-Z 0-9 _ -");
+                                    }
+                                } else {
+                                    projectNameInput.removeClass("input-error");
+                                    $('<i style="margin-top: 8px;" class="fa fa-check"></i>').appendTo(projectNameStatus);
+                                    projectNameSublabel.text("Must contain only A-Z 0-9 _ -");
+                                    projectNameValid = true;
+                                }
+                                projectNameLastChecked = projectName;
+                            }
+                            valid = projectNameValid;
+                            $("#projects-dialog-create-name").prop('disabled',!valid).toggleClass('disabled ui-button-disabled ui-state-disabled',!valid);
+                        }
+
+                        var row = $('<div class="form-row"></div>').appendTo(body);
+                        $('<label for="projects-dialog-screen-create-project-name">Project name</label>').appendTo(row);
+
+                        var subrow = $('<div style="position:relative;"></div>').appendTo(row);
+                        projectNameInput = $('<input id="projects-dialog-screen-create-project-name" type="text"></input>').val(createProjectOptions.name||"").appendTo(subrow);
+                        var projectNameStatus = $('<div class="projects-dialog-screen-input-status"></div>').appendTo(subrow);
+
+                        var projectNameInputChanged = false;
+                        var projectNameLastChecked = "";
+                        var projectNameValid;
+                        var checkProjectName;
+                        var autoInsertedName = "";
+
+
+                        projectNameInput.on("change keyup paste",function() {
+                            projectNameInputChanged = (projectNameInput.val() !== projectNameLastChecked);
+                            if (checkProjectName) {
+                                clearTimeout(checkProjectName);
+                            } else if (projectNameInputChanged) {
+                                projectNameStatus.empty();
+                                $('<img src="red/images/spin.svg"/>').appendTo(projectNameStatus);
+                                if (projectNameInput.val() === '') {
+                                    validateForm();
+                                    return;
+                                }
+                            }
+                            checkProjectName = setTimeout(function() {
+                                validateForm();
+                                checkProjectName = null;
+                            },300)
+                        });
+                        projectNameSublabel = $('<label class="projects-edit-form-sublabel"><small>Must contain only A-Z 0-9 _ -</small></label>').appendTo(row).find("small");
+
+                        // Empty Project
+                        row = $('<div class="form-row projects-dialog-screen-create-row projects-dialog-screen-create-row-empty"></div>').appendTo(body);
+                        $('<label for="projects-dialog-screen-create-project-desc">Description</label>').appendTo(row);
+                        projectSummaryInput = $('<input id="projects-dialog-screen-create-project-desc" type="text">').val(createProjectOptions.summary||"").appendTo(row);
+                        $('<label class="projects-edit-form-sublabel"><small>Optional</small></label>').appendTo(row);
+
+                        setTimeout(function() {
+                            projectNameInput.focus();
+                            projectNameInput.change();
+                        },50);
+                        return container;
+                    },
+                    buttons: function(options) {
+                        return [
+                            {
+                                text: "Back",
+                                click: function() {
+                                    show('git-config');
+                                }
+                            },
+                            {
+                                id: "projects-dialog-create-name",
+                                disabled: true,
+                                text: "Next", // TODO: nls
+                                class: "primary disabled",
+                                click: function() {
+                                    createProjectOptions.name = projectNameInput.val();
+                                    createProjectOptions.summary = projectSummaryInput.val();
+                                    show('default-files', options);
+                                }
+                            }
+                        ]
+                    }
+                };
+            })(),
+            'clone-project': (function() {
+                var projectNameInput;
+                var projectSummaryInput;
+                var projectFlowFileInput;
+                var projectSecretInput;
+                var projectSecretSelect;
+                var copyProject;
+                var projectRepoInput;
+                var projectCloneSecret;
+                var emptyProjectCredentialInput;
+                var projectRepoUserInput;
+                var projectRepoPasswordInput;
+                var projectNameSublabel;
+                var projectRepoSSHKeySelect;
+                var projectRepoPassphrase;
+                var projectRepoRemoteName
+                var projectRepoBranch;
+                var selectedProject;
+
+                return {
+                    content: function(options) {
+                        var container = $('<div class="projects-dialog-screen-start"></div>');
+                        migrateProjectHeader.appendTo(container);
+                        var body = $('<div class="projects-dialog-screen-start-body"></div>').appendTo(container);
+                        $('<p>').text("Clone a project").appendTo(body);
+                        $('<p>').text("If you already have a git repository containing a project, you can clone it to get started.").appendTo(body);
+
+                        var projectList = null;
+                        var pendingFormValidation = false;
+                        $.getJSON("projects", function(data) {
+                            projectList = {};
+                            data.projects.forEach(function(p) {
+                                projectList[p] = true;
+                                if (pendingFormValidation) {
+                                    pendingFormValidation = false;
+                                    validateForm();
+                                }
+                            })
+                        });
+
+
+                        var validateForm = function() {
+                            var projectName = projectNameInput.val();
+                            var valid = true;
+                            if (projectNameInputChanged) {
+                                if (projectList === null) {
+                                    pendingFormValidation = true;
+                                    return;
+                                }
+                                projectNameStatus.empty();
+                                if (!/^[a-zA-Z0-9\-_]+$/.test(projectName) || projectList[projectName]) {
+                                    projectNameInput.addClass("input-error");
+                                    $('<i style="margin-top: 8px;" class="fa fa-exclamation-triangle"></i>').appendTo(projectNameStatus);
+                                    projectNameValid = false;
+                                    valid = false;
+                                    if (projectList[projectName]) {
+                                        projectNameSublabel.text("Project already exists");
+                                    } else {
+                                        projectNameSublabel.text("Must contain only A-Z 0-9 _ -");
+                                    }
+                                } else {
+                                    projectNameInput.removeClass("input-error");
+                                    $('<i style="margin-top: 8px;" class="fa fa-check"></i>').appendTo(projectNameStatus);
+                                    projectNameSublabel.text("Must contain only A-Z 0-9 _ -");
+                                    projectNameValid = true;
+                                }
+                                projectNameLastChecked = projectName;
+                            }
+                            valid = projectNameValid;
+
+                            var repo = projectRepoInput.val();
+
+                            // var validRepo = /^(?:file|git|ssh|https?|[\d\w\.\-_]+@[\w\.]+):(?:\/\/)?[\w\.@:\/~_-]+(?:\/?|\#[\d\w\.\-_]+?)$/.test(repo);
+                            var validRepo = repo.length > 0 && !/\s/.test(repo);
+                            if (/^https?:\/\/[^/]+@/i.test(repo)) {
+                                $("#projects-dialog-screen-create-project-repo-label small").text("Do not include the username/password in the url");
+                                validRepo = false;
+                            }
+                            if (!validRepo) {
+                                if (projectRepoChanged) {
+                                    projectRepoInput.addClass("input-error");
+                                }
+                                valid = false;
+                            } else {
+                                projectRepoInput.removeClass("input-error");
+                            }
+                            if (/^https?:\/\//.test(repo)) {
+                                $(".projects-dialog-screen-create-row-creds").show();
+                                $(".projects-dialog-screen-create-row-sshkey").hide();
+                            } else if (/^(?:ssh|[\S]+?@[\S]+?):(?:\/\/)?/.test(repo)) {
+                                $(".projects-dialog-screen-create-row-creds").hide();
+                                $(".projects-dialog-screen-create-row-sshkey").show();
+                                // if ( !getSelectedSSHKey(projectRepoSSHKeySelect) ) {
+                                //     valid = false;
+                                // }
+                            } else {
+                                $(".projects-dialog-screen-create-row-creds").hide();
+                                $(".projects-dialog-screen-create-row-sshkey").hide();
+                            }
+
+                            $("#projects-dialog-clone-project").prop('disabled',!valid).toggleClass('disabled ui-button-disabled ui-state-disabled',!valid);
+                        }
+
+                        var row;
+
+                        row = $('<div class="form-row projects-dialog-screen-create-row projects-dialog-screen-create-row-empty projects-dialog-screen-create-row-clone"></div>').appendTo(body);
+                        $('<label for="projects-dialog-screen-create-project-name">Project name</label>').appendTo(row);
+
+                        var subrow = $('<div style="position:relative;"></div>').appendTo(row);
+                        projectNameInput = $('<input id="projects-dialog-screen-create-project-name" type="text"></input>').appendTo(subrow);
+                        var projectNameStatus = $('<div class="projects-dialog-screen-input-status"></div>').appendTo(subrow);
+
+                        var projectNameInputChanged = false;
+                        var projectNameLastChecked = "";
+                        var projectNameValid;
+                        var checkProjectName;
+                        var autoInsertedName = "";
+
+
+                        projectNameInput.on("change keyup paste",function() {
+                            projectNameInputChanged = (projectNameInput.val() !== projectNameLastChecked);
+                            if (checkProjectName) {
+                                clearTimeout(checkProjectName);
+                            } else if (projectNameInputChanged) {
+                                projectNameStatus.empty();
+                                $('<img src="red/images/spin.svg"/>').appendTo(projectNameStatus);
+                                if (projectNameInput.val() === '') {
+                                    validateForm();
+                                    return;
+                                }
+                            }
+                            checkProjectName = setTimeout(function() {
+                                validateForm();
+                                checkProjectName = null;
+                            },300)
+                        });
+                        projectNameSublabel = $('<label class="projects-edit-form-sublabel"><small>Must contain only A-Z 0-9 _ -</small></label>').appendTo(row).find("small");
+
+                        row = $('<div class="form-row projects-dialog-screen-create-row projects-dialog-screen-create-row-clone"></div>').appendTo(body);
+                        $('<label for="projects-dialog-screen-create-project-repo">Git repository URL</label>').appendTo(row);
+                        projectRepoInput = $('<input id="projects-dialog-screen-create-project-repo" type="text" placeholder="https://git.example.com/path/my-project.git"></input>').appendTo(row);
+                        $('<label id="projects-dialog-screen-create-project-repo-label" class="projects-edit-form-sublabel"><small>https://, ssh:// or file://</small></label>').appendTo(row);
+                        var projectRepoChanged = false;
+                        var lastProjectRepo = "";
+                        projectRepoInput.on("change keyup paste",function() {
+                            projectRepoChanged = true;
+                            var repo = $(this).val();
+                            if (lastProjectRepo !== repo) {
+                                $("#projects-dialog-screen-create-project-repo-label small").text("https://, ssh:// or file://");
+                            }
+                            lastProjectRepo = repo;
+
+                            var m = /\/([^/]+?)(?:\.git)?$/.exec(repo);
+                            if (m) {
+                                var projectName = projectNameInput.val();
+                                if (projectName === "" || projectName === autoInsertedName) {
+                                    autoInsertedName = m[1];
+                                    projectNameInput.val(autoInsertedName);
+                                    projectNameInput.change();
+                                }
+                            }
+                            validateForm();
+                        });
+
+                        var cloneAuthRows = $('<div class="projects-dialog-screen-create-row"></div>').appendTo(body);
+                        row = $('<div class="form-row projects-dialog-screen-create-row-auth-error"></div>').hide().appendTo(cloneAuthRows);
+                        $('<div><i class="fa fa-warning"></i> Authentication failed</div>').appendTo(row);
+
+                        // Repo credentials - username/password ----------------
+                        row = $('<div class="hide form-row projects-dialog-screen-create-row-creds"></div>').hide().appendTo(cloneAuthRows);
+
+                        var subrow = $('<div style="width: calc(50% - 10px); display:inline-block;"></div>').appendTo(row);
+                        $('<label for="projects-dialog-screen-create-project-repo-user">Username</label>').appendTo(subrow);
+                        projectRepoUserInput = $('<input id="projects-dialog-screen-create-project-repo-user" type="text"></input>').appendTo(subrow);
+
+                        subrow = $('<div style="width: calc(50% - 10px); margin-left: 20px; display:inline-block;"></div>').appendTo(row);
+                        $('<label for="projects-dialog-screen-create-project-repo-pass">Password</label>').appendTo(subrow);
+                        projectRepoPasswordInput = $('<input id="projects-dialog-screen-create-project-repo-pass" type="password"></input>').appendTo(subrow);
+                        // -----------------------------------------------------
+
+                        // Repo credentials - key/passphrase -------------------
+                        row = $('<div class="form-row projects-dialog-screen-create-row projects-dialog-screen-create-row-sshkey"></div>').hide().appendTo(cloneAuthRows);
+                        subrow = $('<div style="width: calc(50% - 10px); display:inline-block;"></div>').appendTo(row);
+                        $('<label for="projects-dialog-screen-create-project-repo-passphrase">SSH Key</label>').appendTo(subrow);
+                        projectRepoSSHKeySelect = $("<select>",{style:"width: 100%"}).appendTo(subrow);
+
+                        $.getJSON("settings/user/keys", function(data) {
+                            var count = 0;
+                            data.keys.forEach(function(key) {
+                                projectRepoSSHKeySelect.append($("<option></option>").val(key.name).text(key.name));
+                                count++;
+                            });
+                            if (count === 0) {
+                                projectRepoSSHKeySelect.addClass("input-error");
+                                projectRepoSSHKeySelect.attr("disabled",true);
+                                sshwarningRow.show();
+                            } else {
+                                projectRepoSSHKeySelect.removeClass("input-error");
+                                projectRepoSSHKeySelect.attr("disabled",false);
+                                sshwarningRow.hide();
+                            }
+                        });
+                        subrow = $('<div style="width: calc(50% - 10px); margin-left: 20px; display:inline-block;"></div>').appendTo(row);
+                        $('<label for="projects-dialog-screen-create-project-repo-passphrase">Passphrase</label>').appendTo(subrow);
+                        projectRepoPassphrase = $('<input id="projects-dialog-screen-create-project-repo-passphrase" type="password"></input>').appendTo(subrow);
+
+                        subrow = $('<div class="form-row projects-dialog-screen-create-row projects-dialog-screen-create-row-sshkey"></div>').appendTo(cloneAuthRows);
+                        var sshwarningRow = $('<div class="projects-dialog-screen-create-row-auth-error-no-keys"></div>').hide().appendTo(subrow);
+                        $('<div class="form-row"><i class="fa fa-warning"></i> Before you can clone a repository over ssh you must add an SSH key to access it.</div>').appendTo(sshwarningRow);
+                        subrow = $('<div style="text-align: center">').appendTo(sshwarningRow);
+                        $('<button class="editor-button">Add an ssh key</button>').appendTo(subrow).click(function(e) {
+                            e.preventDefault();
+                            $('#projects-dialog-cancel').click();
+                            RED.userSettings.show('gitconfig');
+                            setTimeout(function() {
+                                $("#user-settings-gitconfig-add-key").click();
+                            },500);
+                        });
+                        // -----------------------------------------------------
+
+
+                        // Secret - clone
+                        row = $('<div class="form-row projects-dialog-screen-create-row projects-dialog-screen-create-row-clone"></div>').appendTo(body);
+                        $('<label>Credentials encryption key</label>').appendTo(row);
+                        projectSecretInput = $('<input type="password"></input>').appendTo(row);
+
+
+
+                        return container;
+                    },
+                    buttons: function(options) {
+                        return [
+                            {
+                                text: "Back",
+                                click: function() {
+                                    show('git-config');
+                                }
+                            },
+                            {
+                                id: "projects-dialog-clone-project",
+                                disabled: true,
+                                text: "Clone project", // TODO: nls
+                                class: "primary disabled",
+                                click: function() {
+                                    var projectType = $(".projects-dialog-screen-create-type.selected").data('type');
+                                    var projectData = {
+                                        name: projectNameInput.val(),
+                                    }
+                                    projectData.credentialSecret = projectSecretInput.val();
+                                    var repoUrl = projectRepoInput.val();
+                                    var metaData = {};
+                                    if (/^(?:ssh|[\d\w\.\-_]+@[\w\.]+):(?:\/\/)?/.test(repoUrl)) {
+                                        var selected = projectRepoSSHKeySelect.val();//false;//getSelectedSSHKey(projectRepoSSHKeySelect);
+                                        if ( selected ) {
+                                            projectData.git = {
+                                                remotes: {
+                                                    'origin': {
+                                                        url: repoUrl,
+                                                        keyFile: selected,
+                                                        passphrase: projectRepoPassphrase.val()
+                                                    }
+                                                }
+                                            };
+                                        }
+                                        else {
+                                            console.log("Error! Can't get selected SSH key path.");
+                                            return;
+                                        }
+                                    }
+                                    else {
+                                        projectData.git = {
+                                            remotes: {
+                                                'origin': {
+                                                    url: repoUrl,
+                                                    username: projectRepoUserInput.val(),
+                                                    password: projectRepoPasswordInput.val()
+                                                }
+                                            }
+                                        };
+                                    }
+
+                                    $(".projects-dialog-screen-create-row-auth-error").hide();
+                                    $("#projects-dialog-screen-create-project-repo-label small").text("https://, ssh:// or file://");
+
+                                    projectRepoUserInput.removeClass("input-error");
+                                    projectRepoPasswordInput.removeClass("input-error");
+                                    projectRepoSSHKeySelect.removeClass("input-error");
+                                    projectRepoPassphrase.removeClass("input-error");
+
+                                    RED.deploy.setDeployInflight(true);
+                                    RED.projects.settings.switchProject(projectData.name);
+
+                                    sendRequest({
+                                        url: "projects",
+                                        type: "POST",
+                                        handleAuthFail: false,
+                                        responses: {
+                                            200: function(data) {
+                                                dialog.dialog( "close" );
+                                            },
+                                            400: {
+                                                'project_exists': function(error) {
+                                                    console.log("already exists");
+                                                },
+                                                'git_error': function(error) {
+                                                    console.log("git error",error);
+                                                },
+                                                'git_connection_failed': function(error) {
+                                                    projectRepoInput.addClass("input-error");
+                                                    $("#projects-dialog-screen-create-project-repo-label small").text("Connection failed");
+                                                },
+                                                'git_not_a_repository': function(error) {
+                                                    projectRepoInput.addClass("input-error");
+                                                    $("#projects-dialog-screen-create-project-repo-label small").text("Not a git repository");
+                                                },
+                                                'git_repository_not_found': function(error) {
+                                                    projectRepoInput.addClass("input-error");
+                                                    $("#projects-dialog-screen-create-project-repo-label small").text("Repository not found");
+                                                },
+                                                'git_auth_failed': function(error) {
+                                                    $(".projects-dialog-screen-create-row-auth-error").show();
+
+                                                    projectRepoUserInput.addClass("input-error");
+                                                    projectRepoPasswordInput.addClass("input-error");
+                                                    // getRepoAuthDetails(req);
+                                                    projectRepoSSHKeySelect.addClass("input-error");
+                                                    projectRepoPassphrase.addClass("input-error");
+                                                },
+                                                'missing_flow_file': function(error) {
+                                                    // This is handled via a runtime notification.
+                                                    dialog.dialog("close");
+                                                },
+                                                'project_empty': function(error) {
+                                                    // This is handled via a runtime notification.
+                                                    dialog.dialog("close");
+                                                },
+                                                'credentials_load_failed': function(error) {
+                                                    // This is handled via a runtime notification.
+                                                    dialog.dialog("close");
+                                                },
+                                                '*': function(error) {
+                                                    reportUnexpectedError(error);
+                                                    $( dialog ).dialog( "close" );
+                                                }
+                                            }
+                                        }
+                                    },projectData).then(function() {
+                                        RED.events.emit("project:change", {name:name});
+                                    }).always(function() {
+                                        setTimeout(function() {
+                                            RED.deploy.setDeployInflight(false);
+                                        },500);
+                                    })
+
+                                }
+                            }
+                        ]
+                    }
+                }
+            })(),
+            'default-files': (function() {
+                var projectFlowFileInput;
+                var projectCredentialFileInput;
+                return {
+                    content: function(options) {
+                        var container = $('<div class="projects-dialog-screen-start"></div>');
+                        migrateProjectHeader.appendTo(container);
+                        var body = $('<div class="projects-dialog-screen-start-body"></div>').appendTo(container);
+
+                        $('<p>').text("Create your project files").appendTo(body);
+                        $('<p>').text("A project contains your flow files, a README file and a package.json file.").appendTo(body);
+                        $('<p>').text("It can contain any other files you want to maintain in the Git repository.").appendTo(body);
+                        if (!options.existingProject && RED.settings.files) {
+                            $('<p>').text("Your existing flow and credential files will be copied into the project.").appendTo(body);
+                        }
+
+                        var validateForm = function() {
+                            var valid = true;
+                            var flowFile = projectFlowFileInput.val();
+                            if (flowFile === "" || !/\.json$/.test(flowFile)) {
+                                valid = false;
+                                if (!projectFlowFileInput.hasClass("input-error")) {
+                                    projectFlowFileInput.addClass("input-error");
+                                    projectFlowFileInput.next().empty().append('<i style="margin-top: 8px;" class="fa fa-exclamation-triangle"></i>');
+                                }
+                                projectCredentialFileInput.text("");
+                                if (!projectCredentialFileInput.hasClass("input-error")) {
+                                    projectCredentialFileInput.addClass("input-error");
+                                    projectCredentialFileInput.next().empty().append('<i style="margin-top: 8px;" class="fa fa-exclamation-triangle"></i>');
+                                }
+                            } else {
+                                if (projectFlowFileInput.hasClass("input-error")) {
+                                    projectFlowFileInput.removeClass("input-error");
+                                    projectFlowFileInput.next().empty();
+                                }
+                                if (projectCredentialFileInput.hasClass("input-error")) {
+                                    projectCredentialFileInput.removeClass("input-error");
+                                    projectCredentialFileInput.next().empty();
+                                }
+                                projectCredentialFileInput.text(flowFile.substring(0,flowFile.length-5)+"_cred.json");
+                            }
+                            $("#projects-dialog-create-default-files").prop('disabled',!valid).toggleClass('disabled ui-button-disabled ui-state-disabled',!valid);
+                        }
+                        var row = $('<div class="form-row"></div>').appendTo(body);
+                        $('<label for="projects-dialog-screen-create-project-file">Flow file</label>').appendTo(row);
+                        var subrow = $('<div style="position:relative;"></div>').appendTo(row);
+                        var defaultFlowFile = (createProjectOptions.files &&createProjectOptions.files.flow) || (RED.settings.files && RED.settings.files.flow)||"flow.json";
+                        projectFlowFileInput = $('<input id="projects-dialog-screen-create-project-file" type="text">').val(defaultFlowFile)
+                            .on("change keyup paste",validateForm)
+                            .appendTo(subrow);
+                        $('<div class="projects-dialog-screen-input-status"></div>').appendTo(subrow);
+                        $('<label class="projects-edit-form-sublabel"><small>*.json</small></label>').appendTo(row);
+
+                        var defaultCredentialsFile = (createProjectOptions.files &&createProjectOptions.files.credentials) || (RED.settings.files && RED.settings.files.credentials)||"flow_cred.json";
+                        row = $('<div class="form-row"></div>').appendTo(body);
+                        $('<label for="projects-dialog-screen-create-project-credfile">Credentials file</label>').appendTo(row);
+                        subrow = $('<div style="position:relative;"></div>').appendTo(row);
+                        projectCredentialFileInput = $('<div style="width: 100%" class="uneditable-input" id="projects-dialog-screen-create-project-credentials">').text(defaultCredentialsFile)
+                            .appendTo(subrow);
+                        $('<div class="projects-dialog-screen-input-status"></div>').appendTo(subrow);
+
+                        setTimeout(function() {
+                            projectFlowFileInput.focus();
+                            validateForm();
+                        },50);
+
+                        return container;
+                    },
+                    buttons: function(options) {
+                        return [
+                            {
+                                // id: "clipboard-dialog-cancel",
+                                text: options.existingProject?"Cancel":"Back",
+                                click: function() {
+                                    if (options.existingProject) {
+                                        $(this).dialog('close');
+                                    } else {
+                                        show('project-details',options);
+                                    }
+                                }
+                            },
+                            {
+                                id: "projects-dialog-create-default-files",
+                                text: "Next", // TODO: nls
+                                class: "primary",
+                                click: function() {
+                                    createProjectOptions.files = {
+                                        flow: projectFlowFileInput.val(),
+                                        credentials: projectCredentialFileInput.text()
+                                    }
+                                    if (!options.existingProject) {
+                                        createProjectOptions.migrateFiles = true;
+                                    }
+                                    show('encryption-config',options);
+                                }
+                            }
+                        ]
+                    }
+                }
+            })(),
+            'encryption-config': (function() {
+                var emptyProjectCredentialInput;
+                return {
+                    content: function(options) {
+
+                        var container = $('<div class="projects-dialog-screen-start"></div>');
+                        migrateProjectHeader.appendTo(container);
+                        var body = $('<div class="projects-dialog-screen-start-body"></div>').appendTo(container);
+
+                        $('<p>').text("Setup encryption of your credentials file").appendTo(body);
+                        if (options.existingProject) {
+                            $('<p>').text("Your flow credentials file can be encrypted to keep its contents secure.").appendTo(body);
+                            $('<p>').text("If you want to store these credentials in a public Git repository, you must encrypt them by providing a secret key phrase.").appendTo(body);
+                        } else {
+                            if (RED.settings.flowEncryptionType === 'disabled') {
+                                $('<p>').text("Your flow credentials file is not currently encrypted.").appendTo(body);
+                                $('<p>').text("That means its contents, such as passwords and access tokens, can be read by anyone with access to the file.").appendTo(body);
+                                $('<p>').text("If you want to store these credentials in a public Git repository, you must encrypt them by providing a secret key phrase.").appendTo(body);
+                            } else {
+                                if (RED.settings.flowEncryptionType === 'user') {
+                                    $('<p>').text("Your flow credentials file is currently encrypted using the credentialSecret property from your settings file as the key.").appendTo(body);
+                                } else if (RED.settings.flowEncryptionType === 'system') {
+                                    $('<p>').text("Your flow credentials file is currently encrypted using a system-generated key. You should provide a new secret key for this project.").appendTo(body);
+                                }
+                                $('<p>').text("The key will be stored separately from your project files. You will need to provide the key to use this project in another instance of Node-RED.").appendTo(body);
+                            }
+                        }
+
+                        // var row = $('<div class="form-row"></div>').appendTo(body);
+                        // $('<label for="">Username</label>').appendTo(row);
+                        // var gitUsernameInput = $('<input type="text">').val(currentGitSettings.user.name||"").appendTo(row);
+                        // // $('<div style="position:relative;"></div>').text("This does not need to be your real name").appendTo(row);
+                        //
+                        // row = $('<div class="form-row"></div>').appendTo(body);
+                        // $('<label for="">Email</label>').appendTo(row);
+                        // var gitEmailInput = $('<input type="text">').val(currentGitSettings.user.email||"").appendTo(row);
+                        // // $('<div style="position:relative;"></div>').text("Something something email").appendTo(row);
+
+                        var validateForm = function() {
+                            var valid = true;
+                            var encryptionState = $("input[name=projects-encryption-type]:checked").val();
+                            if (encryptionState === 'enabled') {
+                                var encryptionKeyType = $("input[name=projects-encryption-key]:checked").val();
+                                if (encryptionKeyType === 'custom') {
+                                    valid = valid && emptyProjectCredentialInput.val()!=='';
+                                }
+                            }
+                            $("#projects-dialog-create-encryption").prop('disabled',!valid).toggleClass('disabled ui-button-disabled ui-state-disabled',!valid);
+                        }
+
+
+                        var row = $('<div class="form-row projects-dialog-screen-create-row projects-dialog-screen-create-row-empty"></div>').appendTo(body);
+                        $('<label>Credentials</label>').appendTo(row);
+
+                        var credentialsBox = $('<div style="width: 550px">').appendTo(row);
+                        var credentialsRightBox = $('<div style="min-height:150px; box-sizing: border-box; float: right; vertical-align: top; width: 331px; margin-left: -1px; padding: 15px; margin-top: -15px; border: 1px solid #ccc; border-radius: 3px;  display: inline-block">').appendTo(credentialsBox);
+                        var credentialsLeftBox = $('<div style="vertical-align: top; width: 220px;  display: inline-block">').appendTo(credentialsBox);
+
+                        var credentialsEnabledBox = $('<div class="form-row" style="padding:  7px 8px 3px 8px;border: 1px solid #ccc;border-radius: 4px;border-top-right-radius: 0;border-bottom-right-radius: 0;border-right-color: white;"></div>').appendTo(credentialsLeftBox);
+                        $('<label class="projects-edit-form-inline-label" style="margin-left: 5px"><input type="radio" style="vertical-align: middle; margin-top:0; margin-right: 10px;" name="projects-encryption-type" value="enabled"> <i style="font-size: 1.4em; margin-right: 8px; vertical-align: middle; color: #888;" class="fa fa-lock"></i> <span style="vertical-align: middle;">Enable encryption</span></label>').appendTo(credentialsEnabledBox);
+                        var credentialsDisabledBox = $('<div class="form-row" style="padding:  7px 8px 3px 8px;border: 1px solid white;border-radius: 4px;border-top-right-radius: 0;border-bottom-right-radius: 0;border-right-color: #ccc; "></div>').appendTo(credentialsLeftBox);
+                        $('<label class="projects-edit-form-inline-label" style="margin-left: 5px"><input type="radio" style="vertical-align: middle; margin-top:0; margin-right: 10px;" name="projects-encryption-type" value="disabled"> <i style="font-size: 1.4em; margin-right: 8px; vertical-align: middle; color: #888;" class="fa fa-unlock"></i> <span style="vertical-align: middle;">Disable encryption</span></label>').appendTo(credentialsDisabledBox);
+
+                        credentialsLeftBox.find("input[name=projects-encryption-type]").click(function(e) {
+                            var val = $(this).val();
+                            var toEnable;
+                            var toDisable;
+                            if (val === 'enabled') {
+                                toEnable = credentialsEnabledBox;
+                                toDisable = credentialsDisabledBox;
+                                $(".projects-encryption-enabled-row").show();
+                                $(".projects-encryption-disabled-row").hide();
+                                if ($("input[name=projects-encryption-key]:checked").val() === 'custom') {
+                                    emptyProjectCredentialInput.focus();
+                                }
+
+                            } else {
+                                toDisable = credentialsEnabledBox;
+                                toEnable = credentialsDisabledBox;
+                                $(".projects-encryption-enabled-row").hide();
+                                $(".projects-encryption-disabled-row").show();
+                            }
+
+                            toEnable.css({
+                                borderColor: "#ccc",
+                                borderRightColor: "white"
+                            });
+                            toDisable.css({
+                                borderColor: "white",
+                                borderRightColor: "#ccc"
+                            });
+
+                            validateForm();
+                        })
+
+                        row = $('<div class="form-row projects-encryption-enabled-row"></div>').appendTo(credentialsRightBox);
+                        $('<label class="projects-edit-form-inline-label '+((RED.settings.flowEncryptionType !== 'user')?'disabled':'')+'" style="margin-left: 5px"><input '+((RED.settings.flowEncryptionType !== 'user')?'disabled':'')+' type="radio" style="vertical-align: middle; margin-top:0; margin-right: 10px;" value="default" name="projects-encryption-key"> <span style="vertical-align: middle;">Copy over existing key</span></label>').appendTo(row);
+                        row = $('<div class="form-row projects-encryption-enabled-row"></div>').appendTo(credentialsRightBox);
+                        $('<label class="projects-edit-form-inline-label" style="margin-left: 5px"><input type="radio" style="vertical-align: middle; margin-top:0; margin-right: 10px;" value="custom" name="projects-encryption-key"> <span style="vertical-align: middle;">Use custom key</span></label>').appendTo(row);
+                        row = $('<div class="projects-encryption-enabled-row"></div>').appendTo(credentialsRightBox);
+                        emptyProjectCredentialInput = $('<input disabled type="password" style="margin-left: 25px; width: calc(100% - 30px);"></input>').appendTo(row);
+                        emptyProjectCredentialInput.on("change keyup paste", validateForm);
+
+                        row = $('<div class="form-row projects-encryption-disabled-row"></div>').hide().appendTo(credentialsRightBox);
+                        $('<div class="" style="padding: 5px 20px;"><i class="fa fa-warning"></i> The credentials file will not be encrypted and its contents easily read</div>').appendTo(row);
+
+                        credentialsRightBox.find("input[name=projects-encryption-key]").click(function() {
+                            var val = $(this).val();
+                            emptyProjectCredentialInput.attr("disabled",val === 'default');
+                            if (val === "custom") {
+                                emptyProjectCredentialInput.focus();
+                            }
+                            validateForm();
+                        });
+
+                        setTimeout(function() {
+                            credentialsLeftBox.find("input[name=projects-encryption-type][value=enabled]").click();
+                            if (RED.settings.flowEncryptionType !== 'user') {
+                                credentialsRightBox.find("input[name=projects-encryption-key][value=custom]").click();
+                            } else {
+                                credentialsRightBox.find("input[name=projects-encryption-key][value=default]").click();
+                            }
+                            validateForm();
+                        },100);
+
+                        return container;
+                    },
+                    buttons: function(options) {
+                            return [
+                            {
+                                // id: "clipboard-dialog-cancel",
+                                text: "Back",
+                                click: function() {
+                                    show('default-files',options);
+                                }
+                            },
+                            {
+                                id: "projects-dialog-create-encryption",
+                                text: options.existingProject?"Create project files":"Create project", // TODO: nls
+                                class: "primary disabled",
+                                disabled: true,
+                                click: function() {
+                                    var encryptionState = $("input[name=projects-encryption-type]:checked").val();
+                                    if (encryptionState === 'enabled') {
+                                        var encryptionKeyType = $("input[name=projects-encryption-key]:checked").val();
+                                        if (encryptionKeyType === 'custom') {
+                                            createProjectOptions.credentialSecret = emptyProjectCredentialInput.val();
+                                        } else {
+                                            // If 'use existing', leave createProjectOptions.credentialSecret blank
+                                            // - that will trigger it to use the existing key
+                                            // TODO: this option should be disabled if encryption is disabled
+                                        }
+                                    } else {
+                                        // Disabled encryption by explicitly setting credSec to false
+                                        createProjectOptions.credentialSecret = false;
+                                    }
+                                    RED.deploy.setDeployInflight(true);
+                                    RED.projects.settings.switchProject(createProjectOptions.name);
+
+                                    var method = "POST";
+                                    var url = "projects";
+
+                                    if (options.existingProject) {
+                                        createProjectOptions.initialise = true;
+                                        method = "PUT";
+                                        url = "projects/"+activeProject.name;
+                                    }
+                                    var self = this;
+                                    sendRequest({
+                                        url: url,
+                                        type: method,
+                                        requireCleanWorkspace: true,
+                                        handleAuthFail: false,
+                                        responses: {
+                                            200: function(data) {
+                                                createProjectOptions = {};
+                                                if (options.existingProject) {
+                                                    $( self ).dialog( "close" );
+                                                } else {
+                                                    show('create-success');
+                                                    RED.menu.setDisabled('menu-item-projects-open',false);
+                                                    RED.menu.setDisabled('menu-item-projects-settings',false);
+                                                }
+                                            },
+                                            400: {
+                                                'project_exists': function(error) {
+                                                    console.log("already exists");
+                                                },
+                                                'git_error': function(error) {
+                                                    console.log("git error",error);
+                                                },
+                                                'git_connection_failed': function(error) {
+                                                    projectRepoInput.addClass("input-error");
+                                                },
+                                                'git_auth_failed': function(error) {
+                                                    projectRepoUserInput.addClass("input-error");
+                                                    projectRepoPasswordInput.addClass("input-error");
+                                                    // getRepoAuthDetails(req);
+                                                    console.log("git auth error",error);
+                                                },
+                                                '*': function(error) {
+                                                    reportUnexpectedError(error);
+                                                    $( dialog ).dialog( "close" );
+                                                }
+                                            }
+                                        }
+                                    },createProjectOptions).always(function() {
+                                        setTimeout(function() {
+                                            RED.deploy.setDeployInflight(false);
+                                        },500);
+                                    })
+                                }
+                            }
+                        ];
+                    }
+                }
+            })(),
+            'create-success': {
+                content: function(options) {
+
+                    var container = $('<div class="projects-dialog-screen-start"></div>');
+                    migrateProjectHeader.appendTo(container);
+                    var body = $('<div class="projects-dialog-screen-start-body"></div>').appendTo(container);
+
+                    $('<p>').text("You have successfully created your first project!").appendTo(body);
+                    $('<p>').text("You can now continue to use Node-RED just as you always have.").appendTo(body);
+                    $('<p>').text("The 'info' tab in the sidebar shows you what your current active project is. "+
+                    "The button next to the name can be used to access the project settings view.").appendTo(body);
+                    $('<p>').text("The 'history' tab in the sidebar can be used to view files that have changed "+
+                    "in your project and to commit them. It shows you a complete history of your commits and "+
+                    "allows you to push your changes to a remote repository.").appendTo(body);
+
+                    return container;
+                },
+                buttons: [
+                    {
+                        text: "Done",
+                        click: function() {
+                            $( this ).dialog( "close" );
+                        }
+                    }
+                ]
+            },
+            'create': (function() {
+                var projectNameInput;
+                var projectSummaryInput;
+                var projectFlowFileInput;
+                var projectSecretInput;
+                var projectSecretSelect;
+                var copyProject;
+                var projectRepoInput;
+                var projectCloneSecret;
+                var emptyProjectCredentialInput;
+                var projectRepoUserInput;
+                var projectRepoPasswordInput;
+                var projectNameSublabel;
+                var projectRepoSSHKeySelect;
+                var projectRepoPassphrase;
+                var projectRepoRemoteName
+                var projectRepoBranch;
+                var selectedProject;
+
+                return {
+                    title: "Projects", // TODO: NLS
+                    content: function(options) {
+                        var projectList = null;
+                        selectedProject = null;
+                        var pendingFormValidation = false;
+                        $.getJSON("projects", function(data) {
+                            projectList = {};
+                            data.projects.forEach(function(p) {
+                                projectList[p] = true;
+                                if (pendingFormValidation) {
+                                    pendingFormValidation = false;
+                                    validateForm();
+                                }
+                            })
+                        });
+
+                        var container = $('<div class="projects-dialog-screen-create"></div>');
+                        var row;
+
+                        var validateForm = function() {
+                            var projectName = projectNameInput.val();
+                            var valid = true;
+                            if (projectNameInputChanged) {
+                                if (projectList === null) {
+                                    pendingFormValidation = true;
+                                    return;
+                                }
+                                projectNameStatus.empty();
+                                if (!/^[a-zA-Z0-9\-_]+$/.test(projectName) || projectList[projectName]) {
+                                    projectNameInput.addClass("input-error");
+                                    $('<i style="margin-top: 8px;" class="fa fa-exclamation-triangle"></i>').appendTo(projectNameStatus);
+                                    projectNameValid = false;
+                                    valid = false;
+                                    if (projectList[projectName]) {
+                                        projectNameSublabel.text("Project already exists");
+                                    } else {
+                                        projectNameSublabel.text("Must contain only A-Z 0-9 _ -");
+                                    }
+                                } else {
+                                    projectNameInput.removeClass("input-error");
+                                    $('<i style="margin-top: 8px;" class="fa fa-check"></i>').appendTo(projectNameStatus);
+                                    projectNameSublabel.text("Must contain only A-Z 0-9 _ -");
+                                    projectNameValid = true;
+                                }
+                                projectNameLastChecked = projectName;
+                            }
+                            valid = projectNameValid;
+
+                            var projectType = $(".projects-dialog-screen-create-type.selected").data('type');
+                            if (projectType === 'copy') {
+                                if (!copyProject) {
+                                    valid = false;
+                                }
+                            } else if (projectType === 'clone') {
+                                var repo = projectRepoInput.val();
+
+                                // var validRepo = /^(?:file|git|ssh|https?|[\d\w\.\-_]+@[\w\.]+):(?:\/\/)?[\w\.@:\/~_-]+(?:\/?|\#[\d\w\.\-_]+?)$/.test(repo);
+                                var validRepo = repo.length > 0 && !/\s/.test(repo);
+                                if (/^https?:\/\/[^/]+@/i.test(repo)) {
+                                    $("#projects-dialog-screen-create-project-repo-label small").text("Do not include the username/password in the url");
+                                    validRepo = false;
+                                }
+                                if (!validRepo) {
+                                    if (projectRepoChanged) {
+                                        projectRepoInput.addClass("input-error");
+                                    }
+                                    valid = false;
+                                } else {
+                                    projectRepoInput.removeClass("input-error");
+                                }
+                                if (/^https?:\/\//.test(repo)) {
+                                    $(".projects-dialog-screen-create-row-creds").show();
+                                    $(".projects-dialog-screen-create-row-sshkey").hide();
+                                } else if (/^(?:ssh|[\S]+?@[\S]+?):(?:\/\/)?/.test(repo)) {
+                                    $(".projects-dialog-screen-create-row-creds").hide();
+                                    $(".projects-dialog-screen-create-row-sshkey").show();
+                                    // if ( !getSelectedSSHKey(projectRepoSSHKeySelect) ) {
+                                    //     valid = false;
+                                    // }
+                                } else {
+                                    $(".projects-dialog-screen-create-row-creds").hide();
+                                    $(".projects-dialog-screen-create-row-sshkey").hide();
+                                }
+
+
+                            } else if (projectType === 'empty') {
+                                var flowFile = projectFlowFileInput.val();
+                                if (flowFile === "" || !/\.json$/.test(flowFile)) {
+                                    valid = false;
+                                    if (!projectFlowFileInput.hasClass("input-error")) {
+                                        projectFlowFileInput.addClass("input-error");
+                                        projectFlowFileInput.next().empty().append('<i style="margin-top: 8px;" class="fa fa-exclamation-triangle"></i>');
+                                    }
+                                } else {
+                                    if (projectFlowFileInput.hasClass("input-error")) {
+                                        projectFlowFileInput.removeClass("input-error");
+                                        projectFlowFileInput.next().empty();
+                                    }
+                                }
+
+                                var encryptionState = $("input[name=projects-encryption-type]:checked").val();
+                                if (encryptionState === 'enabled') {
+                                    var encryptionKeyType = $("input[name=projects-encryption-key]:checked").val();
+                                    if (encryptionKeyType === 'custom') {
+                                        valid = valid && emptyProjectCredentialInput.val()!==''
+                                    }
+                                }
+                            } else if (projectType === 'open') {
+                                valid = !!selectedProject;
+                            }
+
+                            $("#projects-dialog-create").prop('disabled',!valid).toggleClass('disabled ui-button-disabled ui-state-disabled',!valid);
+                        }
+
+                        row = $('<div class="form-row button-group"></div>').appendTo(container);
+
+                        var openProject = $('<button data-type="open" class="editor-button projects-dialog-screen-create-type toggle"><i class="fa fa-archive fa-2x"></i><i style="position: absolute;" class="fa fa-folder-open"></i><br/>Open Project</button>').appendTo(row);
+                        var createAsEmpty = $('<button data-type="empty" class="editor-button projects-dialog-screen-create-type toggle"><i class="fa fa-archive fa-2x"></i><i style="position: absolute;" class="fa fa-asterisk"></i><br/>Create Project</button>').appendTo(row);
+                        // var createAsCopy = $('<button data-type="copy" class="editor-button projects-dialog-screen-create-type toggle"><i class="fa fa-archive fa-2x"></i><i class="fa fa-long-arrow-right fa-2x"></i><i class="fa fa-archive fa-2x"></i><br/>Copy existing</button>').appendTo(row);
+                        var createAsClone = $('<button data-type="clone" class="editor-button projects-dialog-screen-create-type toggle"><i class="fa fa-archive fa-2x"></i><i style="position: absolute;" class="fa fa-git"></i><br/>Clone Repository</button>').appendTo(row);
+                        // var createAsClone = $('<button data-type="clone" class="editor-button projects-dialog-screen-create-type toggle"><i class="fa fa-git fa-2x"></i><i class="fa fa-arrows-h fa-2x"></i><i class="fa fa-archive fa-2x"></i><br/>Clone Repository</button>').appendTo(row);
+                        row.find(".projects-dialog-screen-create-type").click(function(evt) {
+                            evt.preventDefault();
+                            container.find(".projects-dialog-screen-create-type").removeClass('selected');
+                            $(this).addClass('selected');
+                            container.find(".projects-dialog-screen-create-row").hide();
+                            container.find(".projects-dialog-screen-create-row-"+$(this).data('type')).show();
+                            validateForm();
+                            projectNameInput.focus();
+                            switch ($(this).data('type')) {
+                                case "open": $("#projects-dialog-create").text("Open project"); break;
+                                case "empty": $("#projects-dialog-create").text("Create project"); break;
+                                case "clone": $("#projects-dialog-create").text("Clone project"); break;
+                            }
+                        })
+
+                        row = $('<div class="form-row projects-dialog-screen-create-row projects-dialog-screen-create-row-open"></div>').hide().appendTo(container);
+                        createProjectList({
+                            canSelectActive: false,
+                            dblclick: function(project) {
+                                selectedProject = project;
+                                $("#projects-dialog-create").click();
+                            },
+                            select: function(project) {
+                                selectedProject = project;
+                                validateForm();
+                            },
+                            delete: function(project) {
+                                if (projectList) {
+                                    delete projectList[project.name];
+                                }
+                                selectedProject = null;
+
+                                validateForm();
+                            }
+                        }).appendTo(row);
+
+                        row = $('<div class="form-row projects-dialog-screen-create-row projects-dialog-screen-create-row-empty projects-dialog-screen-create-row-clone"></div>').appendTo(container);
+                        $('<label for="projects-dialog-screen-create-project-name">Project name</label>').appendTo(row);
+
+                        var subrow = $('<div style="position:relative;"></div>').appendTo(row);
+                        projectNameInput = $('<input id="projects-dialog-screen-create-project-name" type="text"></input>').appendTo(subrow);
+                        var projectNameStatus = $('<div class="projects-dialog-screen-input-status"></div>').appendTo(subrow);
+
+                        var projectNameInputChanged = false;
+                        var projectNameLastChecked = "";
+                        var projectNameValid;
+                        var checkProjectName;
+                        var autoInsertedName = "";
+
+
+                        projectNameInput.on("change keyup paste",function() {
+                            projectNameInputChanged = (projectNameInput.val() !== projectNameLastChecked);
+                            if (checkProjectName) {
+                                clearTimeout(checkProjectName);
+                            } else if (projectNameInputChanged) {
+                                projectNameStatus.empty();
+                                $('<img src="red/images/spin.svg"/>').appendTo(projectNameStatus);
+                                if (projectNameInput.val() === '') {
+                                    validateForm();
+                                    return;
+                                }
+                            }
+                            checkProjectName = setTimeout(function() {
+                                validateForm();
+                                checkProjectName = null;
+                            },300)
+                        });
+                        projectNameSublabel = $('<label class="projects-edit-form-sublabel"><small>Must contain only A-Z 0-9 _ -</small></label>').appendTo(row).find("small");
+
+                        // Empty Project
+                        row = $('<div class="form-row projects-dialog-screen-create-row projects-dialog-screen-create-row-empty"></div>').appendTo(container);
+                        $('<label for="projects-dialog-screen-create-project-desc">Description</label>').appendTo(row);
+                        projectSummaryInput = $('<input id="projects-dialog-screen-create-project-desc" type="text">').appendTo(row);
+                        $('<label class="projects-edit-form-sublabel"><small>Optional</small></label>').appendTo(row);
+
+                        row = $('<div class="form-row projects-dialog-screen-create-row projects-dialog-screen-create-row-empty"></div>').appendTo(container);
+                        $('<label for="projects-dialog-screen-create-project-file">Flow file</label>').appendTo(row);
+                        subrow = $('<div style="position:relative;"></div>').appendTo(row);
+                        projectFlowFileInput = $('<input id="projects-dialog-screen-create-project-file" type="text">').val("flow.json")
+                            .on("change keyup paste",validateForm)
+                            .appendTo(subrow);
+                        $('<div class="projects-dialog-screen-input-status"></div>').appendTo(subrow);
+                        $('<label class="projects-edit-form-sublabel"><small>*.json</small></label>').appendTo(row);
+
+                        row = $('<div class="form-row projects-dialog-screen-create-row projects-dialog-screen-create-row-empty"></div>').appendTo(container);
+                        $('<label>Credentials</label>').appendTo(row);
+
+                        var credentialsBox = $('<div style="width: 550px">').appendTo(row);
+                        var credentialsRightBox = $('<div style="min-height:150px; box-sizing: border-box; float: right; vertical-align: top; width: 331px; margin-left: -1px; padding: 15px; margin-top: -15px; border: 1px solid #ccc; border-radius: 3px;  display: inline-block">').appendTo(credentialsBox);
+                        var credentialsLeftBox = $('<div style="vertical-align: top; width: 220px;  display: inline-block">').appendTo(credentialsBox);
+
+                        var credentialsEnabledBox = $('<div class="form-row" style="padding:  7px 8px 3px 8px;border: 1px solid #ccc;border-radius: 4px;border-top-right-radius: 0;border-bottom-right-radius: 0;border-right-color: white;"></div>').appendTo(credentialsLeftBox);
+                        $('<label class="projects-edit-form-inline-label" style="margin-left: 5px"><input type="radio" checked style="vertical-align: middle; margin-top:0; margin-right: 10px;" name="projects-encryption-type" value="enabled"> <i style="font-size: 1.4em; margin-right: 8px; vertical-align: middle; color: #888;" class="fa fa-lock"></i> <span style="vertical-align: middle;">Enable encryption</span></label>').appendTo(credentialsEnabledBox);
+                        var credentialsDisabledBox = $('<div class="form-row" style="padding:  7px 8px 3px 8px;border: 1px solid white;border-radius: 4px;border-top-right-radius: 0;border-bottom-right-radius: 0;border-right-color: #ccc; "></div>').appendTo(credentialsLeftBox);
+                        $('<label class="projects-edit-form-inline-label" style="margin-left: 5px"><input type="radio" style="vertical-align: middle; margin-top:0; margin-right: 10px;" name="projects-encryption-type" value="disabled"> <i style="font-size: 1.4em; margin-right: 8px; vertical-align: middle; color: #888;" class="fa fa-unlock"></i> <span style="vertical-align: middle;">Disable encryption</span></label>').appendTo(credentialsDisabledBox);
+
+                        credentialsLeftBox.find("input[name=projects-encryption-type]").click(function(e) {
+                            var val = $(this).val();
+                            var toEnable;
+                            var toDisable;
+                            if (val === 'enabled') {
+                                toEnable = credentialsEnabledBox;
+                                toDisable = credentialsDisabledBox;
+                                $(".projects-encryption-enabled-row").show();
+                                $(".projects-encryption-disabled-row").hide();
+                                if ($("input[name=projects-encryption-key]:checked").val() === 'custom') {
+                                    emptyProjectCredentialInput.focus();
+                                }
+                            } else {
+                                toDisable = credentialsEnabledBox;
+                                toEnable = credentialsDisabledBox;
+                                $(".projects-encryption-enabled-row").hide();
+                                $(".projects-encryption-disabled-row").show();
+
+                            }
+
+                            toEnable.css({
+                                borderColor: "#ccc",
+                                borderRightColor: "white"
+                            });
+                            toDisable.css({
+                                borderColor: "white",
+                                borderRightColor: "#ccc"
+                            })
+                            validateForm();
+                        })
+
+                        row = $('<div class="form-row projects-encryption-enabled-row"></div>').appendTo(credentialsRightBox);
+                        $('<label class="projects-edit-form-inline-label">Encryption key</label>').appendTo(row);
+                        // row = $('<div class="projects-encryption-enabled-row"></div>').appendTo(credentialsRightBox);
+                        emptyProjectCredentialInput = $('<input type="password"></input>').appendTo(row);
+                        emptyProjectCredentialInput.on("change keyup paste", validateForm);
+                        $('<label class="projects-edit-form-sublabel"><small>A phrase to secure your credentials with</small></label>').appendTo(row);
+
+
+                        row = $('<div class="form-row projects-encryption-disabled-row"></div>').hide().appendTo(credentialsRightBox);
+                        $('<div class="" style="padding: 5px 20px;"><i class="fa fa-warning"></i> The credentials file will not be encrypted and its contents easily read</div>').appendTo(row);
+
+                        credentialsRightBox.find("input[name=projects-encryption-key]").click(function() {
+                            var val = $(this).val();
+                            emptyProjectCredentialInput.attr("disabled",val === 'default');
+                            if (val === "custom") {
+                                emptyProjectCredentialInput.focus();
+                            }
+                            validateForm();
+                        })
+
+                        // Clone Project
+                        row = $('<div class="hide form-row projects-dialog-screen-create-row projects-dialog-screen-create-row-clone"></div>').appendTo(container);
+                        $('<label for="projects-dialog-screen-create-project-repo">Git repository URL</label>').appendTo(row);
+                        projectRepoInput = $('<input id="projects-dialog-screen-create-project-repo" type="text" placeholder="https://git.example.com/path/my-project.git"></input>').appendTo(row);
+                        $('<label id="projects-dialog-screen-create-project-repo-label" class="projects-edit-form-sublabel"><small>https://, ssh:// or file://</small></label>').appendTo(row);
+
+                        var projectRepoChanged = false;
+                        var lastProjectRepo = "";
+                        projectRepoInput.on("change keyup paste",function() {
+                            projectRepoChanged = true;
+                            var repo = $(this).val();
+                            if (lastProjectRepo !== repo) {
+                                $("#projects-dialog-screen-create-project-repo-label small").text("https://, ssh:// or file://");
+                            }
+                            lastProjectRepo = repo;
+
+                            var m = /\/([^/]+?)(?:\.git)?$/.exec(repo);
+                            if (m) {
+                                var projectName = projectNameInput.val();
+                                if (projectName === "" || projectName === autoInsertedName) {
+                                    autoInsertedName = m[1];
+                                    projectNameInput.val(autoInsertedName);
+                                    projectNameInput.change();
+                                }
+                            }
+                            validateForm();
+                        });
+
+
+                        var cloneAuthRows = $('<div class="hide projects-dialog-screen-create-row projects-dialog-screen-create-row-clone"></div>').hide().appendTo(container);
+                        row = $('<div class="form-row projects-dialog-screen-create-row-auth-error"></div>').hide().appendTo(cloneAuthRows);
+                        $('<div><i class="fa fa-warning"></i> Authentication failed</div>').appendTo(row);
+
+                        // Repo credentials - username/password ----------------
+                        row = $('<div class="hide form-row projects-dialog-screen-create-row-creds"></div>').hide().appendTo(cloneAuthRows);
+
+                        var subrow = $('<div style="width: calc(50% - 10px); display:inline-block;"></div>').appendTo(row);
+                        $('<label for="projects-dialog-screen-create-project-repo-user">Username</label>').appendTo(subrow);
+                        projectRepoUserInput = $('<input id="projects-dialog-screen-create-project-repo-user" type="text"></input>').appendTo(subrow);
+
+                        subrow = $('<div style="width: calc(50% - 10px); margin-left: 20px; display:inline-block;"></div>').appendTo(row);
+                        $('<label for="projects-dialog-screen-create-project-repo-pass">Password</label>').appendTo(subrow);
+                        projectRepoPasswordInput = $('<input id="projects-dialog-screen-create-project-repo-pass" type="password"></input>').appendTo(subrow);
+                        // -----------------------------------------------------
+
+                        // Repo credentials - key/passphrase -------------------
+                        row = $('<div class="form-row projects-dialog-screen-create-row projects-dialog-screen-create-row-sshkey"></div>').hide().appendTo(cloneAuthRows);
+                        subrow = $('<div style="width: calc(50% - 10px); display:inline-block;"></div>').appendTo(row);
+                        $('<label for="projects-dialog-screen-create-project-repo-passphrase">SSH Key</label>').appendTo(subrow);
+                        projectRepoSSHKeySelect = $("<select>",{style:"width: 100%"}).appendTo(subrow);
+
+                        $.getJSON("settings/user/keys", function(data) {
+                            var count = 0;
+                            data.keys.forEach(function(key) {
+                                projectRepoSSHKeySelect.append($("<option></option>").val(key.name).text(key.name));
+                                count++;
+                            });
+                            if (count === 0) {
+                                projectRepoSSHKeySelect.addClass("input-error");
+                                projectRepoSSHKeySelect.attr("disabled",true);
+                                sshwarningRow.show();
+                            } else {
+                                projectRepoSSHKeySelect.removeClass("input-error");
+                                projectRepoSSHKeySelect.attr("disabled",false);
+                                sshwarningRow.hide();
+                            }
+                        });
+                        subrow = $('<div style="width: calc(50% - 10px); margin-left: 20px; display:inline-block;"></div>').appendTo(row);
+                        $('<label for="projects-dialog-screen-create-project-repo-passphrase">Passphrase</label>').appendTo(subrow);
+                        projectRepoPassphrase = $('<input id="projects-dialog-screen-create-project-repo-passphrase" type="password"></input>').appendTo(subrow);
+
+                        subrow = $('<div class="form-row projects-dialog-screen-create-row projects-dialog-screen-create-row-sshkey"></div>').appendTo(cloneAuthRows);
+                        var sshwarningRow = $('<div class="projects-dialog-screen-create-row-auth-error-no-keys"></div>').hide().appendTo(subrow);
+                        $('<div class="form-row"><i class="fa fa-warning"></i> Before you can clone a repository over ssh you must add an SSH key to access it.</div>').appendTo(sshwarningRow);
+                        subrow = $('<div style="text-align: center">').appendTo(sshwarningRow);
+                        $('<button class="editor-button">Add an ssh key</button>').appendTo(subrow).click(function(e) {
+                            e.preventDefault();
+                            $('#projects-dialog-cancel').click();
+                            RED.userSettings.show('gitconfig');
+                            setTimeout(function() {
+                                $("#user-settings-gitconfig-add-key").click();
+                            },500);
+                        });
+                        // -----------------------------------------------------
+
+
+                        // Secret - clone
+                        row = $('<div class="hide form-row projects-dialog-screen-create-row projects-dialog-screen-create-row-clone"></div>').appendTo(container);
+                        $('<label>Credentials encryption key</label>').appendTo(row);
+                        projectSecretInput = $('<input type="password"></input>').appendTo(row);
+
+
+                        switch(options.screen||"empty") {
+                            case "empty": createAsEmpty.click(); break;
+                            case "open":  openProject.click(); break;
+                            case "clone": createAsClone.click(); break;
+                        }
+
+                        setTimeout(function() {
+                            if ((options.screen||"empty") !== "open") {
+                                projectNameInput.focus();
+                            } else {
+                                $("#projects-dialog-project-list-search").focus();
+                            }
+                        },50);
+                        return container;
+                    },
+                    buttons: function(options) {
+                        var initialLabel;
+                        switch (options.screen||"empty") {
+                            case "open": initialLabel = "Open project"; break;
+                            case "empty": initialLabel = "Create project"; break;
+                            case "clone": initialLabel = "Clone project"; break;
+                        }
+                        return [
+                            {
+                                id: "projects-dialog-cancel",
+                                text: RED._("common.label.cancel"),
+                                click: function() {
+                                    $( this ).dialog( "close" );
+                                }
+                            },
+                            {
+                                id: "projects-dialog-create",
+                                text: initialLabel,
+                                class: "primary disabled",
+                                disabled: true,
+                                click: function() {
+                                    var projectType = $(".projects-dialog-screen-create-type.selected").data('type');
+                                    var projectData = {
+                                        name: projectNameInput.val(),
+                                    }
+                                    if (projectType === 'empty') {
+                                        projectData.summary = projectSummaryInput.val();
+                                        projectData.files = {
+                                            flow: projectFlowFileInput.val()
+                                        };
+                                        var encryptionState = $("input[name=projects-encryption-type]:checked").val();
+                                        if (encryptionState === 'enabled') {
+                                            projectData.credentialSecret = emptyProjectCredentialInput.val();
+                                        } else {
+                                            // Disabled encryption by explicitly setting credSec to false
+                                            projectData.credentialSecret = false;
+                                        }
+
+
+                                    } else if (projectType === 'copy') {
+                                        projectData.copy = copyProject.name;
+                                    } else if (projectType === 'clone') {
+                                        projectData.credentialSecret = projectSecretInput.val();
+                                        var repoUrl = projectRepoInput.val();
+                                        var metaData = {};
+                                        if (/^(?:ssh|[\d\w\.\-_]+@[\w\.]+):(?:\/\/)?/.test(repoUrl)) {
+                                            var selected = projectRepoSSHKeySelect.val();//false;//getSelectedSSHKey(projectRepoSSHKeySelect);
+                                            if ( selected ) {
+                                                projectData.git = {
+                                                    remotes: {
+                                                        'origin': {
+                                                            url: repoUrl,
+                                                            keyFile: selected,
+                                                            passphrase: projectRepoPassphrase.val()
+                                                        }
+                                                    }
+                                                };
+                                            }
+                                            else {
+                                                console.log("Error! Can't get selected SSH key path.");
+                                                return;
+                                            }
+                                        }
+                                        else {
+                                            projectData.git = {
+                                                remotes: {
+                                                    'origin': {
+                                                        url: repoUrl,
+                                                        username: projectRepoUserInput.val(),
+                                                        password: projectRepoPasswordInput.val()
+                                                    }
+                                                }
+                                            };
+                                        }
+                                    } else if (projectType === 'open') {
+                                        return switchProject(selectedProject.name,function(err,data) {
+                                            dialog.dialog( "close" );
+                                            if (err) {
+                                                if (err.error !== 'credentials_load_failed') {
+                                                    console.log("unexpected_error",err)
+                                                }
+                                            }
+                                        })
+                                    }
+
+                                    $(".projects-dialog-screen-create-row-auth-error").hide();
+                                    $("#projects-dialog-screen-create-project-repo-label small").text("https://, ssh:// or file://");
+
+                                    projectRepoUserInput.removeClass("input-error");
+                                    projectRepoPasswordInput.removeClass("input-error");
+                                    projectRepoSSHKeySelect.removeClass("input-error");
+                                    projectRepoPassphrase.removeClass("input-error");
+
+                                    RED.deploy.setDeployInflight(true);
+                                    RED.projects.settings.switchProject(projectData.name);
+
+                                    sendRequest({
+                                        url: "projects",
+                                        type: "POST",
+                                        handleAuthFail: false,
+                                        responses: {
+                                            200: function(data) {
+                                                dialog.dialog( "close" );
+                                            },
+                                            400: {
+                                                'project_exists': function(error) {
+                                                    console.log("already exists");
+                                                },
+                                                'git_error': function(error) {
+                                                    console.log("git error",error);
+                                                },
+                                                'git_connection_failed': function(error) {
+                                                    projectRepoInput.addClass("input-error");
+                                                    $("#projects-dialog-screen-create-project-repo-label small").text("Connection failed");
+                                                },
+                                                'git_not_a_repository': function(error) {
+                                                    projectRepoInput.addClass("input-error");
+                                                    $("#projects-dialog-screen-create-project-repo-label small").text("Not a git repository");
+                                                },
+                                                'git_repository_not_found': function(error) {
+                                                    projectRepoInput.addClass("input-error");
+                                                    $("#projects-dialog-screen-create-project-repo-label small").text("Repository not found");
+                                                },
+                                                'git_auth_failed': function(error) {
+                                                    $(".projects-dialog-screen-create-row-auth-error").show();
+
+                                                    projectRepoUserInput.addClass("input-error");
+                                                    projectRepoPasswordInput.addClass("input-error");
+                                                    // getRepoAuthDetails(req);
+                                                    projectRepoSSHKeySelect.addClass("input-error");
+                                                    projectRepoPassphrase.addClass("input-error");
+                                                },
+                                                'missing_flow_file': function(error) {
+                                                    // This is handled via a runtime notification.
+                                                    dialog.dialog("close");
+                                                },
+                                                'project_empty': function(error) {
+                                                    // This is handled via a runtime notification.
+                                                    dialog.dialog("close");
+                                                },
+                                                'credentials_load_failed': function(error) {
+                                                    // This is handled via a runtime notification.
+                                                    dialog.dialog("close");
+                                                },
+                                                '*': function(error) {
+                                                    reportUnexpectedError(error);
+                                                    $( dialog ).dialog( "close" );
+                                                }
+                                            }
+                                        }
+                                    },projectData).then(function() {
+                                        RED.events.emit("project:change", {name:name});
+                                    }).always(function() {
+                                        setTimeout(function() {
+                                            RED.deploy.setDeployInflight(false);
+                                        },500);
+                                    })
+                                }
+                            }
+                        ]
+                    }
+                }
+            })()
+        }
+    }
+
+    function switchProject(name,done) {
+        RED.deploy.setDeployInflight(true);
+        RED.projects.settings.switchProject(name);
+        sendRequest({
+            url: "projects/"+name,
+            type: "PUT",
+            requireCleanWorkspace: true,
+            responses: {
+                200: function(data) {
+                    done(null,data);
+                },
+                400: {
+                    '*': done
+                },
+            }
+        },{active:true}).then(function() {
+            RED.events.emit("project:change", {name:name});
+        }).always(function() {
+            setTimeout(function() {
+                RED.deploy.setDeployInflight(false);
+            },500);
+        })
+    }
+
+    function deleteProject(row,name,done) {
+        var cover = $('<div>').css({
+            background:"white",
+            position:"absolute",
+            top:0,right:0,bottom:0,left:"100%",
+            overflow:"hidden",
+            padding: "5px 20px",
+            transition: "left 0.4s",
+            whitespace: "nowrap",
+            width:"1000px"
+        }).click(function(evt) { evt.stopPropagation(); }).appendTo(row);
+        $('<span>').css({"lineHeight":"40px"}).text("Are you sure you want to delete this project?").appendTo(cover);
+        $('<button style="margin-left:20px" class="editor-button">Cancel</button>')
+            .appendTo(cover)
+            .click(function(e) {
+                e.stopPropagation();
+                cover.remove();
+                done(true);
+            });
+        $('<button style="margin-left:20px" class="editor-button primary">Delete</button>')
+            .appendTo(cover)
+            .click(function(e) {
+                e.stopPropagation();
+                cover.remove();
+                sendRequest({
+                    url: "projects/"+name,
+                    type: "DELETE",
+                    responses: {
+                        200: function(data) {
+                            done(false);
+                        },
+                        400: {
+                            'unexpected_error': function(error) {
+                                cover.remove();
+                                done(true);
+                            }
+                        }
+                    }
+                });
+            });
+
+        setTimeout(function() {
+            cover.css("left",0);
+        },50);
+        //
+    }
+
+    function show(s,options) {
+        if (!dialog) {
+            RED.projects.init();
+        }
+        var screen = screens[s];
+        var container = screen.content(options||{});
+
+        dialogBody.empty();
+        var buttons = screen.buttons;
+        if (typeof buttons === 'function') {
+            buttons = buttons(options||{});
+        }
+        dialog.dialog('option','buttons',buttons);
+        dialogBody.append(container);
+        dialog.dialog('option','title',screen.title||"");
+        dialog.dialog("open");
+        dialog.dialog({position: { 'my': 'center top', 'at': 'center top+10%', 'of': window }});
+    }
+
+    function createProjectList(options) {
+        options = options||{};
+        var height = options.height || "300px";
+        var container = $('<div></div>',{class:"projects-dialog-project-list-container" });
+        var filterTerm = "";
+
+        var searchDiv = $("<div>",{class:"red-ui-search-container"}).appendTo(container);
+        var searchInput = $('<input id="projects-dialog-project-list-search" type="text" placeholder="search your projects">').appendTo(searchDiv).searchBox({
+            //data-i18n="[placeholder]menu.label.searchInput"
+            delay: 200,
+            change: function() {
+                filterTerm = $(this).val().toLowerCase();
+                list.editableList('filter');
+                if (selectedListItem && !selectedListItem.is(":visible")) {
+                    selectedListItem.children().children().removeClass('selected');
+                    selectedListItem = list.children(":visible").first();
+                    selectedListItem.children().children().addClass('selected');
+                    if (options.select) {
+                        options.select(selectedListItem.children().data('data'));
+                    }
+                } else {
+                    selectedListItem = list.children(":visible").first();
+                    selectedListItem.children().children().addClass('selected');
+                    if (options.select) {
+                        options.select(selectedListItem.children().data('data'));
+                    }
+                }
+                ensureSelectedIsVisible();
+            }
+        });
+        var selectedListItem;
+
+        searchInput.on('keydown',function(evt) {
+            if (evt.keyCode === 40) {
+                evt.preventDefault();
+                // Down
+                var next = selectedListItem;
+                if (selectedListItem) {
+                    do {
+                        next = next.next();
+                    } while(next.length !== 0 && !next.is(":visible"));
+                    if (next.length === 0) {
+                        return;
+                    }
+                    selectedListItem.children().children().removeClass('selected');
+                } else {
+                    next = list.children(":visible").first();
+                }
+                selectedListItem = next;
+                selectedListItem.children().children().addClass('selected');
+                if (options.select) {
+                    options.select(selectedListItem.children().data('data'));
+                }
+                ensureSelectedIsVisible();
+            } else if (evt.keyCode === 38) {
+                evt.preventDefault();
+                // Up
+                var prev = selectedListItem;
+                if (selectedListItem) {
+                    do {
+                        prev = prev.prev();
+                    } while(prev.length !== 0 && !prev.is(":visible"));
+                    if (prev.length === 0) {
+                        return;
+                    }
+                    selectedListItem.children().children().removeClass('selected');
+                } else {
+                    prev = list.children(":visible").first();
+                }
+                selectedListItem = prev;
+                selectedListItem.children().children().addClass('selected');
+                if (options.select) {
+                    options.select(selectedListItem.children().data('data'));
+                }
+                ensureSelectedIsVisible();
+            } else if (evt.keyCode === 13) {
+                evt.preventDefault();
+                // Enter
+                if (selectedListItem) {
+                    if (options.dblclick) {
+                        options.dblclick(selectedListItem.children().data('data'));
+                    }
+                }
+            }
+        });
+
+        searchInput.i18n();
+
+        var ensureSelectedIsVisible = function() {
+            var selectedEntry = list.find(".projects-dialog-project-list-entry.selected").parent().parent();
+            if (selectedEntry.length === 1) {
+                var scrollWindow = listContainer;
+                var scrollHeight = scrollWindow.height();
+                var scrollOffset = scrollWindow.scrollTop();
+                var y = selectedEntry.position().top;
+                var h = selectedEntry.height();
+                if (y+h > scrollHeight) {
+                    scrollWindow.animate({scrollTop: '-='+(scrollHeight-y-h)},50);
+                } else if (y<0) {
+                    scrollWindow.animate({scrollTop: '+='+y},50);
+                }
+            }
+        }
+
+        var listContainer = $('<div></div>',{class:"projects-dialog-project-list-inner-container" }).appendTo(container);
+
+        var list = $('<ol>',{class:"projects-dialog-project-list"}).appendTo(listContainer).editableList({
+            addButton: false,
+            height:"auto",
+            scrollOnAdd: false,
+            addItem: function(row,index,entry) {
+                var header = $('<div></div>',{class:"projects-dialog-project-list-entry"}).appendTo(row);
+                $('<span class="projects-dialog-project-list-entry-icon"><i class="fa fa-archive"></i></span>').appendTo(header);
+                $('<span class="projects-dialog-project-list-entry-name" style=""></span>').text(entry.name).appendTo(header);
+                if (activeProject && activeProject.name === entry.name) {
+                    header.addClass("projects-list-entry-current");
+                    $('<span class="projects-dialog-project-list-entry-current">current</span>').appendTo(header);
+                    if (options.canSelectActive === false) {
+                        // active project cannot be selected; so skip the rest
+                        return
+                    }
+                }
+
+                header.addClass("selectable");
+
+                var tools = $('<div class="projects-dialog-project-list-entry-tools"></div>').appendTo(header);
+                $('<button class="editor-button editor-button-small" style="float: right;"><i class="fa fa-trash"></i></button>')
+                    .appendTo(tools)
+                    .click(function(e) {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        deleteProject(row,entry.name, function(cancelled) {
+                            if (!cancelled) {
+                                row.fadeOut(300,function() {
+                                    list.editableList('removeItem',entry);
+                                    if (options.delete) {
+                                        options.delete(entry);
+                                    }
+                                });
+                            }
+                        })
+                    });
+
+
+                row.click(function(evt) {
+                    $('.projects-dialog-project-list-entry').removeClass('selected');
+                    header.addClass('selected');
+                    selectedListItem = row.parent();
+                    if (options.select) {
+                        options.select(entry);
+                    }
+                    ensureSelectedIsVisible();
+                    searchInput.focus();
+                })
+                if (options.dblclick) {
+                    row.dblclick(function(evt) {
+                        evt.preventDefault();
+                        options.dblclick(entry);
+                    })
+                }
+            },
+            filter: function(data) {
+                if (filterTerm === "") { return true; }
+                return data.name.toLowerCase().indexOf(filterTerm) !== -1;
+            }
+        });
+        $.getJSON("projects", function(data) {
+            data.projects.forEach(function(project) {
+                list.editableList('addItem',{name:project});
+            });
+        })
+        return container;
+    }
+
+
+
+    function requireCleanWorkspace(done) {
+        if (RED.nodes.dirty()) {
+            var message = '<p>You have undeployed changes that will be lost.</p><p>Do you want to continue?</p>';
+            var cleanNotification = RED.notify(message,{
+                type:"info",
+                fixed: true,
+                modal: true,
+                buttons: [
+                    {
+                        //id: "node-dialog-delete",
+                        //class: 'leftButton',
+                        text: RED._("common.label.cancel"),
+                        click: function() {
+                            cleanNotification.close();
+                            done(true);
+                        }
+                    },{
+                        text: 'Continue',
+                        click: function() {
+                            cleanNotification.close();
+                            done(false);
+                        }
+                    }
+                ]
+            });
+
+        }
+    }
+
+    function sendRequest(options,body) {
+        // dialogBody.hide();
+        // console.log(options.url,body);
+
+        if (options.requireCleanWorkspace && RED.nodes.dirty()) {
+            var thenCallback;
+            var alwaysCallback;
+            requireCleanWorkspace(function(cancelled) {
+                if (cancelled) {
+                    if (options.cancel) {
+                        options.cancel();
+                        if (alwaysCallback) {
+                            alwaysCallback();
+                        }
+                    }
+                } else {
+                    delete options.requireCleanWorkspace;
+                    sendRequest(options,body).then(function() {
+                        if (thenCallback) {
+                            thenCallback();
+                        }
+                    }).always(function() {
+                        if (alwaysCallback) {
+                            alwaysCallback();
+                        }
+
+                    })
+                }
+            })
+            // What follows is a very hacky Promise-like api thats good enough
+            // for our needs.
+            return {
+                then: function(done) {
+                    thenCallback = done;
+                    return { always: function(done) { alwaysCallback = done; }}
+                 },
+                always: function(done) { alwaysCallback = done; }
+            }
+        }
+
+        var start = Date.now();
+        // TODO: this is specific to the dialog-based requests
+        $(".projects-dialog-spinner").show();
+        $("#projects-dialog").parent().find(".ui-dialog-buttonset").children().css("visibility","hidden")
+        if (body) {
+            options.data = JSON.stringify(body);
+            options.contentType = "application/json; charset=utf-8";
+        }
+        var resultCallback;
+        var resultCallbackArgs;
+        return $.ajax(options).done(function(data,textStatus,xhr) {
+            if (options.responses && options.responses[200]) {
+                resultCallback = options.responses[200];
+                resultCallbackArgs = data;
+            }
+        }).fail(function(xhr,textStatus,err) {
+            if (options.responses && options.responses[xhr.status]) {
+                var responses = options.responses[xhr.status];
+                if (typeof responses === 'function') {
+                    resultCallback = responses;
+                    resultCallbackArgs = {error:responses.statusText};
+                    return;
+                } else if (options.handleAuthFail !== false && xhr.responseJSON.error === 'git_auth_failed') {
+                    var url = activeProject.git.remotes[xhr.responseJSON.remote||options.remote||'origin'].fetch;
+
+                    var message = $('<div>'+
+                        '<div class="form-row">Authentication required for repository:</div>'+
+                        '<div class="form-row"><div style="margin-left: 20px;">'+url+'</div></div>'+
+                        '</div>');
+
+                    var isSSH = false;
+                    if (/^https?:\/\//.test(url)) {
+                        $('<div class="form-row"><label for="projects-user-auth-username">Username</label><input id="projects-user-auth-username" type="text"></input></div>'+
+                        '<div class="form-row"><label for=projects-user-auth-password">Password</label><input id="projects-user-auth-password" type="password"></input></div>').appendTo(message);
+                    } else if (/^(?:ssh|[\d\w\.\-_]+@[\w\.]+):(?:\/\/)?/.test(url)) {
+                        isSSH = true;
+                        var row = $('<div class="form-row"></div>').appendTo(message);
+                        $('<label for="projects-user-auth-key">SSH Key</label>').appendTo(row);
+                        var projectRepoSSHKeySelect = $('<select id="projects-user-auth-key">').width('70%').appendTo(row);
+                        $.getJSON("settings/user/keys", function(data) {
+                            var count = 0;
+                            data.keys.forEach(function(key) {
+                                projectRepoSSHKeySelect.append($("<option></option>").val(key.name).text(key.name));
+                                count++;
+                            });
+                            if (count === 0) {
+                                //TODO: handle no keys yet setup
+                            }
+                        });
+                        row = $('<div class="form-row"></div>').appendTo(message);
+                        $('<label for="projects-user-auth-passphrase">Passphrase</label>').appendTo(row);
+                        $('<input id="projects-user-auth-passphrase" type="password"></input>').appendTo(row);
+                    }
+
+                    var notification = RED.notify(message,{
+                        type:"error",
+                        fixed: true,
+                        modal: true,
+                        buttons: [
+                            {
+                                //id: "node-dialog-delete",
+                                //class: 'leftButton',
+                                text: RED._("common.label.cancel"),
+                                click: function() {
+                                    notification.close();
+                                }
+                            },{
+                                text: $('<span><i class="fa fa-refresh"></i> Retry</span>'),
+                                click: function() {
+                                    body = body || {};
+                                    var authBody = {};
+                                    if (isSSH) {
+                                        authBody.keyFile = $('#projects-user-auth-key').val();
+                                        authBody.passphrase = $('#projects-user-auth-passphrase').val();
+                                    } else {
+                                        authBody.username = $('#projects-user-auth-username').val();
+                                        authBody.password = $('#projects-user-auth-password').val();
+                                    }
+                                    var done = function(err) {
+                                        if (err) {
+                                            console.log("Failed to update auth");
+                                            console.log(err);
+                                        } else {
+                                            sendRequest(options,body);
+                                            notification.close();
+                                        }
+
+                                    }
+                                    sendRequest({
+                                        url: "projects/"+activeProject.name+"/remotes/"+(xhr.responseJSON.remote||options.remote||'origin'),
+                                        type: "PUT",
+                                        responses: {
+                                            0: function(error) {
+                                                done(error,null);
+                                            },
+                                            200: function(data) {
+                                                done(null,data);
+                                            },
+                                            400: {
+                                                'unexpected_error': function(error) {
+                                                    done(error,null);
+                                                }
+                                            },
+                                        }
+                                    },{auth:authBody});
+                                }
+                            }
+                        ]
+                    });
+                    return;
+                } else if (responses[xhr.responseJSON.error]) {
+                    resultCallback = responses[xhr.responseJSON.error];
+                    resultCallbackArgs = xhr.responseJSON;
+                    return;
+                } else if (responses['*']) {
+                    resultCallback = responses['*'];
+                    resultCallbackArgs = xhr.responseJSON;
+                    return;
+                }
+            }
+            console.log("Unhandled error response:");
+            console.log(xhr);
+            console.log(textStatus);
+            console.log(err);
+        }).always(function() {
+            var delta = Date.now() - start;
+            delta = Math.max(0,500-delta);
+            setTimeout(function() {
+                // dialogBody.show();
+                $(".projects-dialog-spinner").hide();
+                $("#projects-dialog").parent().find(".ui-dialog-buttonset").children().css("visibility","")
+                if (resultCallback) {
+                    resultCallback(resultCallbackArgs)
+                }
+            },delta);
+        });
+    }
+
+    function createBranchList(options) {
+        var branchFilterTerm = "";
+        var branchFilterCreateItem;
+        var branches = [];
+        var branchPrefix = "";
+        var container = $('<div class="projects-branch-list">').appendTo(options.container);
+
+        var branchFilter = $('<input type="text">').attr('placeholder',options.placeholder).appendTo(container).searchBox({
+            delay: 200,
+            change: function() {
+                branchFilterTerm = $(this).val();
+                if (/(\.\.|\/\.|[?*[~^: \\]|\/\/|\/.$|\/$)/.test(branchFilterTerm)) {
+                    if (!branchFilterCreateItem.hasClass("input-error")) {
+                        branchFilterCreateItem.addClass("input-error");
+                        branchFilterCreateItem.find("i").addClass("fa-warning").removeClass("fa-code-fork");
+                    }
+                    branchFilterCreateItem.find("span").text("Invalid branch: "+branchPrefix+branchFilterTerm);
+                } else {
+                    if (branchFilterCreateItem.hasClass("input-error")) {
+                        branchFilterCreateItem.removeClass("input-error");
+                        branchFilterCreateItem.find("i").removeClass("fa-warning").addClass("fa-code-fork");
+                    }
+                    branchFilterCreateItem.find(".sidebar-version-control-branch-list-entry-create-name").text(branchPrefix+branchFilterTerm);
+                }
+                branchList.editableList("filter");
+            }
+        });
+        var branchList = $("<ol>",{style:"height: 130px;"}).appendTo(container);
+        branchList.editableList({
+            addButton: false,
+            scrollOnAdd: false,
+            addItem: function(row,index,entry) {
+                var container = $('<div class="sidebar-version-control-branch-list-entry">').appendTo(row);
+                if (!entry.hasOwnProperty('commit')) {
+                    branchFilterCreateItem = container;
+                    $('<i class="fa fa-code-fork"></i>').appendTo(container);
+                    $('<span>').text("Create branch:").appendTo(container);
+                    $('<div class="sidebar-version-control-branch-list-entry-create-name" style="margin-left: 10px;">').text(entry.name).appendTo(container);
+                } else {
+                    $('<i class="fa fa-code-fork"></i>').appendTo(container);
+                    $('<span>').text(entry.name).appendTo(container);
+                    if (entry.current) {
+                        container.addClass("selected");
+                        $('<span class="current"></span>').text(options.currentLabel||"current").appendTo(container);
+                    }
+                }
+                container.click(function(evt) {
+                    evt.preventDefault();
+                    if ($(this).hasClass('input-error')) {
+                        return;
+                    }
+                    var body = {};
+                    if (!entry.hasOwnProperty('commit')) {
+                        body.name = branchFilter.val();
+                        body.create = true;
+                        if (options.remote) {
+                            body.name = options.remote()+"/"+body.name;
+                        }
+                    } else {
+                        if ($(this).hasClass('selected')) {
+                            body.current = true;
+                        }
+                        body.name = entry.name;
+                    }
+                    if (options.onselect) {
+                        options.onselect(body);
+                    }
+                });
+            },
+            filter: function(data) {
+                var isCreateEntry = (!data.hasOwnProperty('commit'));
+                return (
+                            isCreateEntry &&
+                            (
+                                branchFilterTerm !== "" &&
+                                branches.indexOf(branchPrefix+branchFilterTerm) === -1
+                            )
+                     ) ||
+                     (
+                         !isCreateEntry &&
+                         data.name.indexOf(branchFilterTerm) !== -1
+                     );
+            }
+        });
+        return {
+            refresh: function(url) {
+                branchFilter.searchBox("value","");
+                branchList.editableList('empty');
+                var start = Date.now();
+                var spinner = addSpinnerOverlay(container).addClass("projects-dialog-spinner-contain");
+                if (options.remote) {
+                    branchPrefix = options.remote()+"/";
+                } else {
+                    branchPrefix = "";
+                }
+
+                sendRequest({
+                    url: url,
+                    type: "GET",
+                    responses: {
+                        0: function(error) {
+                            console.log(error);
+                        },
+                        200: function(result) {
+                            branches = result.branches;
+                            result.branches.forEach(function(b) {
+                                branchList.editableList('addItem',b);
+                            });
+                            branchList.editableList('addItem',{});
+                            setTimeout(function() {
+                                spinner.remove();
+                            },Math.max(300-(Date.now() - start),0));
+                        },
+                        400: {
+                            'git_connection_failed': function(error) {
+                                RED.notify(error.message,'error');
+                            },
+                            'git_not_a_repository': function(error) {
+                                RED.notify(error.message,'error');
+                            },
+                            'git_repository_not_found': function(error) {
+                                RED.notify(error.message,'error');
+                            },
+                            'unexpected_error': function(error) {
+                                reportUnexpectedError(error);
+                            }
+                        }
+                    }
+                })
+            },
+            // addItem: function(data) { branchList.editableList('addItem',data) },
+            filter: function() { branchList.editableList('filter') },
+            focus: function() { branchFilter.focus() }
+        }
+    }
+
+    function addSpinnerOverlay(container) {
+        var spinner = $('<div class="projects-dialog-spinner"><img src="red/images/spin.svg"/></div>').appendTo(container);
+        return spinner;
+    }
+
+    function init() {
+        dialog = $('<div id="projects-dialog" class="hide node-red-dialog projects-edit-form"><form class="form-horizontal"></form><div class="projects-dialog-spinner hide"><img src="red/images/spin.svg"/></div></div>')
+            .appendTo("body")
+            .dialog({
+                modal: true,
+                autoOpen: false,
+                width: 600,
+                resizable: false,
+                open: function(e) {
+                    $(this).parent().find(".ui-dialog-titlebar-close").hide();
+                    // $("#header-shade").show();
+                    // $("#editor-shade").show();
+                    // $("#palette-shade").show();
+                    // $("#sidebar-shade").show();
+                },
+                close: function(e) {
+                    // $("#header-shade").hide();
+                    // $("#editor-shade").hide();
+                    // $("#palette-shade").hide();
+                    // $("#sidebar-shade").hide();
+                }
+            });
+        dialogBody = dialog.find("form");
+
+        RED.actions.add("core:new-project",RED.projects.newProject);
+        RED.actions.add("core:open-project",RED.projects.selectProject);
+        RED.actions.add("core:show-project-settings",RED.projects.settings.show);
+        var projectsAPI = {
+            sendRequest:sendRequest,
+            createBranchList:createBranchList,
+            addSpinnerOverlay:addSpinnerOverlay,
+            reportUnexpectedError:reportUnexpectedError
+        };
+        RED.projects.settings.init(projectsAPI);
+        RED.projects.userSettings.init(projectsAPI);
+        RED.sidebar.versionControl.init(projectsAPI);
+        initScreens();
+        // initSidebar();
+    }
+
+    function createDefaultFileSet() {
+        if (!activeProject) {
+            throw new Error("Cannot create default file set without an active project");
+        } else if (!activeProject.empty) {
+            throw new Error("Cannot create default file set on a non-empty project");
+        }
+        if (!RED.user.hasPermission("projects.write")) {
+            RED.notify(RED._("user.errors.notAuthorized"),"error");
+            return;
+        }
+        createProjectOptions = {};
+        show('default-files',{existingProject: true});
+    }
+    function createDefaultPackageFile() {
+        RED.deploy.setDeployInflight(true);
+        RED.projects.settings.switchProject(activeProject.name);
+
+        var method = "PUT";
+        var url = "projects/"+activeProject.name;
+        var createProjectOptions = {
+            initialise: true
+        };
+        sendRequest({
+            url: url,
+            type: method,
+            requireCleanWorkspace: true,
+            handleAuthFail: false,
+            responses: {
+                200: function(data) { },
+                400: {
+                    'git_error': function(error) {
+                        console.log("git error",error);
+                    },
+                    'missing_flow_file': function(error) {
+                        // This is a natural next error - but let the runtime event
+                        // trigger the dialog rather than double-report it.
+                        $( dialog ).dialog( "close" );
+                    },
+                    '*': function(error) {
+                        reportUnexpectedError(error);
+                        $( dialog ).dialog( "close" );
+                    }
+                }
+            }
+        },createProjectOptions).always(function() {
+            setTimeout(function() {
+                RED.deploy.setDeployInflight(false);
+            },500);
+        })
+    }
+
+    function refresh(done) {
+        $.getJSON("projects",function(data) {
+            if (data.active) {
+                $.getJSON("projects/"+data.active, function(project) {
+                    activeProject = project;
+                    RED.sidebar.versionControl.refresh(true);
+                    if (done) {
+                        done(activeProject);
+                    }
+                });
+            } else {
+                if (done) {
+                    done(null);
+                }
+            }
+        });
+    }
+
+
+    function showNewProjectScreen() {
+        createProjectOptions = {};
+        if (!activeProject) {
+            show('welcome');
+        } else {
+            show('create',{screen:'empty'})
+        }
+    }
+
+    return {
+        init: init,
+        showStartup: function() {
+            if (!RED.user.hasPermission("projects.write")) {
+                RED.notify(RED._("user.errors.notAuthorized"),"error");
+                return;
+            }
+            show('welcome');
+        },
+        newProject: function() {
+            if (!RED.user.hasPermission("projects.write")) {
+                RED.notify(RED._("user.errors.notAuthorized"),"error");
+                return;
+            }
+
+            if (RED.nodes.dirty()) {
+                return requireCleanWorkspace(function(cancelled) {
+                    if (!cancelled) {
+                        showNewProjectScreen();
+                    }
+                })
+            } else {
+                showNewProjectScreen();
+            }
+        },
+        selectProject: function() {
+            if (!RED.user.hasPermission("projects.write")) {
+                RED.notify(RED._("user.errors.notAuthorized"),"error");
+                return;
+            }
+            show('create',{screen:'open'})
+        },
+        showCredentialsPrompt: function() { //TODO: rename this function
+            if (!RED.user.hasPermission("projects.write")) {
+                RED.notify(RED._("user.errors.notAuthorized"),"error");
+                return;
+            }
+            RED.projects.settings.show('settings');
+        },
+        showFilesPrompt: function() { //TODO: rename this function
+            if (!RED.user.hasPermission("projects.write")) {
+                RED.notify(RED._("user.errors.notAuthorized"),"error");
+                return;
+            }
+            RED.projects.settings.show('settings');
+        },
+        showProjectDependencies: function() {
+            RED.projects.settings.show('deps');
+        },
+        createDefaultFileSet: createDefaultFileSet,
+        createDefaultPackageFile: createDefaultPackageFile,
+        // showSidebar: showSidebar,
+        refresh: refresh,
+        editProject: function() {
+            RED.projects.settings.show();
+        },
+        getActiveProject: function() {
+            return activeProject;
+        }
+    }
+})();
+;/**
+ * Copyright JS Foundation and other contributors, http://js.foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ **/
+
+RED.projects.settings = (function() {
+
+    var trayWidth = 700;
+    var settingsVisible = false;
+
+    var panes = [];
+
+    function addPane(options) {
+        panes.push(options);
+    }
+
+    // TODO: DRY - tab-info.js
+    function addTargetToExternalLinks(el) {
+        $(el).find("a").each(function(el) {
+            var href = $(this).attr('href');
+            if (/^https?:/.test(href)) {
+                $(this).attr('target','_blank');
+            }
+        });
+        return el;
+    }
+
+    function show(initialTab) {
+        if (settingsVisible) {
+            return;
+        }
+        if (!RED.user.hasPermission("projects.write")) {
+            RED.notify(RED._("user.errors.notAuthorized"),"error");
+            return;
+        }
+
+        settingsVisible = true;
+        var tabContainer;
+
+        var trayOptions = {
+            title: "Project Settings",// RED._("menu.label.userSettings"),, // TODO: nls
+            buttons: [
+                {
+                    id: "node-dialog-ok",
+                    text: RED._("common.label.close"),
+                    class: "primary",
+                    click: function() {
+                        RED.tray.close();
+                    }
+                }
+            ],
+            resize: function(dimensions) {
+                trayWidth = dimensions.width;
+            },
+            open: function(tray) {
+                var project = RED.projects.getActiveProject();
+
+                var trayBody = tray.find('.editor-tray-body');
+                var settingsContent = $('<div></div>').appendTo(trayBody);
+                var tabContainer = $('<div></div>',{id:"user-settings-tabs-container"}).appendTo(settingsContent);
+
+                $('<ul></ul>',{id:"user-settings-tabs"}).appendTo(tabContainer);
+                var settingsTabs = RED.tabs.create({
+                    id: "user-settings-tabs",
+                    vertical: true,
+                    onchange: function(tab) {
+                        setTimeout(function() {
+                            $("#user-settings-tabs-content").children().hide();
+                            $("#" + tab.id).show();
+                            if (tab.pane.focus) {
+                                tab.pane.focus();
+                            }
+                        },50);
+                    }
+                });
+                var tabContents = $('<div></div>',{id:"user-settings-tabs-content"}).appendTo(settingsContent);
+
+                panes.forEach(function(pane) {
+                    settingsTabs.addTab({
+                        id: "project-settings-tab-"+pane.id,
+                        label: pane.title,
+                        pane: pane
+                    });
+                    pane.get(project).hide().appendTo(tabContents);
+                });
+                settingsContent.i18n();
+                settingsTabs.activateTab("project-settings-tab-"+(initialTab||'main'))
+                $("#sidebar-shade").show();
+            },
+            close: function() {
+                settingsVisible = false;
+                panes.forEach(function(pane) {
+                    if (pane.close) {
+                        pane.close();
+                    }
+                });
+                $("#sidebar-shade").hide();
+
+            },
+            show: function() {}
+        }
+        if (trayWidth !== null) {
+            trayOptions.width = trayWidth;
+        }
+        RED.tray.show(trayOptions);
+    }
+
+    function editDescription(activeProject, container) {
+        RED.editor.editMarkdown({
+            title: RED._('sidebar.project.editDescription'),
+            header: $('<span><i class="fa fa-book"></i> README.md</span>'),
+            value: activeProject.description,
+            complete: function(v) {
+                container.empty();
+                var spinner = utils.addSpinnerOverlay(container);
+                var done = function(err,res) {
+                    if (err) {
+                        return editDescription(activeProject, container);
+                    }
+                    activeProject.description = v;
+                    updateProjectDescription(activeProject, container);
+                }
+                utils.sendRequest({
+                    url: "projects/"+activeProject.name,
+                    type: "PUT",
+                    responses: {
+                        0: function(error) {
+                            done(error,null);
+                        },
+                        200: function(data) {
+                            done(null,data);
+                            RED.sidebar.versionControl.refresh(true);
+                        },
+                        400: {
+                            '*': function(error) {
+                                utils.reportUnexpectedError(error);
+                                done(error,null);
+                            }
+                        },
+                    }
+                },{description:v}).always(function() {
+                    spinner.remove();
+                });
+            }
+        });
+    }
+    function updateProjectDescription(activeProject, container) {
+        container.empty();
+        var desc;
+        if (activeProject.description) {
+            desc = marked(activeProject.description);
+        } else {
+            desc = '<span class="node-info-none">'+'No description available'+'</span>';
+        }
+        var description = addTargetToExternalLinks($('<span class="bidiAware" dir=\"'+RED.text.bidi.resolveBaseTextDir(desc)+'">'+desc+'</span>')).appendTo(container);
+        description.find(".bidiAware").contents().filter(function() { return this.nodeType === 3 && this.textContent.trim() !== "" }).wrap( "<span></span>" );
+    }
+
+    function editSummary(activeProject, summary, container) {
+        var editButton = container.prev();
+        editButton.hide();
+        container.empty();
+        var bg = $('<span class="button-row" style="position: relative; float: right; margin-right:0;"></span>').appendTo(container);
+        var input = $('<input type="text" style="width: calc(100% - 150px); margin-right: 10px;">').val(summary||"").appendTo(container);
+        $('<button class="editor-button">Cancel</button>')
+            .appendTo(bg)
+            .click(function(evt) {
+                evt.preventDefault();
+                updateProjectSummary(activeProject.summary, container);
+                editButton.show();
+            });
+        $('<button class="editor-button">Save</button>')
+            .appendTo(bg)
+            .click(function(evt) {
+                evt.preventDefault();
+                var v = input.val();
+                updateProjectSummary(v, container);
+                var spinner = utils.addSpinnerOverlay(container);
+                var done = function(err,res) {
+                    if (err) {
+                        spinner.remove();
+                        return editSummary(activeProject, summary, container);
+                    }
+                    activeProject.summary = v;
+                    spinner.remove();
+                    updateProjectSummary(activeProject.summary, container);
+                    editButton.show();
+                }
+                utils.sendRequest({
+                    url: "projects/"+activeProject.name,
+                    type: "PUT",
+                    responses: {
+                        0: function(error) {
+                            done(error,null);
+                        },
+                        200: function(data) {
+                            RED.sidebar.versionControl.refresh(true);
+                            done(null,data);
+                        },
+                        400: {
+                            '*': function(error) {
+                                utils.reportUnexpectedError(error);
+                                done(error,null);
+                            }
+                        },
+                    }
+                },{summary:v});
+            });
+    }
+    function updateProjectSummary(summary, container) {
+        container.empty();
+        if (summary) {
+            container.text(summary).removeClass('node-info-node');
+        } else {
+            container.text("No summary available").addClass('node-info-none');// TODO: nls
+        }
+    }
+
+    function createMainPane(activeProject) {
+
+        var pane = $('<div id="project-settings-tab-main" class="project-settings-tab-pane node-help"></div>');
+        $('<h1>').text(activeProject.name).appendTo(pane);
+        var summary = $('<div style="position: relative">').appendTo(pane);
+        var summaryContent = $('<div></div>',{style:"color: #999"}).appendTo(summary);
+        updateProjectSummary(activeProject.summary, summaryContent);
+        if (RED.user.hasPermission("projects.write")) {
+            $('<button class="editor-button editor-button-small" style="float: right;">edit description</button>')
+                .prependTo(summary)
+                .click(function(evt) {
+                    evt.preventDefault();
+                    editSummary(activeProject, activeProject.summary, summaryContent);
+                });
+        }
+        $('<hr>').appendTo(pane);
+
+        var description = $('<div class="node-help" style="position: relative"></div>').appendTo(pane);
+        var descriptionContent = $('<div>',{style:"min-height: 200px"}).appendTo(description);
+
+        updateProjectDescription(activeProject, descriptionContent);
+
+        if (RED.user.hasPermission("projects.write")) {
+            $('<button class="editor-button editor-button-small" style="float: right;">edit README.md</button>')
+                .prependTo(description)
+                .click(function(evt) {
+                    evt.preventDefault();
+                    editDescription(activeProject, descriptionContent);
+                });
+        }
+        return pane;
+    }
+    function updateProjectDependencies(activeProject,depsList) {
+        depsList.editableList('empty');
+
+        var totalCount = 0;
+        var unknownCount = 0;
+        var unusedCount = 0;
+        var notInstalledCount = 0;
+
+        for (var m in modulesInUse) {
+            if (modulesInUse.hasOwnProperty(m)) {
+                depsList.editableList('addItem',{
+                    id: modulesInUse[m].module,
+                    version: modulesInUse[m].version,
+                    count: modulesInUse[m].count,
+                    known: activeProject.dependencies.hasOwnProperty(m),
+                    installed: true
+                });
+                totalCount++;
+                if (modulesInUse[m].count === 0) {
+                    unusedCount++;
+                }
+                if (!activeProject.dependencies.hasOwnProperty(m)) {
+                    unknownCount++;
+                }
+            }
+        }
+
+        if (activeProject.dependencies) {
+            for (var m in activeProject.dependencies) {
+                if (activeProject.dependencies.hasOwnProperty(m) && !modulesInUse.hasOwnProperty(m)) {
+                    var installed = !!RED.nodes.registry.getModule(m);
+                    depsList.editableList('addItem',{
+                        id: m,
+                        version: activeProject.dependencies[m], //RED.nodes.registry.getModule(module).version,
+                        count: 0,
+                        known: true,
+                        installed: installed
+                    });
+                    totalCount++;
+                    if (installed) {
+                        unusedCount++;
+                    } else {
+                        notInstalledCount++;
+                    }
+                }
+            }
+        }
+        // if (notInstalledCount > 0) {
+        //     depsList.editableList('addItem',{index:1, label:"Missing dependencies"}); // TODO: nls
+        // }
+        // if (unknownCount > 0) {
+        //     depsList.editableList('addItem',{index:1, label:"Unlisted dependencies"}); // TODO: nls
+        // }
+        // if (unusedCount > 0) {
+        //     depsList.editableList('addItem',{index:3, label:"Unused dependencies"}); // TODO: nls
+        // }
+        if (totalCount === 0) {
+            depsList.editableList('addItem',{index:0, label:"None"}); // TODO: nls
+        }
+
+    }
+
+    function saveDependencies(depsList,container,dependencies,complete) {
+        var activeProject = RED.projects.getActiveProject();
+        var spinner = utils.addSpinnerOverlay(container).addClass('projects-dialog-spinner-contain');
+        var done = function(err,res) {
+            spinner.remove();
+            if (err) {
+                return complete(err);
+            }
+            activeProject.dependencies = dependencies;
+            RED.sidebar.versionControl.refresh(true);
+            complete();
+        }
+        utils.sendRequest({
+            url: "projects/"+activeProject.name,
+            type: "PUT",
+            responses: {
+                0: function(error) {
+                    done(error,null);
+                },
+                200: function(data) {
+                    RED.sidebar.versionControl.refresh(true);
+                    done(null,data);
+                },
+                400: {
+                    '*': function(error) {
+                        done(error,null);
+                    }
+                },
+            }
+        },{dependencies:dependencies});
+    }
+    function editDependencies(activeProject,depsJSON,container,depsList) {
+        var json = depsJSON||JSON.stringify(activeProject.dependencies||{},"",4);
+        if (json === "{}") {
+            json = "{\n\n}";
+        }
+        RED.editor.editJSON({
+            title: RED._('sidebar.project.editDependencies'),
+            value: json,
+            requireValid: true,
+            complete: function(v) {
+                try {
+                    var parsed = JSON.parse(v);
+                    saveDependencies(depsList,container,parsed,function(err) {
+                        if (err) {
+                            return editDependencies(activeProject,v,container,depsList);
+                        }
+                        activeProject.dependencies = parsed;
+                        updateProjectDependencies(activeProject,depsList);
+                    });
+                } catch(err) {
+                    editDependencies(activeProject,v,container,depsList);
+                }
+            }
+        });
+    }
+
+    function createDependenciesPane(activeProject) {
+        var pane = $('<div id="project-settings-tab-deps" class="project-settings-tab-pane node-help"></div>');
+        if (RED.user.hasPermission("projects.write")) {
+            $('<button class="editor-button editor-button-small" style="margin-top:10px;float: right;">edit</button>')
+                .appendTo(pane)
+                .click(function(evt) {
+                    evt.preventDefault();
+                    editDependencies(activeProject,null,pane,depsList)
+                });
+        }
+        var depsList = $("<ol>",{style:"position: absolute;top: 60px;bottom: 20px;left: 20px;right: 20px;"}).appendTo(pane);
+        depsList.editableList({
+            addButton: false,
+            addItem: function(row,index,entry) {
+                // console.log(entry);
+                var headerRow = $('<div>',{class:"palette-module-header"}).appendTo(row);
+                if (entry.label) {
+                    if (entry.index === 0) {
+                        headerRow.addClass("red-ui-search-empty")
+                    } else {
+                        row.parent().addClass("palette-module-section");
+                    }
+                    headerRow.text(entry.label);
+                    // if (RED.user.hasPermission("projects.write")) {
+                    //     if (entry.index === 1) {
+                    //         var addButton = $('<button class="editor-button editor-button-small palette-module-button">add to project</button>').appendTo(headerRow).click(function(evt) {
+                    //             evt.preventDefault();
+                    //             var deps = $.extend(true, {}, activeProject.dependencies);
+                    //             for (var m in modulesInUse) {
+                    //                 if (modulesInUse.hasOwnProperty(m) && !modulesInUse[m].known) {
+                    //                     deps[m] = modulesInUse[m].version;
+                    //                 }
+                    //             }
+                    //             editDependencies(activeProject,JSON.stringify(deps,"",4),pane,depsList);
+                    //         });
+                    //     } else if (entry.index === 3) {
+                    //         var removeButton = $('<button class="editor-button editor-button-small palette-module-button">remove from project</button>').appendTo(headerRow).click(function(evt) {
+                    //             evt.preventDefault();
+                    //             var deps = $.extend(true, {}, activeProject.dependencies);
+                    //             for (var m in activeProject.dependencies) {
+                    //                 if (activeProject.dependencies.hasOwnProperty(m) && !modulesInUse.hasOwnProperty(m)) {
+                    //                     delete deps[m];
+                    //                 }
+                    //             }
+                    //             editDependencies(activeProject,JSON.stringify(deps,"",4),pane,depsList);
+                    //         });
+                    //     }
+                    // }
+                } else {
+                    headerRow.addClass("palette-module-header");
+                    if (!entry.installed) {
+                        headerRow.addClass("palette-module-not-installed");
+                    } else if (entry.count === 0) {
+                        headerRow.addClass("palette-module-unused");
+                    } else if (!entry.known) {
+                        headerRow.addClass("palette-module-unknown");
+                    }
+
+                    entry.element = headerRow;
+                    var titleRow = $('<div class="palette-module-meta palette-module-name"></div>').appendTo(headerRow);
+                    var iconClass = "fa-cube";
+                    if (!entry.installed) {
+                        iconClass = "fa-warning";
+                    }
+                    var icon = $('<i class="fa '+iconClass+'"></i>').appendTo(titleRow);
+                    entry.icon = icon;
+                    $('<span>').text(entry.id).appendTo(titleRow);
+                    var metaRow = $('<div class="palette-module-meta palette-module-version"><i class="fa fa-tag"></i></div>').appendTo(headerRow);
+                    var versionSpan = $('<span>').text(entry.version).appendTo(metaRow);
+                    metaRow = $('<div class="palette-module-meta"></div>').appendTo(headerRow);
+                    var buttons = $('<div class="palette-module-button-group"></div>').appendTo(metaRow);
+                    if (RED.user.hasPermission("projects.write")) {
+                        if (!entry.installed && RED.settings.theme('palette.editable') !== false) {
+                            $('<a href="#" class="editor-button editor-button-small">install</a>').appendTo(buttons)
+                                .click(function(evt) {
+                                    evt.preventDefault();
+                                    RED.palette.editor.install(entry,row,function(err) {
+                                        if (!err) {
+                                            entry.installed = true;
+                                            var spinner = RED.utils.addSpinnerOverlay(row,true);
+                                            setTimeout(function() {
+                                                depsList.editableList('removeItem',entry);
+                                                refreshModuleInUseCounts();
+                                                entry.count = modulesInUse[entry.id].count;
+                                                depsList.editableList('addItem',entry);
+                                            },500);
+                                        }
+                                    });
+                                })
+                        } else if (entry.known && entry.count === 0) {
+                            $('<a href="#" class="editor-button editor-button-small">remove from project</a>').appendTo(buttons)
+                                .click(function(evt) {
+                                    evt.preventDefault();
+                                    var deps = $.extend(true, {}, activeProject.dependencies);
+                                    delete deps[entry.id];
+                                    saveDependencies(depsList,row,deps,function(err) {
+                                        if (!err) {
+                                            row.fadeOut(200,function() {
+                                                depsList.editableList('removeItem',entry);
+                                            });
+                                        } else {
+                                            console.log(err);
+                                        }
+                                    });
+                                });
+                        } else if (!entry.known) {
+                            $('<a href="#" class="editor-button editor-button-small">add to project</a>').appendTo(buttons)
+                                .click(function(evt) {
+                                    evt.preventDefault();
+                                    var deps = $.extend(true, {}, activeProject.dependencies);
+                                    deps[entry.id] = modulesInUse[entry.id].version;
+                                    saveDependencies(depsList,row,deps,function(err) {
+                                        if (!err) {
+                                            buttons.remove();
+                                            headerRow.removeClass("palette-module-unknown");
+                                        } else {
+                                            console.log(err);
+                                        }
+                                    });
+                                });
+                        }
+                    }
+                }
+            },
+            sort: function(A,B) {
+                return A.id.localeCompare(B.id);
+                // if (A.index && B.index) {
+                //     return A.index - B.index;
+                // }
+                // var Acategory = A.index?A.index:(A.known?(A.count>0?0:4):2);
+                // var Bcategory = B.index?B.index:(B.known?(B.count>0?0:4):2);
+                // if (Acategory === Bcategory) {
+                //     return A.id.localeCompare(B.id);
+                // } else {
+                //     return Acategory - Bcategory;
+                // }
+            }
+        });
+
+        updateProjectDependencies(activeProject,depsList);
+        return pane;
+
+    }
+
+    function showProjectFileListing(row,activeProject,current,filter,done) {
+        var dialog;
+        var dialogBody;
+        var filesList;
+        var selected;
+        var container = $('<div class="project-file-listing-container"></div>',{style:"position: relative; min-height: 175px; height: 175px;"}).hide().appendTo(row);
+        var spinner = utils.addSpinnerOverlay(container);
+        $.getJSON("projects/"+activeProject.name+"/files",function(result) {
+            var fileNames = Object.keys(result);
+            fileNames = fileNames.filter(function(fn) {
+                return !result[fn].status || !/D/.test(result[fn].status);
+            })
+            var files = {};
+            fileNames.sort();
+            fileNames.forEach(function(file) {
+                file.split("/").reduce(function(r,v,i,arr) { if (v) { if (i<arr.length-1) { r[v] = r[v]||{};} else { r[v] = true }return r[v];}},files);
+            });
+            var sortFiles = function(key,value,fullPath) {
+                var result = {
+                    name: key||"/",
+                    path: fullPath+(fullPath?"/":"")+key,
+                };
+                if (value === true) {
+                    result.type = 'f';
+                    return result;
+                }
+                result.type = 'd';
+                result.children = [];
+                result.path = result.path;
+                var files = Object.keys(value);
+                files.forEach(function(file) {
+                    result.children.push(sortFiles(file,value[file],result.path));
+                })
+                result.children.sort(function(A,B) {
+                    if (A.hasOwnProperty("children") && !B.hasOwnProperty("children")) {
+                        return -1;
+                    } else if (!A.hasOwnProperty("children") && B.hasOwnProperty("children")) {
+                        return 1;
+                    }
+                    return A.name.localeCompare(B.name);
+                })
+                return result;
+            }
+            var files = sortFiles("",files,"");
+            createFileSubList(container,files.children,current,filter,done,"height: 175px");
+            spinner.remove();
+        });
+        return container;
+    }
+
+    function createFileSubList(container, files, current, filter, onselect, style) {
+        style = style || "";
+        var list = $('<ol>',{class:"projects-dialog-file-list", style:style}).appendTo(container).editableList({
+            addButton: false,
+            scrollOnAdd: false,
+            addItem: function(row,index,entry) {
+                var header = $('<div></div>',{class:"projects-dialog-file-list-entry"}).appendTo(row);
+                if (entry.children) {
+                    $('<span class="projects-dialog-file-list-entry-folder"><i class="fa fa-angle-right"></i> <i class="fa fa-folder-o"></i></span>').appendTo(header);
+                    if (entry.children.length > 0) {
+                        var children = $('<div></div>',{style:"padding-left: 20px;"}).appendTo(row);
+                        if (current.indexOf(entry.path+"/") === 0) {
+                            header.addClass("expanded");
+                        } else {
+                            children.hide();
+                        }
+                        createFileSubList(children,entry.children,current,filter,onselect);
+                        header.addClass("selectable");
+                        header.click(function(e) {
+                            if ($(this).hasClass("expanded")) {
+                                $(this).removeClass("expanded");
+                                children.slideUp(200);
+                            } else {
+                                $(this).addClass("expanded");
+                                children.slideDown(200);
+                            }
+
+                        });
+
+                    }
+                } else {
+                    var fileIcon = "fa-file-o";
+                    var fileClass = "";
+                    if (/\.json$/i.test(entry.name)) {
+                        fileIcon = "fa-file-code-o"
+                    } else if (/\.md$/i.test(entry.name)) {
+                        fileIcon = "fa-book";
+                    } else if (/^\.git/i.test(entry.name)) {
+                        fileIcon = "fa-code-fork";
+                        header.addClass("projects-dialog-file-list-entry-file-type-git");
+                    }
+                    $('<span class="projects-dialog-file-list-entry-file"> <i class="fa '+fileIcon+'"></i></span>').appendTo(header);
+                    if (filter.test(entry.name)) {
+                        header.addClass("selectable");
+                        if (entry.path === current) {
+                            header.addClass("selected");
+                        }
+                        header.click(function(e) {
+                            $(".projects-dialog-file-list-entry.selected").removeClass("selected");
+                            $(this).addClass("selected");
+                            onselect(entry.path);
+                        })
+                        header.dblclick(function(e) {
+                            e.preventDefault();
+                            onselect(entry.path,true);
+                        })
+                    } else {
+                        header.addClass("unselectable");
+                    }
+                }
+                $('<span class="projects-dialog-file-list-entry-name" style=""></span>').text(entry.name).appendTo(header);
+            }
+        });
+        if (!style) {
+            list.parent().css("overflow-y","");
+        }
+        files.forEach(function(f) {
+            list.editableList('addItem',f);
+        })
+    }
+
+    // function editFiles(activeProject, container,flowFile, flowFileLabel) {
+    //     var editButton = container.children().first();
+    //     editButton.hide();
+    //
+    //     var flowFileInput = $('<input id="" type="text" style="width: calc(100% - 300px);">').val(flowFile).insertAfter(flowFileLabel);
+    //
+    //     var flowFileInputSearch = $('<button class="editor-button" style="margin-left: 10px"><i class="fa fa-folder-open-o"></i></button>')
+    //         .insertAfter(flowFileInput)
+    //         .click(function(e) {
+    //             showProjectFileListing(activeProject,'Select flow file',flowFileInput.val(),function(result) {
+    //                 flowFileInput.val(result);
+    //                 checkFiles();
+    //             })
+    //         })
+    //
+    //     var checkFiles = function() {
+    //         saveButton.toggleClass('disabled',flowFileInput.val()==="");
+    //         saveButton.prop('disabled',flowFileInput.val()==="");
+    //     }
+    //     flowFileInput.on("change keyup paste",checkFiles);
+    //     flowFileLabel.hide();
+    //
+    //     var bg = $('<span class="button-group" style="position: relative; float: right; margin-right:0;"></span>').prependTo(container);
+    //     $('<button class="editor-button">Cancel</button>')
+    //         .appendTo(bg)
+    //         .click(function(evt) {
+    //             evt.preventDefault();
+    //
+    //             flowFileLabel.show();
+    //             flowFileInput.remove();
+    //             flowFileInputSearch.remove();
+    //             bg.remove();
+    //             editButton.show();
+    //         });
+    //     var saveButton = $('<button class="editor-button">Save</button>')
+    //         .appendTo(bg)
+    //         .click(function(evt) {
+    //             evt.preventDefault();
+    //             var newFlowFile = flowFileInput.val();
+    //             var newCredsFile = credentialsFileInput.val();
+    //             var spinner = utils.addSpinnerOverlay(container);
+    //             var done = function(err,res) {
+    //                 if (err) {
+    //                     spinner.remove();
+    //                     return;
+    //                 }
+    //                 activeProject.summary = v;
+    //                 spinner.remove();
+    //                 flowFileLabel.text(newFlowFile);
+    //                 flowFileLabel.show();
+    //                 flowFileInput.remove();
+    //                 flowFileInputSearch.remove();
+    //                 bg.remove();
+    //                 editButton.show();
+    //             }
+    //             // utils.sendRequest({
+    //             //     url: "projects/"+activeProject.name,
+    //             //     type: "PUT",
+    //             //     responses: {
+    //             //         0: function(error) {
+    //             //             done(error,null);
+    //             //         },
+    //             //         200: function(data) {
+    //             //             done(null,data);
+    //             //         },
+    //             //         400: {
+    //             //             'unexpected_error': function(error) {
+    //             //                 done(error,null);
+    //             //             }
+    //             //         },
+    //             //     }
+    //             // },{summary:v});
+    //         });
+    //
+    //
+    //     checkFiles();
+    //
+    // }
+
+    function createFilesSection(activeProject,pane) {
+        var title = $('<h3></h3>').text("Files").appendTo(pane);
+        var filesContainer = $('<div class="user-settings-section"></div>').appendTo(pane);
+        if (RED.user.hasPermission("projects.write")) {
+            var editFilesButton = $('<button class="editor-button editor-button-small" style="float: right;">edit</button>')
+                .appendTo(title)
+                .click(function(evt) {
+                    evt.preventDefault();
+                    formButtons.show();
+                    editFilesButton.hide();
+                    flowFileLabelText.hide();
+                    flowFileInput.show();
+                    flowFileInputSearch.show();
+                    credFileLabel.hide();
+                    credFileInput.show();
+                    flowFileInput.focus();
+                    // credentialStateLabel.parent().hide();
+                    credentialStateLabel.addClass("uneditable-input");
+                    $(".user-settings-row-credentials").show();
+                    credentialStateLabel.css('height','auto');
+                    credentialFormRows.hide();
+                    credentialSecretButtons.show();
+                });
+        }
+        var row;
+
+        // Flow files
+        row = $('<div class="user-settings-row"></div>').appendTo(filesContainer);
+        $('<label for=""></label>').text('Flow').appendTo(row);
+        var flowFileLabel = $('<div class="uneditable-input" style="padding:0">').appendTo(row);
+        var flowFileLabelText = $('<span style="display:inline-block; padding: 6px">').text(activeProject.files.flow).appendTo(flowFileLabel);
+
+        var flowFileInput = $('<input id="" type="text" style="margin-bottom: 0;width: 100%; border: none;">').val(activeProject.files.flow).hide().appendTo(flowFileLabel);
+        var flowFileInputSearch = $('<button class="editor-button" style="border-top-right-radius: 4px; border-bottom-right-radius: 4px; width: 36px; height: 34px; position: absolute; top: -1px; right: -1px;"><i class="fa fa-folder-open-o"></i></button>')
+            .hide()
+            .appendTo(flowFileLabel)
+            .click(function(e) {
+                if ($(this).hasClass('selected')) {
+                    $(this).removeClass('selected');
+                    flowFileLabel.find('.project-file-listing-container').slideUp(200,function() {
+                         $(this).remove();
+                         flowFileLabel.css('height','');
+                     });
+                    flowFileLabel.css('color','');
+                } else {
+                    $(this).addClass('selected');
+                    flowFileLabel.css('color','inherit');
+                    var fileList = showProjectFileListing(flowFileLabel,activeProject,flowFileInput.val(), /.*\.json$/,function(result,isDblClick) {
+                        if (result) {
+                            flowFileInput.val(result);
+                        }
+                        if (isDblClick) {
+                            $(flowFileInputSearch).click();
+                        }
+                        checkFiles();
+                    });
+                    flowFileLabel.css('height','auto');
+                    setTimeout(function() {
+                        fileList.slideDown(200);
+                    },50);
+
+                }
+            })
+
+        row = $('<div class="user-settings-row"></div>').appendTo(filesContainer);
+        $('<label for=""></label>').text('Credentials').appendTo(row);
+        var credFileLabel = $('<div class="uneditable-input">').text(activeProject.files.credentials).appendTo(row);
+        var credFileInput = $('<div class="uneditable-input">').text(activeProject.files.credentials).hide().insertAfter(credFileLabel);
+
+        var checkFiles = function() {
+            var saveDisabled;
+            var currentFlowValue = flowFileInput.val();
+            var m = /^(.+?)(\.[^.]*)?$/.exec(currentFlowValue);
+            if (m) {
+                credFileInput.text(m[1]+"_cred"+(m[2]||".json"));
+            } else if (currentFlowValue === "") {
+                credFileInput.text("");
+            }
+            var isFlowInvalid = currentFlowValue==="" ||
+                                /\.\./.test(currentFlowValue) ||
+                                /\/$/.test(currentFlowValue);
+
+            saveDisabled = isFlowInvalid || credFileInput.text()==="";
+
+            if (credentialSecretExistingInput.is(":visible")) {
+                credentialSecretExistingInput.toggleClass("input-error", credentialSecretExistingInput.val() === "");
+                saveDisabled = saveDisabled || credentialSecretExistingInput.val() === "";
+            }
+            if (credentialSecretNewInput.is(":visible")) {
+                credentialSecretNewInput.toggleClass("input-error", credentialSecretNewInput.val() === "");
+                saveDisabled = saveDisabled || credentialSecretNewInput.val() === "";
+            }
+
+
+            flowFileInput.toggleClass("input-error", isFlowInvalid);
+            credFileInput.toggleClass("input-error",credFileInput.text()==="");
+            saveButton.toggleClass('disabled',saveDisabled);
+            saveButton.prop('disabled',saveDisabled);
+        }
+        flowFileInput.on("change keyup paste",checkFiles);
+
+
+        if (!activeProject.files.flow) {
+            $('<span class="form-warning"><i class="fa fa-warning"></i> Missing</span>').appendTo(flowFileLabelText);
+        }
+        if (!activeProject.files.credentials) {
+            $('<span class="form-warning"><i class="fa fa-warning"></i> Missing</span>').appendTo(credFileLabel);
+        }
+
+
+        row = $('<div class="user-settings-row"></div>').appendTo(filesContainer);
+
+        $('<label></label>').appendTo(row);
+        var credentialStateLabel = $('<span><i class="user-settings-credentials-state-icon fa"></i> <span class="user-settings-credentials-state"></span></span>').appendTo(row);
+        var credentialSecretButtons = $('<span class="button-group" style="margin-left: -72px;">').hide().appendTo(row);
+
+        credentialStateLabel.css('color','#666');
+        credentialSecretButtons.css('vertical-align','top');
+        var credentialSecretResetButton = $('<button class="editor-button" style="vertical-align: top; width: 36px; margin-bottom: 10px"><i class="fa fa-trash-o"></i></button>')
+            .appendTo(credentialSecretButtons)
+            .click(function(e) {
+                e.preventDefault();
+                if (!$(this).hasClass('selected')) {
+                    credentialSecretNewInput.val("");
+                    credentialSecretExistingRow.hide();
+                    credentialSecretNewRow.show();
+                    $(this).addClass("selected");
+                    credentialSecretEditButton.removeClass("selected");
+                    credentialResetLabel.show();
+                    credentialResetWarning.show();
+                    credentialSetLabel.hide();
+                    credentialChangeLabel.hide();
+
+                    credentialFormRows.show();
+                } else {
+                    $(this).removeClass("selected");
+                    credentialFormRows.hide();
+                }
+                checkFiles();
+            });
+        var credentialSecretEditButton = $('<button class="editor-button" style="border-top-right-radius: 4px; border-bottom-right-radius: 4px; vertical-align: top; width: 36px; margin-bottom: 10px"><i class="fa fa-pencil"></i></button>')
+            .appendTo(credentialSecretButtons)
+            .click(function(e) {
+                e.preventDefault();
+                if (!$(this).hasClass('selected')) {
+                    credentialSecretExistingInput.val("");
+                    credentialSecretNewInput.val("");
+                    if (activeProject.settings.credentialSecretInvalid || !activeProject.settings.credentialsEncrypted) {
+                        credentialSetLabel.show();
+                        credentialChangeLabel.hide();
+                        credentialSecretExistingRow.hide();
+                    } else {
+                        credentialSecretExistingRow.show();
+                        credentialSetLabel.hide();
+                        credentialChangeLabel.show();
+                    }
+                    credentialSecretNewRow.show();
+                    credentialSecretEditButton.addClass("selected");
+                    credentialSecretResetButton.removeClass("selected");
+
+                    credentialResetLabel.hide();
+                    credentialResetWarning.hide();
+                    credentialFormRows.show();
+                } else {
+                    $(this).removeClass("selected");
+                    credentialFormRows.hide();
+                }
+                checkFiles();
+            })
+
+
+        row = $('<div class="user-settings-row user-settings-row-credentials"></div>').hide().appendTo(filesContainer);
+
+
+
+        var credentialFormRows = $('<div>',{style:"margin-top:10px"}).hide().appendTo(credentialStateLabel);
+
+        var credentialSetLabel = $('<div style="margin: 20px 0 10px 5px;">Set the encryption key:</div>').hide().appendTo(credentialFormRows);
+        var credentialChangeLabel = $('<div style="margin: 20px 0 10px 5px;">Change the encryption key:</div>').hide().appendTo(credentialFormRows);
+        var credentialResetLabel = $('<div style="margin: 20px 0 10px 5px;">Reset the encryption key:</div>').hide().appendTo(credentialFormRows);
+
+        var credentialSecretExistingRow = $('<div class="user-settings-row user-settings-row-credentials"></div>').appendTo(credentialFormRows);
+        $('<label for=""></label>').text('Current key').appendTo(credentialSecretExistingRow);
+        var credentialSecretExistingInput = $('<input type="password">').appendTo(credentialSecretExistingRow)
+            .on("change keyup paste",function() {
+                if (popover) {
+                    popover.close();
+                    popover = null;
+                }
+                checkFiles();
+            });
+
+        var credentialSecretNewRow = $('<div class="user-settings-row user-settings-row-credentials"></div>').appendTo(credentialFormRows);
+
+
+        $('<label for=""></label>').text('New key').appendTo(credentialSecretNewRow);
+        var credentialSecretNewInput = $('<input type="password">').appendTo(credentialSecretNewRow).on("change keyup paste",checkFiles);
+
+        var credentialResetWarning = $('<div class="form-tips form-warning" style="margin: 10px;"><i class="fa fa-warning"></i> This will delete all existing credentials</div>').hide().appendTo(credentialFormRows);
+
+
+        var hideEditForm = function() {
+            editFilesButton.show();
+            formButtons.hide();
+            flowFileLabelText.show();
+            flowFileInput.hide();
+            flowFileInputSearch.hide();
+            credFileLabel.show();
+            credFileInput.hide();
+            // credentialStateLabel.parent().show();
+            credentialStateLabel.removeClass("uneditable-input");
+            credentialStateLabel.css('height','');
+
+            flowFileInputSearch.removeClass('selected');
+            flowFileLabel.find('.project-file-listing-container').remove();
+            flowFileLabel.css('height','');
+            flowFileLabel.css('color','');
+
+            $(".user-settings-row-credentials").hide();
+            credentialFormRows.hide();
+            credentialSecretButtons.hide();
+            credentialSecretResetButton.removeClass("selected");
+            credentialSecretEditButton.removeClass("selected");
+
+
+        }
+
+        var formButtons = $('<span class="button-row" style="position: relative; float: right; margin-right:0;"></span>').hide().appendTo(filesContainer);
+        $('<button class="editor-button">Cancel</button>')
+            .appendTo(formButtons)
+            .click(function(evt) {
+                evt.preventDefault();
+                hideEditForm();
+            });
+        var saveButton = $('<button class="editor-button">Save</button>')
+            .appendTo(formButtons)
+            .click(function(evt) {
+                evt.preventDefault();
+                var spinner = utils.addSpinnerOverlay(filesContainer);
+                var done = function(err) {
+                    spinner.remove();
+                    if (err) {
+                        utils.reportUnexpectedError(err);
+                        return;
+                    }
+                    flowFileLabelText.text(flowFileInput.val());
+                    credFileLabel.text(credFileInput.text());
+                    hideEditForm();
+                }
+                var payload = {
+                    files: {
+                        flow: flowFileInput.val(),
+                        credentials: credFileInput.text()
+                    }
+                }
+
+                if (credentialSecretResetButton.hasClass('selected')) {
+                    payload.resetCredentialSecret = true;
+                }
+                if (credentialSecretResetButton.hasClass('selected') || credentialSecretEditButton.hasClass('selected')) {
+                    payload.credentialSecret = credentialSecretNewInput.val();
+                    if (credentialSecretExistingInput.is(":visible")) {
+                        payload.currentCredentialSecret = credentialSecretExistingInput.val();
+                    }
+                }
+
+                // console.log(JSON.stringify(payload,null,4));
+                RED.deploy.setDeployInflight(true);
+                utils.sendRequest({
+                    url: "projects/"+activeProject.name,
+                    type: "PUT",
+                    responses: {
+                        0: function(error) {
+                            done(error);
+                        },
+                        200: function(data) {
+                            activeProject = data;
+                            RED.sidebar.versionControl.refresh(true);
+                            updateForm();
+                            done();
+                        },
+                        400: {
+                            'credentials_load_failed': function(error) {
+                                done(error);
+                            },
+                            'missing_current_credential_key':  function(error) {
+                                credentialSecretExistingInput.addClass("input-error");
+                                popover = RED.popover.create({
+                                    target: credentialSecretExistingInput,
+                                    direction: 'right',
+                                    size: 'small',
+                                    content: "Incorrect key",
+                                    autoClose: 3000
+                                }).open();
+                                done(error);
+                            },
+                            '*': function(error) {
+                                done(error);
+                            }
+                        },
+                    }
+                },payload).always(function() {
+                    setTimeout(function() {
+                        RED.deploy.setDeployInflight(false);
+                    },500);
+                });
+            });
+        var updateForm = function() {
+            if (activeProject.settings.credentialSecretInvalid) {
+                credentialStateLabel.find(".user-settings-credentials-state-icon").removeClass().addClass("user-settings-credentials-state-icon fa fa-warning");
+                credentialStateLabel.find(".user-settings-credentials-state").text("Invalid encryption key");
+            } else if (activeProject.settings.credentialsEncrypted) {
+                credentialStateLabel.find(".user-settings-credentials-state-icon").removeClass().addClass("user-settings-credentials-state-icon fa fa-lock");
+                credentialStateLabel.find(".user-settings-credentials-state").text("Encryption enabled");
+            } else {
+                credentialStateLabel.find(".user-settings-credentials-state-icon").removeClass().addClass("user-settings-credentials-state-icon fa fa-unlock");
+                credentialStateLabel.find(".user-settings-credentials-state").text("Encryption disabled");
+            }
+            credentialSecretResetButton.toggleClass('disabled',!activeProject.settings.credentialSecretInvalid && !activeProject.settings.credentialsEncrypted);
+            credentialSecretResetButton.prop('disabled',!activeProject.settings.credentialSecretInvalid && !activeProject.settings.credentialsEncrypted);
+        }
+
+        checkFiles();
+        updateForm();
+    }
+
+    function createLocalBranchListSection(activeProject,pane) {
+        var localBranchContainer = $('<div class="user-settings-section"></div>').appendTo(pane);
+        $('<h4></h4>').text("Branches").appendTo(localBranchContainer);
+
+        var row = $('<div class="user-settings-row projects-dialog-list"></div>').appendTo(localBranchContainer);
+
+
+        var branchList = $('<ol>').appendTo(row).editableList({
+            height: 'auto',
+            addButton: false,
+            scrollOnAdd: false,
+            addItem: function(row,index,entry) {
+                var container = $('<div class="projects-dialog-list-entry">').appendTo(row);
+                if (entry.empty) {
+                    container.addClass('red-ui-search-empty');
+                    container.text("No branches");
+                    return;
+                }
+                if (entry.current) {
+                    container.addClass("current");
+                }
+                $('<span class="entry-icon"><i class="fa fa-code-fork"></i></span>').appendTo(container);
+                var content = $('<span>').appendTo(container);
+                var topRow = $('<div>').appendTo(content);
+                $('<span class="entry-name">').text(entry.name).appendTo(topRow);
+                if (entry.commit) {
+                    $('<span class="entry-detail">').text(entry.commit.sha).appendTo(topRow);
+                }
+                if (entry.remote) {
+                    var bottomRow = $('<div>').appendTo(content);
+
+                    $('<span class="entry-detail entry-remote-name">').text(entry.remote||"").appendTo(bottomRow);
+                    if (entry.status.ahead+entry.status.behind > 0) {
+                        $('<span class="entry-detail">'+
+                            '<i class="fa fa-long-arrow-up"></i> <span>'+entry.status.ahead+'</span> '+
+                            '<i class="fa fa-long-arrow-down"></i> <span>'+entry.status.behind+'</span>'+
+                            '</span>').appendTo(bottomRow);
+                    }
+                }
+
+                if (!entry.current) {
+                    var tools = $('<span class="entry-tools">').appendTo(container);
+                    $('<button class="editor-button editor-button-small"><i class="fa fa-trash"></i></button>')
+                        .appendTo(tools)
+                        .click(function(e) {
+                            e.preventDefault();
+                            var spinner = utils.addSpinnerOverlay(row).addClass('projects-dialog-spinner-contain');
+                            var notification = RED.notify("Are you sure you want to delete the local branch '"+entry.name+"'? This cannot be undone.", {
+                                type: "warning",
+                                modal: true,
+                                fixed: true,
+                                buttons: [
+                                    {
+                                        text: RED._("common.label.cancel"),
+                                        click: function() {
+                                            spinner.remove();
+                                            notification.close();
+                                        }
+                                    },{
+                                        text: 'Delete branch',
+                                        click: function() {
+                                            notification.close();
+                                            var url = "projects/"+activeProject.name+"/branches/"+entry.name;
+                                            var options = {
+                                                url: url,
+                                                type: "DELETE",
+                                                responses: {
+                                                    200: function(data) {
+                                                        row.fadeOut(200,function() {
+                                                            branchList.editableList('removeItem',entry);
+                                                            spinner.remove();
+                                                        });
+                                                    },
+                                                    400: {
+                                                        'git_delete_branch_unmerged': function(error) {
+                                                            notification = RED.notify("The local branch '"+entry.name+"' has unmerged changes that will be lost. Are you sure you want to delete it?", {
+                                                                type: "warning",
+                                                                modal: true,
+                                                                fixed: true,
+                                                                buttons: [
+                                                                    {
+                                                                        text: RED._("common.label.cancel"),
+                                                                        click: function() {
+                                                                            spinner.remove();
+                                                                            notification.close();
+                                                                        }
+                                                                    },{
+                                                                        text: 'Delete unmerged branch',
+                                                                        click: function() {
+                                                                            options.url += "?force=true";
+                                                                            notification.close();
+                                                                            utils.sendRequest(options);
+                                                                        }
+                                                                    }
+                                                                ]
+                                                            });
+                                                        },
+                                                        '*': function(error) {
+                                                            utils.reportUnexpectedError(error);
+                                                            spinner.remove();
+                                                        }
+                                                    },
+                                                }
+                                            }
+                                            utils.sendRequest(options);
+                                        }
+                                    }
+
+                                ]
+                            })
+                        })
+                }
+
+            }
+        });
+
+        $.getJSON("projects/"+activeProject.name+"/branches",function(result) {
+            if (result.branches) {
+                if (result.branches.length > 0) {
+                    result.branches.sort(function(A,B) {
+                        if (A.current) { return -1 }
+                        if (B.current) { return 1 }
+                        return A.name.localeCompare(B.name);
+                    });
+                    result.branches.forEach(function(branch) {
+                        branchList.editableList('addItem',branch);
+                    })
+                } else {
+                    branchList.editableList('addItem',{empty:true});
+                }
+            }
+        })
+    }
+
+    function createRemoteRepositorySection(activeProject,pane) {
+        $('<h3></h3>').text("Version Control").appendTo(pane);
+
+        createLocalBranchListSection(activeProject,pane);
+
+        var repoContainer = $('<div class="user-settings-section"></div>').appendTo(pane);
+        var title = $('<h4></h4>').text("Git remotes").appendTo(repoContainer);
+
+        var editRepoButton = $('<button class="editor-button editor-button-small" style="float: right; margin-right: 10px;">add remote</button>')
+            .appendTo(title)
+            .click(function(evt) {
+                editRepoButton.attr('disabled',true);
+                addRemoteDialog.slideDown(200, function() {
+                    addRemoteDialog[0].scrollIntoView();
+                    if (isEmpty) {
+                        remoteNameInput.val('origin');
+                        remoteURLInput.focus();
+                    } else {
+                        remoteNameInput.focus();
+                    }
+                    validateForm();
+                });
+            });
+
+
+        var emptyItem = { empty: true };
+        var isEmpty = true;
+        var row = $('<div class="user-settings-row"></div>').appendTo(repoContainer);
+        var addRemoteDialog = $('<div class="projects-dialog-list-dialog"></div>').hide().appendTo(row);
+        row = $('<div class="user-settings-row projects-dialog-list"></div>').appendTo(repoContainer);
+        var remotesList = $('<ol>').appendTo(row);
+        remotesList.editableList({
+            addButton: false,
+            height: 'auto',
+            addItem: function(row,index,entry) {
+
+                var container = $('<div class="projects-dialog-list-entry">').appendTo(row);
+                if (entry.empty) {
+                    container.addClass('red-ui-search-empty');
+                    container.text("No remotes");
+                    return;
+                } else {
+                    $('<span class="entry-icon"><i class="fa fa-globe"></i></span>').appendTo(container);
+                    var content = $('<span>').appendTo(container);
+                    $('<div class="entry-name">').text(entry.name).appendTo(content);
+                    if (entry.urls.fetch === entry.urls.push) {
+                        $('<div class="entry-detail">').text(entry.urls.fetch).appendTo(content);
+                    } else {
+                        $('<div class="entry-detail">').text("fetch: "+entry.urls.fetch).appendTo(content);
+                        $('<div class="entry-detail">').text("push: "+entry.urls.push).appendTo(content);
+
+                    }
+                    var tools = $('<span class="entry-tools">').appendTo(container);
+                    $('<button class="editor-button editor-button-small"><i class="fa fa-trash"></i></button>')
+                        .appendTo(tools)
+                        .click(function(e) {
+                            e.preventDefault();
+                            var spinner = utils.addSpinnerOverlay(row).addClass('projects-dialog-spinner-contain');
+                            var notification = RED.notify("Are you sure you want to delete the remote '"+entry.name+"'?", {
+                                type: "warning",
+                                modal: true,
+                                fixed: true,
+                                buttons: [
+                                    {
+                                        text: RED._("common.label.cancel"),
+                                        click: function() {
+                                            spinner.remove();
+                                            notification.close();
+                                        }
+                                    },{
+                                        text: 'Delete remote',
+                                        click: function() {
+                                            notification.close();
+
+                                            if (activeProject.git.branches.remote && activeProject.git.branches.remote.indexOf(entry.name+"/") === 0) {
+                                                delete activeProject.git.branches.remote;
+                                            }
+                                            if (activeProject.git.branches.remoteAlt && activeProject.git.branches.remoteAlt.indexOf(entry.name+"/") === 0) {
+                                                delete activeProject.git.branches.remoteAlt;
+                                            }
+
+                                            var url = "projects/"+activeProject.name+"/remotes/"+entry.name;
+                                            var options = {
+                                                url: url,
+                                                type: "DELETE",
+                                                responses: {
+                                                    200: function(data) {
+                                                        row.fadeOut(200,function() {
+                                                            remotesList.editableList('removeItem',entry);
+                                                            setTimeout(spinner.remove, 100);
+                                                            if (data.remotes.length === 0) {
+                                                                delete activeProject.git.remotes;
+                                                                isEmpty = true;
+                                                                remotesList.editableList('addItem',emptyItem);
+                                                            } else {
+                                                                activeProject.git.remotes = {};
+                                                                data.remotes.forEach(function(remote) {
+                                                                    var name = remote.name;
+                                                                    delete remote.name;
+                                                                    activeProject.git.remotes[name] = remote;
+                                                                });
+                                                            }
+                                                            delete activeProject.git.branches.remoteAlt;
+                                                            RED.sidebar.versionControl.refresh();
+                                                        });
+                                                    },
+                                                    400: {
+                                                        '*': function(error) {
+                                                            utils.reportUnexpectedError(error);
+                                                            spinner.remove();
+                                                        }
+                                                    },
+                                                }
+                                            }
+                                            utils.sendRequest(options);
+                                        }
+                                    }
+
+                                ]
+                            })
+                        });
+                }
+
+
+            }
+        });
+
+        var validateForm = function() {
+            var validName = /^[a-zA-Z0-9\-_]+$/.test(remoteNameInput.val());
+            var repo = remoteURLInput.val();
+            // var validRepo = /^(?:file|git|ssh|https?|[\d\w\.\-_]+@[\w\.]+):(?:\/\/)?[\w\.@:\/~_-]+(?:\.git)?(?:\/?|\#[\d\w\.\-_]+?)$/.test(remoteURLInput.val());
+            var validRepo = repo.length > 0 && !/\s/.test(repo);
+            if (/^https?:\/\/[^/]+@/i.test(repo)) {
+                remoteURLLabel.text("Do not include the username/password in the url");
+                validRepo = false;
+            } else {
+                remoteURLLabel.text("https://, ssh:// or file://");
+            }
+            saveButton.attr('disabled',(!validName || !validRepo))
+            remoteNameInput.toggleClass('input-error',remoteNameInputChanged&&!validName);
+            remoteURLInput.toggleClass('input-error',remoteURLInputChanged&&!validRepo);
+            if (popover) {
+                popover.close();
+                popover = null;
+            }
+        };
+        var popover;
+        var remoteNameInputChanged = false;
+        var remoteURLInputChanged = false;
+
+        $('<div class="projects-dialog-list-dialog-header">').text('Add remote').appendTo(addRemoteDialog);
+
+        row = $('<div class="user-settings-row"></div>').appendTo(addRemoteDialog);
+        $('<label for=""></label>').text('Remote name').appendTo(row);
+        var remoteNameInput = $('<input type="text">').appendTo(row).on("change keyup paste",function() {
+            remoteNameInputChanged = true;
+            validateForm();
+        });
+        $('<label class="projects-edit-form-sublabel"><small>Must contain only A-Z 0-9 _ -</small></label>').appendTo(row).find("small");
+        row = $('<div class="user-settings-row"></div>').appendTo(addRemoteDialog);
+        $('<label for=""></label>').text('URL').appendTo(row);
+        var remoteURLInput = $('<input type="text">').appendTo(row).on("change keyup paste",function() {
+            remoteURLInputChanged = true;
+            validateForm()
+        });
+        var remoteURLLabel = $('<label class="projects-edit-form-sublabel"><small>https://, ssh:// or file://</small></label>').appendTo(row).find("small");
+
+        var hideEditForm = function() {
+            editRepoButton.attr('disabled',false);
+            addRemoteDialog.hide();
+            remoteNameInput.val("");
+            remoteURLInput.val("");
+            if (popover) {
+                popover.close();
+                popover = null;
+            }
+        }
+        var formButtons = $('<span class="button-row" style="position: relative; float: right; margin: 10px;"></span>')
+            .appendTo(addRemoteDialog);
+        $('<button class="editor-button">Cancel</button>')
+            .appendTo(formButtons)
+            .click(function(evt) {
+                evt.preventDefault();
+                hideEditForm();
+            });
+        var saveButton = $('<button class="editor-button">Add remote</button>')
+            .appendTo(formButtons)
+            .click(function(evt) {
+                evt.preventDefault();
+                var spinner = utils.addSpinnerOverlay(addRemoteDialog).addClass('projects-dialog-spinner-contain');
+
+                var payload = {
+                    name: remoteNameInput.val(),
+                    url: remoteURLInput.val()
+                }
+                var done = function(err) {
+                    spinner.remove();
+                    if (err) {
+                        return;
+                    }
+                    hideEditForm();
+                }
+                // console.log(JSON.stringify(payload,null,4));
+                RED.deploy.setDeployInflight(true);
+                utils.sendRequest({
+                    url: "projects/"+activeProject.name+"/remotes",
+                    type: "POST",
+                    responses: {
+                        0: function(error) {
+                            done(error);
+                        },
+                        200: function(data) {
+                            activeProject.git.remotes = {};
+                            data.remotes.forEach(function(remote) {
+                                var name = remote.name;
+                                delete remote.name;
+                                activeProject.git.remotes[name] = remote;
+                            });
+                            updateForm();
+                            RED.sidebar.versionControl.refresh();
+                            done();
+                        },
+                        400: {
+                            'git_remote_already_exists': function(error) {
+                                popover = RED.popover.create({
+                                    target: remoteNameInput,
+                                    direction: 'right',
+                                    size: 'small',
+                                    content: "Remote already exists",
+                                    autoClose: 6000
+                                }).open();
+                                remoteNameInput.addClass('input-error');
+                                done(error);
+                            },
+                            '*': function(error) {
+                                utils.reportUnexpectedError(error);
+                                done(error);
+                            }
+                        },
+                    }
+                },payload);
+            });
+
+        var updateForm = function() {
+            remotesList.editableList('empty');
+            var count = 0;
+            if (activeProject.git.hasOwnProperty('remotes')) {
+                for (var name in activeProject.git.remotes) {
+                    if (activeProject.git.remotes.hasOwnProperty(name)) {
+                        count++;
+                        remotesList.editableList('addItem',{name:name,urls:activeProject.git.remotes[name]});
+                    }
+                }
+            }
+            isEmpty = (count === 0);
+            if (isEmpty) {
+                remotesList.editableList('addItem',emptyItem);
+            }
+        }
+        updateForm();
+    }
+
+
+
+    function createSettingsPane(activeProject) {
+        var pane = $('<div id="project-settings-tab-settings" class="project-settings-tab-pane node-help"></div>');
+        createFilesSection(activeProject,pane);
+        // createLocalRepositorySection(activeProject,pane);
+        createRemoteRepositorySection(activeProject,pane);
+        return pane;
+    }
+
+    function refreshModuleInUseCounts() {
+        modulesInUse = {};
+        RED.nodes.eachNode(_updateModulesInUse);
+        RED.nodes.eachConfig(_updateModulesInUse);
+    }
+
+    function _updateModulesInUse(n) {
+        if (!/^subflow:/.test(n.type)) {
+            var module = RED.nodes.registry.getNodeSetForType(n.type).module;
+            if (module !== 'node-red') {
+                if (!modulesInUse.hasOwnProperty(module)) {
+                    modulesInUse[module] = {
+                        module: module,
+                        version: RED.nodes.registry.getModule(module).version,
+                        count: 0,
+                        known: false
+                    }
+                }
+                modulesInUse[module].count++;
+            }
+        }
+    }
+
+    var popover;
+    var utils;
+    var modulesInUse = {};
+    function init(_utils) {
+        utils = _utils;
+        addPane({
+            id:'main',
+            title: "Project", // TODO: nls
+            get: createMainPane,
+            close: function() { }
+        });
+        addPane({
+            id:'deps',
+            title: "Dependencies", // TODO: nls
+            get: createDependenciesPane,
+            close: function() { }
+        });
+        addPane({
+            id:'settings',
+            title: "Settings", // TODO: nls
+            get: createSettingsPane,
+            close: function() {
+                if (popover) {
+                    popover.close();
+                    popover = null;
+                }
+            }
+        });
+
+        RED.events.on('nodes:add', _updateModulesInUse);
+        RED.events.on('nodes:remove', function(n) {
+            if (!/^subflow:/.test(n.type)) {
+                var module = RED.nodes.registry.getNodeSetForType(n.type).module;
+                if (module !== 'node-red' && modulesInUse.hasOwnProperty(module)) {
+                    modulesInUse[module].count--;
+                    if (modulesInUse[module].count === 0) {
+                        if (!modulesInUse[module].known) {
+                            delete modulesInUse[module];
+                        }
+                    }
+                }
+            }
+        })
+
+
+
+    }
+    return {
+        init: init,
+        show: show,
+        switchProject: function(name) {
+            // TODO: not ideal way to trigger this; should there be an editor-wide event?
+            modulesInUse = {};
+        }
+    };
+})();
+;/**
+ * Copyright JS Foundation and other contributors, http://js.foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ **/
+
+RED.projects.userSettings = (function() {
+
+    var gitUsernameInput;
+    var gitEmailInput;
+
+    function createGitUserSection(pane) {
+
+        var currentGitSettings = RED.settings.get('git') || {};
+        currentGitSettings.user = currentGitSettings.user || {};
+
+        var title = $('<h3></h3>').text("Committer Details").appendTo(pane);
+
+        var gitconfigContainer = $('<div class="user-settings-section"></div>').appendTo(pane);
+        $('<div style="color:#aaa;"></div>').appendTo(gitconfigContainer).text("Leave blank to use system default");
+
+        var row = $('<div class="user-settings-row"></div>').appendTo(gitconfigContainer);
+        $('<label for=""></label>').text('Username').appendTo(row);
+        gitUsernameInput = $('<input type="text">').appendTo(row);
+        gitUsernameInput.val(currentGitSettings.user.name||"");
+
+        row = $('<div class="user-settings-row"></div>').appendTo(gitconfigContainer);
+        $('<label for=""></label>').text('Email').appendTo(row);
+        gitEmailInput = $('<input type="text">').appendTo(row);
+        gitEmailInput.val(currentGitSettings.user.email||"");
+    }
+
+
+    function createSSHKeySection(pane) {
+        var container = $('<div class="user-settings-section"></div>').appendTo(pane);
+        var popover;
+        var title = $('<h3></h3>').text("SSH Keys").appendTo(container);
+        var subtitle = $('<div style="color:#aaa;"></div>').appendTo(container).text("Allows you to create secure connections to remote git repositories.");
+
+        var addKeyButton = $('<button id="user-settings-gitconfig-add-key" class="editor-button editor-button-small" style="float: right; margin-right: 10px;">add key</button>')
+            .appendTo(subtitle)
+            .click(function(evt) {
+                addKeyButton.attr('disabled',true);
+                saveButton.attr('disabled',true);
+                // bg.children().removeClass("selected");
+                // addLocalButton.click();
+                addKeyDialog.slideDown(200);
+                keyNameInput.focus();
+            });
+
+        var validateForm = function() {
+            var valid = /^[a-zA-Z0-9\-_]+$/.test(keyNameInput.val());
+            keyNameInput.toggleClass('input-error',keyNameInputChanged&&!valid);
+
+            // var selectedButton = bg.find(".selected");
+            // if (selectedButton[0] === addLocalButton[0]) {
+            //     valid = valid && localPublicKeyPathInput.val().length > 0 && localPrivateKeyPathInput.val().length > 0;
+            // } else if (selectedButton[0] === uploadButton[0]) {
+            //     valid = valid && publicKeyInput.val().length > 0 && privateKeyInput.val().length > 0;
+            // } else if (selectedButton[0] === generateButton[0]) {
+                var passphrase = passphraseInput.val();
+                var validPassphrase = passphrase.length === 0 || passphrase.length >= 8;
+                passphraseInput.toggleClass('input-error',!validPassphrase);
+                if (!validPassphrase) {
+                    passphraseInputSubLabel.text("Passphrase too short");
+                } else if (passphrase.length === 0) {
+                    passphraseInputSubLabel.text("Optional");
+                } else {
+                    passphraseInputSubLabel.text("");
+                }
+                valid = valid && validPassphrase;
+            // }
+
+            saveButton.attr('disabled',!valid);
+
+            if (popover) {
+                popover.close();
+                popover = null;
+            }
+        };
+
+        var row = $('<div class="user-settings-row"></div>').appendTo(container);
+        var addKeyDialog = $('<div class="projects-dialog-list-dialog"></div>').hide().appendTo(row);
+        $('<div class="projects-dialog-list-dialog-header">').text('Add SSH Key').appendTo(addKeyDialog);
+        var addKeyDialogBody = $('<div>').appendTo(addKeyDialog);
+
+        row = $('<div class="user-settings-row"></div>').appendTo(addKeyDialogBody);
+        $('<div style="color:#aaa;"></div>').appendTo(row).text("Generate a new public/private key pair");
+        // var bg = $('<div></div>',{class:"button-group", style:"text-align: center"}).appendTo(row);
+        // var addLocalButton = $('<button class="editor-button toggle selected">use local key</button>').appendTo(bg);
+        // var uploadButton = $('<button class="editor-button toggle">upload key</button>').appendTo(bg);
+        // var generateButton = $('<button class="editor-button toggle">generate key</button>').appendTo(bg);
+        // bg.children().click(function(e) {
+        //     e.preventDefault();
+        //     if ($(this).hasClass("selected")) {
+        //         return;
+        //     }
+        //     bg.children().removeClass("selected");
+        //     $(this).addClass("selected");
+        //     if (this === addLocalButton[0]) {
+        //         addLocalKeyPane.show();
+        //         generateKeyPane.hide();
+        //         uploadKeyPane.hide();
+        //     } else if (this === uploadButton[0]) {
+        //         addLocalKeyPane.hide();
+        //         generateKeyPane.hide();
+        //         uploadKeyPane.show();
+        //     } else if (this === generateButton[0]){
+        //         addLocalKeyPane.hide();
+        //         generateKeyPane.show();
+        //         uploadKeyPane.hide();
+        //     }
+        //     validateForm();
+        // })
+
+
+        row = $('<div class="user-settings-row"></div>').appendTo(addKeyDialogBody);
+        $('<label for=""></label>').text('Name').appendTo(row);
+        var keyNameInputChanged = false;
+        var keyNameInput = $('<input type="text">').appendTo(row).on("change keyup paste",function() {
+            keyNameInputChanged = true;
+            validateForm();
+        });
+        $('<label class="projects-edit-form-sublabel"><small>Must contain only A-Z 0-9 _ -</small></label>').appendTo(row).find("small");
+
+        var generateKeyPane = $('<div>').appendTo(addKeyDialogBody);
+        row = $('<div class="user-settings-row"></div>').appendTo(generateKeyPane);
+        $('<label for=""></label>').text('Passphrase').appendTo(row);
+        var passphraseInput = $('<input type="password">').appendTo(row).on("change keyup paste",validateForm);
+        var passphraseInputSubLabel = $('<label class="projects-edit-form-sublabel"><small>Optional</small></label>').appendTo(row).find("small");
+
+        // var addLocalKeyPane = $('<div>').hide().appendTo(addKeyDialogBody);
+        // row = $('<div class="user-settings-row"></div>').appendTo(addLocalKeyPane);
+        // $('<label for=""></label>').text('Public key').appendTo(row);
+        // var localPublicKeyPathInput = $('<input type="text">').appendTo(row).on("change keyup paste",validateForm);
+        // $('<label class="projects-edit-form-sublabel"><small>Public key file path, for example: ~/.ssh/id_rsa.pub</small></label>').appendTo(row).find("small");
+        // row = $('<div class="user-settings-row"></div>').appendTo(addLocalKeyPane);
+        // $('<label for=""></label>').text('Private key').appendTo(row);
+        // var localPrivateKeyPathInput = $('<input type="text">').appendTo(row).on("change keyup paste",validateForm);
+        // $('<label class="projects-edit-form-sublabel"><small>Private key file path, for example: ~/.ssh/id_rsa</small></label>').appendTo(row).find("small");
+        //
+        // var uploadKeyPane = $('<div>').hide().appendTo(addKeyDialogBody);
+        // row = $('<div class="user-settings-row"></div>').appendTo(uploadKeyPane);
+        // $('<label for=""></label>').text('Public key').appendTo(row);
+        // var publicKeyInput = $('<textarea>').appendTo(row).on("change keyup paste",validateForm);
+        // $('<label class="projects-edit-form-sublabel"><small>Paste in public key contents, for example: ~/.ssh/id_rsa.pub</small></label>').appendTo(row).find("small");
+        // row = $('<div class="user-settings-row"></div>').appendTo(uploadKeyPane);
+        // $('<label for=""></label>').text('Private key').appendTo(row);
+        // var privateKeyInput = $('<textarea>').appendTo(row).on("change keyup paste",validateForm);
+        // $('<label class="projects-edit-form-sublabel"><small>Paste in private key contents, for example: ~/.ssh/id_rsa</small></label>').appendTo(row).find("small");
+
+
+
+
+        var hideEditForm = function() {
+            addKeyButton.attr('disabled',false);
+            addKeyDialog.hide();
+
+            keyNameInput.val("");
+            keyNameInputChanged = false;
+            passphraseInput.val("");
+            // localPublicKeyPathInput.val("");
+            // localPrivateKeyPathInput.val("");
+            // publicKeyInput.val("");
+            // privateKeyInput.val("");
+            if (popover) {
+                popover.close();
+                popover = null;
+            }
+        }
+        var formButtons = $('<span class="button-row" style="position: relative; float: right; margin: 10px;"></span>').appendTo(addKeyDialog);
+        $('<button class="editor-button">Cancel</button>')
+            .appendTo(formButtons)
+            .click(function(evt) {
+                evt.preventDefault();
+                hideEditForm();
+            });
+        var saveButton = $('<button class="editor-button">Generate key</button>')
+            .appendTo(formButtons)
+            .click(function(evt) {
+                evt.preventDefault();
+                var spinner = utils.addSpinnerOverlay(addKeyDialog).addClass('projects-dialog-spinner-contain');
+                var payload = {
+                    name: keyNameInput.val()
+                };
+
+                // var selectedButton = bg.find(".selected");
+                // if (selectedButton[0] === addLocalButton[0]) {
+                //     payload.type = "local";
+                //     payload.publicKeyPath = localPublicKeyPathInput.val();
+                //     payload.privateKeyPath = localPrivateKeyPathInput.val();
+                // } else if (selectedButton[0] === uploadButton[0]) {
+                //     payload.type = "upload";
+                //     payload.publicKey = publicKeyInput.val();
+                //     payload.privateKey = privateKeyInput.val();
+                // } else if (selectedButton[0] === generateButton[0]) {
+                    payload.type = "generate";
+                    payload.comment = gitEmailInput.val();
+                    payload.password = passphraseInput.val();
+                    payload.size = 4096;
+                // }
+                var done = function(err) {
+                    spinner.remove();
+                    if (err) {
+                        return;
+                    }
+                    hideEditForm();
+                }
+                // console.log(JSON.stringify(payload,null,4));
+                RED.deploy.setDeployInflight(true);
+                utils.sendRequest({
+                    url: "settings/user/keys",
+                    type: "POST",
+                    responses: {
+                        0: function(error) {
+                            done(error);
+                        },
+                        200: function(data) {
+                            refreshSSHKeyList(payload.name);
+                            done();
+                        },
+                        400: {
+                            'unexpected_error': function(error) {
+                                console.log(error);
+                                done(error);
+                            }
+                        },
+                    }
+                },payload);
+            });
+
+        row = $('<div class="user-settings-row projects-dialog-list"></div>').appendTo(container);
+        var emptyItem = { empty: true };
+        var expandKey = function(container,entry) {
+            var row = $('<div class="projects-dialog-ssh-public-key">',{style:"position:relative"}).appendTo(container);
+            var keyBox = $('<pre>',{style:"min-height: 80px"}).appendTo(row);
+            var spinner = utils.addSpinnerOverlay(keyBox).addClass('projects-dialog-spinner-contain');
+            var options = {
+                url: 'settings/user/keys/'+entry.name,
+                type: "GET",
+                responses: {
+                    200: function(data) {
+                        keyBox.text(data.publickey);
+                        spinner.remove();
+                    },
+                    400: {
+                        'unexpected_error': function(error) {
+                            console.log(error);
+                            spinner.remove();
+                        }
+                    },
+                }
+            }
+            utils.sendRequest(options);
+
+            var formButtons = $('<span class="button-row" style="position: relative; float: right; margin: 10px;"></span>').appendTo(row);
+            $('<button class="editor-button editor-button-small">Copy public key to clipboard</button>')
+                .appendTo(formButtons)
+                .click(function(evt) {
+                    try {
+                        evt.stopPropagation();
+                        evt.preventDefault();
+                        document.getSelection().selectAllChildren(keyBox[0]);
+                        var ret = document.execCommand('copy');
+                        document.getSelection().empty();
+                    } catch(err) {
+
+                    }
+
+                });
+
+            return row;
+        }
+        var keyList = $('<ol class="projects-dialog-ssh-key-list">').appendTo(row).editableList({
+            height: 'auto',
+            addButton: false,
+            scrollOnAdd: false,
+            addItem: function(row,index,entry) {
+                var container = $('<div class="projects-dialog-list-entry">').appendTo(row);
+                if (entry.empty) {
+                    container.addClass('red-ui-search-empty');
+                    container.text("No SSH keys");
+                    return;
+                }
+                var topRow = $('<div class="projects-dialog-ssh-key-header">').appendTo(container);
+                $('<span class="entry-icon"><i class="fa fa-key"></i></span>').appendTo(topRow);
+                $('<span class="entry-name">').text(entry.name).appendTo(topRow);
+                var tools = $('<span class="button-row entry-tools">').appendTo(topRow);
+                var expandedRow;
+                topRow.click(function(e) {
+                    if (expandedRow) {
+                        expandedRow.slideUp(200,function() {
+                            expandedRow.remove();
+                            expandedRow = null;
+                        })
+                    } else {
+                        expandedRow = expandKey(container,entry);
+                    }
+                    })
+                if (!entry.system) {
+                    $('<button class="editor-button editor-button-small"><i class="fa fa-trash"></i></button>')
+                        .appendTo(tools)
+                        .click(function(e) {
+                            e.stopPropagation();
+                            var spinner = utils.addSpinnerOverlay(row).addClass('projects-dialog-spinner-contain');
+                            var notification = RED.notify("Are you sure you want to delete the SSH key '"+entry.name+"'? This cannot be undone.", {
+                                type: 'warning',
+                                modal: true,
+                                fixed: true,
+                                buttons: [
+                                    {
+                                        text: RED._("common.label.cancel"),
+                                        click: function() {
+                                            spinner.remove();
+                                            notification.close();
+                                        }
+                                    },
+                                    {
+                                        text: "Delete key",
+                                        click: function() {
+                                            notification.close();
+                                            var url = "settings/user/keys/"+entry.name;
+                                            var options = {
+                                                url: url,
+                                                type: "DELETE",
+                                                responses: {
+                                                    200: function(data) {
+                                                        row.fadeOut(200,function() {
+                                                            keyList.editableList('removeItem',entry);
+                                                            setTimeout(spinner.remove, 100);
+                                                            if (keyList.editableList('length') === 0) {
+                                                                keyList.editableList('addItem',emptyItem);
+                                                            }
+                                                        });
+                                                    },
+                                                    400: {
+                                                        'unexpected_error': function(error) {
+                                                            console.log(error);
+                                                            spinner.remove();
+                                                        }
+                                                    },
+                                                }
+                                            }
+                                            utils.sendRequest(options);
+                                        }
+                                    }
+                                ]
+                            });
+                        });
+                }
+                if (entry.expand) {
+                    expandedRow = expandKey(container,entry);
+                }
+            }
+        });
+
+        var refreshSSHKeyList = function(justAdded) {
+            $.getJSON("settings/user/keys",function(result) {
+                if (result.keys) {
+                    result.keys.sort(function(A,B) {
+                        return A.name.localeCompare(B.name);
+                    });
+                    keyList.editableList('empty');
+                    result.keys.forEach(function(key) {
+                        if (key.name === justAdded) {
+                            key.expand = true;
+                        }
+                        keyList.editableList('addItem',key);
+                    });
+                    if (keyList.editableList('length') === 0) {
+                        keyList.editableList('addItem',emptyItem);
+                    }
+
+                }
+            })
+        }
+        refreshSSHKeyList();
+
+    }
+
+    function createSettingsPane(activeProject) {
+        var pane = $('<div id="user-settings-tab-gitconfig" class="project-settings-tab-pane node-help"></div>');
+        createGitUserSection(pane);
+        createSSHKeySection(pane);
+        return pane;
+    }
+
+    var utils;
+    function init(_utils) {
+        utils = _utils;
+        RED.userSettings.add({
+            id:'gitconfig',
+            title: "Git config", // TODO: nls
+            get: createSettingsPane,
+            close: function() {
+                var currentGitSettings = RED.settings.get('git') || {};
+                currentGitSettings.user = currentGitSettings.user || {};
+                currentGitSettings.user.name = gitUsernameInput.val();
+                currentGitSettings.user.email = gitEmailInput.val();
+                RED.settings.set('git', currentGitSettings);
+            }
+        });
+    }
+
+    return {
+        init: init,
+    };
+})();
+;/**
+ * Copyright JS Foundation and other contributors, http://js.foundation
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ **/
+RED.sidebar.versionControl = (function() {
+
+    var sidebarContent;
+    var sections;
+
+    var allChanges = {};
+
+    var unstagedChangesList;
+    var stageAllButton;
+    var stagedChangesList;
+    var unstageAllButton;
+    var unstagedChanges;
+    var stagedChanges;
+    var bulkChangeSpinner;
+    var unmergedContent;
+    var unmergedChangesList;
+    var commitButton;
+    var localChanges;
+
+    var localCommitList;
+    var localCommitListShade;
+    // var remoteCommitList;
+
+    var isMerging;
+
+    function viewFileDiff(entry,state) {
+        var activeProject = RED.projects.getActiveProject();
+        var diffTarget = (state === 'staged')?"index":"tree";
+        utils.sendRequest({
+            url: "projects/"+activeProject.name+"/diff/"+diffTarget+"/"+encodeURIComponent(entry.file),
+            type: "GET",
+            responses: {
+                0: function(error) {
+                    console.log(error);
+                    // done(error,null);
+                },
+                200: function(data) {
+                    var title;
+                    if (state === 'unstaged') {
+                        title = 'Unstaged changes : '+entry.file
+                    } else if (state === 'staged') {
+                        title = 'Staged changes : '+entry.file
+                    } else {
+                        title = 'Resolve conflicts : '+entry.file
+                    }
+                    var options = {
+                        diff: data.diff,
+                        title: title,
+                        unmerged: state === 'unmerged',
+                        project: activeProject
+                    }
+                    if (state == 'unstaged') {
+                        options.oldRevTitle = entry.indexStatus === " "?"HEAD":"Staged";
+                        options.newRevTitle = "Unstaged";
+                        options.oldRev = entry.indexStatus === " "?"@":":0";
+                        options.newRev = "_";
+                    } else if (state === 'staged') {
+                        options.oldRevTitle = "HEAD";
+                        options.newRevTitle = "Staged";
+                        options.oldRev = "@";
+                        options.newRev = ":0";
+                    } else {
+                        options.oldRevTitle = "Local";
+                        options.newRevTitle = "Remote";
+                        options.commonRev = ":1";
+                        options.oldRev = ":2";
+                        options.newRev = ":3";
+                        options.onresolve = function(resolution) {
+                            utils.sendRequest({
+                                url: "projects/"+activeProject.name+"/resolve/"+encodeURIComponent(entry.file),
+                                type: "POST",
+                                responses: {
+                                    0: function(error) {
+                                        console.log(error);
+                                        // done(error,null);
+                                    },
+                                    200: function(data) {
+                                        refresh(true);
+                                    },
+                                    400: {
+                                        'unexpected_error': function(error) {
+                                            console.log(error);
+                                            // done(error,null);
+                                        }
+                                    },
+                                }
+                            },{resolutions:resolution.resolutions[entry.file]});
+                        }
+                    }
+                    RED.diff.showUnifiedDiff(options);
+                },
+                400: {
+                    'unexpected_error': function(error) {
+                        console.log(error);
+                        // done(error,null);
+                    }
+                }
+            }
+        })
+    }
+
+    function createChangeEntry(row, entry, status, state) {
+        row.addClass("sidebar-version-control-change-entry");
+        var container = $('<div>').appendTo(row);
+        if (entry.label) {
+            row.addClass('node-info-none');
+            container.text(entry.label);
+            if (entry.button) {
+                container.css({
+                    display: "inline-block",
+                    maxWidth: "300px",
+                    textAlign: "left"
+                })
+                var toolbar = $('<div style="float: right; margin: 5px; height: 50px;"></div>').appendTo(container);
+
+                $('<button class="editor-button editor-button-small"></button>').text(entry.button.label)
+                    .appendTo(toolbar)
+                    .click(entry.button.click);
+            }
+            return;
+        }
+
+
+        var icon = $('<i class=""></i>').appendTo(container);
+        var entryLink = $('<a href="#">')
+            .appendTo(container)
+            .click(function(e) {
+                e.preventDefault();
+                viewFileDiff(entry,state);
+            });
+        var label = $('<span>').appendTo(entryLink);
+
+        var entryTools = $('<div class="sidebar-version-control-change-entry-tools">').appendTo(row);
+        var bg;
+        var revertButton;
+        if (state === 'unstaged') {
+            bg = $('<span class="button-group" style="margin-right: 5px;"></span>').appendTo(entryTools);
+            revertButton = $('<button class="editor-button editor-button-small"><i class="fa fa-reply"></i></button>')
+                .appendTo(bg)
+                .click(function(evt) {
+                    evt.preventDefault();
+
+                    var spinner = utils.addSpinnerOverlay(container).addClass('projects-dialog-spinner-contain');
+                    var notification = RED.notify("Are you sure you want to revert the changes to '"+entry.file+"'? This cannot be undone.", {
+                        type: "warning",
+                        modal: true,
+                        fixed: true,
+                        buttons: [
+                            {
+                                text: RED._("common.label.cancel"),
+                                click: function() {
+                                    spinner.remove();
+                                    notification.close();
+                                }
+                            },{
+                                text: 'Revert changes',
+                                click: function() {
+                                    notification.close();
+                                    var activeProject = RED.projects.getActiveProject();
+                                    var url = "projects/"+activeProject.name+"/files/_/"+entry.file;
+                                    var options = {
+                                        url: url,
+                                        type: "DELETE",
+                                        responses: {
+                                            200: function(data) {
+                                                spinner.remove();
+                                            },
+                                            400: {
+                                                'unexpected_error': function(error) {
+                                                    spinner.remove();
+                                                    console.log(error);
+                                                    // done(error,null);
+                                                }
+                                            }
+                                        }
+                                    }
+                                    RED.deploy.setDeployInflight(true);
+                                    utils.sendRequest(options).always(function() {
+                                        setTimeout(function() {
+                                            RED.deploy.setDeployInflight(false);
+                                        },500);
+                                    });
+                                }
+                            }
+
+                        ]
+                    })
+
+                });
+        }
+        bg = $('<span class="button-group"></span>').appendTo(entryTools);
+        if (state !== 'unmerged') {
+            $('<button class="editor-button editor-button-small"><i class="fa fa-'+((state==='unstaged')?"plus":"minus")+'"></i></button>')
+                .appendTo(bg)
+                .click(function(evt) {
+                    evt.preventDefault();
+                    var activeProject = RED.projects.getActiveProject();
+                    entry.spinner = utils.addSpinnerOverlay(row).addClass('projects-version-control-spinner-sidebar');
+                    utils.sendRequest({
+                        url: "projects/"+activeProject.name+"/stage/"+encodeURIComponent(entry.file),
+                        type: (state==='unstaged')?"POST":"DELETE",
+                        responses: {
+                            0: function(error) {
+                                console.log(error);
+                                // done(error,null);
+                            },
+                            200: function(data) {
+                                refreshFiles(data);
+                            },
+                            400: {
+                                'unexpected_error': function(error) {
+                                    console.log(error);
+                                    // done(error,null);
+                                }
+                            },
+                        }
+                    },{});
+                });
+        }
+        entry["update"+((state==='unstaged')?"Unstaged":"Staged")] = function(entry,status) {
+            container.removeClass();
+            var iconClass = "";
+            if (status === 'A') {
+                container.addClass("node-diff-added");
+                iconClass = "fa-plus-square";
+            } else if (status === '?') {
+                container.addClass("node-diff-unchanged");
+                iconClass = "fa-question-circle-o";
+            } else if (status === 'D') {
+                container.addClass("node-diff-deleted");
+                iconClass = "fa-minus-square";
+            } else if (status === 'M') {
+                container.addClass("node-diff-changed");
+                iconClass = "fa-square";
+            } else if (status === 'R') {
+                container.addClass("node-diff-changed");
+                iconClass = "fa-toggle-right";
+            } else if (status === 'U') {
+                container.addClass("node-diff-conflicted");
+                iconClass = "fa-exclamation-triangle";
+            } else {
+                iconClass = "fa-exclamation-triangle"
+            }
+            label.empty();
+            $('<span>').text(entry.file.replace(/\\(.)/g,"$1")).appendTo(label);
+
+            if (entry.oldName) {
+                $('<i class="fa fa-long-arrow-right"></i>').prependTo(label);
+                $('<span>').text(entry.oldName.replace(/\\(.)/g,"$1")).prependTo(label);
+                // label.text(entry.oldName+" -> "+entry.file);
+            }
+            // console.log(entry.file,status,iconClass);
+
+            icon.removeClass();
+            icon.addClass("fa "+iconClass);
+            if (entry.spinner) {
+                entry.spinner.remove();
+                delete entry.spinner;
+            }
+
+            if (revertButton) {
+                revertButton.toggle(status !== '?');
+            }
+            entryLink.toggleClass("disabled",(status === 'D' || status === '?'));
+        }
+        entry["update"+((state==='unstaged')?"Unstaged":"Staged")](entry, status);
+    }
+    var utils;
+    function init(_utils) {
+        utils = _utils;
+
+        RED.actions.add("core:show-version-control-tab",show);
+        RED.events.on("deploy", function() {
+            var activeProject = RED.projects.getActiveProject();
+            if (activeProject) {
+                // TODO: this is a full refresh of the files - should be able to
+                //       just do an incremental refresh
+                allChanges = {};
+                unstagedChangesList.editableList('empty');
+                stagedChangesList.editableList('empty');
+                unmergedChangesList.editableList('empty');
+
+                $.getJSON("projects/"+activeProject.name+"/status",function(result) {
+                    refreshFiles(result);
+                });
+            }
+        });
+        RED.events.on("login",function() {
+            refresh(true);
+        });
+        sidebarContent = $('<div>', {class:"sidebar-version-control"});
+        var stackContainer = $("<div>",{class:"sidebar-version-control-stack"}).appendTo(sidebarContent);
+        sections = RED.stack.create({
+            container: stackContainer,
+            fill: true,
+            singleExpanded: true
+        });
+
+        localChanges = sections.add({
+            title: "Local Changes",
+            collapsible: true
+        });
+        localChanges.expand();
+        localChanges.content.css({height:"100%"});
+
+        var bg = $('<div style="float: right"></div>').appendTo(localChanges.header);
+        $('<button class="editor-button editor-button-small"><i class="fa fa-refresh"></i></button>')
+            .appendTo(bg)
+            .click(function(evt) {
+                evt.preventDefault();
+                refresh(true);
+            })
+
+
+        var unstagedContent = $('<div class="sidebar-version-control-change-container"></div>').appendTo(localChanges.content);
+        var header = $('<div class="sidebar-version-control-change-header">Local files</div>').appendTo(unstagedContent);
+        stageAllButton = $('<button class="editor-button editor-button-small" style="float: right"><i class="fa fa-plus"></i> all</button>')
+            .appendTo(header)
+            .click(function(evt) {
+                evt.preventDefault();
+                evt.stopPropagation();
+                var toStage = Object.keys(allChanges).filter(function(fn) {
+                    return allChanges[fn].treeStatus !== ' ';
+                });
+                updateBulk(toStage,true);
+            });
+        unstagedChangesList = $("<ol>",{style:"position: absolute; top: 30px; bottom: 0; right:0; left:0;"}).appendTo(unstagedContent);
+        unstagedChangesList.editableList({
+            addButton: false,
+            scrollOnAdd: false,
+            addItem: function(row,index,entry) {
+                createChangeEntry(row,entry,entry.treeStatus,'unstaged');
+            },
+            sort: function(A,B) {
+                if (A.treeStatus === '?' && B.treeStatus !== '?') {
+                    return 1;
+                } else if (A.treeStatus !== '?' && B.treeStatus === '?') {
+                    return -1;
+                }
+                return A.file.localeCompare(B.file);
+            }
+
+        })
+
+        unmergedContent = $('<div class="sidebar-version-control-change-container"></div>').appendTo(localChanges.content);
+
+        header = $('<div class="sidebar-version-control-change-header">Unmerged changes</div>').appendTo(unmergedContent);
+        bg = $('<div style="float: right"></div>').appendTo(header);
+        var abortMergeButton = $('<button class="editor-button editor-button-small" style="margin-right: 5px;">abort merge</button>')
+            .appendTo(bg)
+            .click(function(evt) {
+                evt.preventDefault();
+                evt.stopPropagation();
+                var spinner = utils.addSpinnerOverlay(unmergedContent);
+                var activeProject = RED.projects.getActiveProject();
+                RED.deploy.setDeployInflight(true);
+                utils.sendRequest({
+                    url: "projects/"+activeProject.name+"/merge",
+                    type: "DELETE",
+                    responses: {
+                        0: function(error) {
+                            console.log(error);
+                        },
+                        200: function(data) {
+                            spinner.remove();
+                            refresh(true);
+                        },
+                        400: {
+                            'unexpected_error': function(error) {
+                                console.log(error);
+                            }
+                        },
+                    }
+                }).always(function() {
+                    setTimeout(function() {
+                        RED.deploy.setDeployInflight(false);
+                    },500);
+                });
+            });
+        unmergedChangesList = $("<ol>",{style:"position: absolute; top: 30px; bottom: 0; right:0; left:0;"}).appendTo(unmergedContent);
+        unmergedChangesList.editableList({
+            addButton: false,
+            scrollOnAdd: false,
+            addItem: function(row,index,entry) {
+                if (entry === emptyMergedItem) {
+                    entry.button = {
+                        label: 'commit',
+                        click: function(evt) {
+                            evt.preventDefault();
+                            evt.stopPropagation();
+                            showCommitBox();
+                        }
+                    }
+                }
+                createChangeEntry(row,entry,entry.treeStatus,'unmerged');
+            },
+            sort: function(A,B) {
+                if (A.treeStatus === '?' && B.treeStatus !== '?') {
+                    return 1;
+                } else if (A.treeStatus !== '?' && B.treeStatus === '?') {
+                    return -1;
+                }
+                return A.file.localeCompare(B.file);
+            }
+
+        })
+
+
+        var stagedContent = $('<div class="sidebar-version-control-change-container"></div>').appendTo(localChanges.content);
+
+        header = $('<div class="sidebar-version-control-change-header">Changes to commit</div>').appendTo(stagedContent);
+
+        bg = $('<div style="float: right"></div>').appendTo(header);
+        var showCommitBox = function() {
+            commitMessage.val("");
+            submitCommitButton.attr("disabled",true);
+            unstagedContent.css("height","30px");
+            if (unmergedContent.is(":visible")) {
+                unmergedContent.css("height","30px");
+                stagedContent.css("height","calc(100% - 60px - 175px)");
+            } else {
+                stagedContent.css("height","calc(100% - 30px - 175px)");
+            }
+            commitBox.show();
+            setTimeout(function() {
+                commitBox.css("height","175px");
+            },10);
+            stageAllButton.attr("disabled",true);
+            unstageAllButton.attr("disabled",true);
+            commitButton.attr("disabled",true);
+            abortMergeButton.attr("disabled",true);
+            commitMessage.focus();
+        }
+        commitButton = $('<button class="editor-button editor-button-small" style="margin-right: 5px;">commit</button>')
+            .appendTo(bg)
+            .click(function(evt) {
+                evt.preventDefault();
+                evt.stopPropagation();
+                showCommitBox();
+            });
+        unstageAllButton = $('<button class="editor-button editor-button-small"><i class="fa fa-minus"></i> all</button>')
+            .appendTo(bg)
+            .click(function(evt) {
+                evt.preventDefault();
+                evt.stopPropagation();
+                var toUnstage = Object.keys(allChanges).filter(function(fn) {
+                    return allChanges[fn].indexStatus !== ' ' && allChanges[fn].indexStatus !== '?';
+                });
+                updateBulk(toUnstage,false);
+
+            });
+
+
+        stagedChangesList = $("<ol>",{style:"position: absolute; top: 30px; bottom: 0; right:0; left:0;"}).appendTo(stagedContent);
+        stagedChangesList.editableList({
+            addButton: false,
+            scrollOnAdd: false,
+            addItem: function(row,index,entry) {
+                createChangeEntry(row,entry,entry.indexStatus,'staged');
+            },
+            sort: function(A,B) {
+                return A.file.localeCompare(B.file);
+            }
+        })
+
+        commitBox = $('<div class="sidebar-version-control-slide-box sidebar-version-control-slide-box-bottom"></div>').hide().appendTo(localChanges.content);
+
+        var commitMessage = $('<textarea placeholder="Enter your commit message"></textarea>')
+            .appendTo(commitBox)
+            .on("change keyup paste",function() {
+                submitCommitButton.attr('disabled',$(this).val().trim()==="");
+            });
+        var commitToolbar = $('<div class="sidebar-version-control-slide-box-toolbar button-group">').appendTo(commitBox);
+
+        var cancelCommitButton = $('<button class="editor-button">Cancel</button>')
+            .appendTo(commitToolbar)
+            .click(function(evt) {
+                evt.preventDefault();
+                commitMessage.val("");
+                unstagedContent.css("height","");
+                unmergedContent.css("height","");
+                stagedContent.css("height","");
+                commitBox.css("height",0);
+                setTimeout(function() {
+                    commitBox.hide();
+                },200);
+                stageAllButton.attr("disabled",false);
+                unstageAllButton.attr("disabled",false);
+                commitButton.attr("disabled",false);
+                abortMergeButton.attr("disabled",false);
+
+            })
+        var submitCommitButton = $('<button class="editor-button">Commit</button>')
+            .appendTo(commitToolbar)
+            .click(function(evt) {
+                evt.preventDefault();
+                var spinner = utils.addSpinnerOverlay(submitCommitButton).addClass('projects-dialog-spinner-sidebar');
+                var activeProject = RED.projects.getActiveProject();
+                RED.deploy.setDeployInflight(true);
+                utils.sendRequest({
+                    url: "projects/"+activeProject.name+"/commit",
+                    type: "POST",
+                    responses: {
+                        0: function(error) {
+                            console.log(error);
+                        },
+                        200: function(data) {
+                            spinner.remove();
+                            cancelCommitButton.click();
+                            refresh(true);
+                        },
+                        400: {
+                            '*': function(error) {
+                                utils.reportUnexpectedError(error);
+                            }
+                        },
+                    }
+                },{
+                    message:commitMessage.val()
+                }).always(function() {
+                    setTimeout(function() {
+                        RED.deploy.setDeployInflight(false);
+                    },500);
+                })
+            })
+
+
+        var localHistory = sections.add({
+            title: "Commit History",
+            collapsible: true
+        });
+
+        var bg = $('<div style="float: right"></div>').appendTo(localHistory.header);
+        $('<button class="editor-button editor-button-small"><i class="fa fa-refresh"></i></button>')
+            .appendTo(bg)
+            .click(function(evt) {
+                evt.preventDefault();
+                refresh(true,true);
+            })
+
+        var localBranchToolbar = $('<div class="sidebar-version-control-change-header" style="text-align: right;"></div>').appendTo(localHistory.content);
+
+        var localBranchButton = $('<button class="editor-button editor-button-small"><i class="fa fa-code-fork"></i> Branch: <span id="sidebar-version-control-local-branch"></span></button>')
+            .appendTo(localBranchToolbar)
+            .click(function(evt) {
+                evt.preventDefault();
+                if ($(this).hasClass('selected')) {
+                    closeBranchBox();
+                } else {
+                    closeRemoteBox();
+                    localCommitListShade.show();
+                    $(this).addClass('selected');
+                    var activeProject = RED.projects.getActiveProject();
+                    localBranchList.refresh("projects/"+activeProject.name+"/branches");
+                    localBranchBox.show();
+                    setTimeout(function() {
+                        localBranchBox.css("height","215px");
+                        localBranchList.focus();
+                    },100);
+                }
+            })
+        var repoStatusButton = $('<button class="editor-button editor-button-small" style="margin-left: 10px;" id="sidebar-version-control-repo-status-button">'+
+                                 '<span id="sidebar-version-control-repo-status-stats">'+
+                                    '<i class="fa fa-long-arrow-up"></i> <span id="sidebar-version-control-commits-ahead"></span> '+
+                                    '<i class="fa fa-long-arrow-down"></i> <span id="sidebar-version-control-commits-behind"></span>'+
+                                 '</span>'+
+                                 '<span id="sidebar-version-control-repo-status-auth-issue">'+
+                                    '<i class="fa fa-warning"></i>'+
+                                 '</span>'+
+                                 '</button>')
+            .appendTo(localBranchToolbar)
+            .click(function(evt) {
+                evt.preventDefault();
+                if ($(this).hasClass('selected')) {
+                    closeRemoteBox();
+                } else {
+                    closeBranchBox();
+                    localCommitListShade.show();
+                    $(this).addClass('selected');
+                    var activeProject = RED.projects.getActiveProject();
+                    $("#sidebar-version-control-repo-toolbar-set-upstream-row").toggle(!!activeProject.git.branches.remoteAlt);
+                    remoteBox.show();
+
+                    setTimeout(function() {
+                        remoteBox.css("height","265px");
+                    },100);
+
+                }
+            });
+
+        localCommitList = $("<ol>",{style:"position: absolute; top: 30px; bottom: 0px; right:0; left:0;"}).appendTo(localHistory.content);
+        localCommitListShade = $('<div class="component-shade" style="z-Index: 3"></div>').css('top',"30px").hide().appendTo(localHistory.content);
+        localCommitList.editableList({
+            addButton: false,
+            scrollOnAdd: false,
+            addItem: function(row,index,entry) {
+                row.addClass('sidebar-version-control-commit-entry');
+                if (entry.url) {
+                    row.addClass('sidebar-version-control-commit-more');
+                    row.text("+ "+(entry.total-entry.totalKnown)+" more commit(s)");
+                    row.click(function(e) {
+                        e.preventDefault();
+                        getCommits(entry.url,localCommitList,row,entry.limit,entry.before);
+                    })
+                } else {
+                    row.click(function(e) {
+                        var activeProject = RED.projects.getActiveProject();
+                        if (activeProject) {
+                            $.getJSON("projects/"+activeProject.name+"/commits/"+entry.sha,function(result) {
+                                result.project = activeProject;
+                                result.parents = entry.parents;
+                                result.oldRev = entry.sha+"~1";
+                                result.newRev = entry.sha;
+                                result.oldRevTitle = "Commit "+entry.sha.substring(0,7)+"~1";
+                                result.newRevTitle = "Commit "+entry.sha.substring(0,7);
+                                result.date = humanizeSinceDate(parseInt(entry.date));
+                                RED.diff.showCommitDiff(result);
+                            });
+                        }
+                    });
+                    var container = $('<div>').appendTo(row);
+                    $('<div class="sidebar-version-control-commit-subject">').text(entry.subject).appendTo(container);
+                    if (entry.refs) {
+                        var refDiv = $('<div class="sidebar-version-control-commit-refs">').appendTo(container);
+                        entry.refs.forEach(function(ref) {
+                            var label = ref;
+                            if (/HEAD -> /.test(ref)) {
+                                label = ref.substring(8);
+                            }
+                            $('<span class="sidebar-version-control-commit-ref">').text(label).appendTo(refDiv);
+                        });
+                        row.addClass('sidebar-version-control-commit-head');
+                    }
+                    $('<div class="sidebar-version-control-commit-sha">').text(entry.sha.substring(0,7)).appendTo(container);
+                    // $('<div class="sidebar-version-control-commit-user">').text(entry.author).appendTo(container);
+                    $('<div class="sidebar-version-control-commit-date">').text(humanizeSinceDate(parseInt(entry.date))).appendTo(container);
+                }
+            }
+        });
+
+
+        var closeBranchBox = function(done) {
+            localBranchButton.removeClass('selected')
+            localBranchBox.css("height","0");
+            localCommitListShade.hide();
+
+            setTimeout(function() {
+                localBranchBox.hide();
+                if (done) { done() }
+            },200);
+        }
+        var localBranchBox = $('<div class="sidebar-version-control-slide-box sidebar-version-control-slide-box-top" style="top:30px;"></div>').hide().appendTo(localHistory.content);
+
+        $('<div class="sidebar-version-control-slide-box-header"></div>').text("Change local branch").appendTo(localBranchBox);
+
+        var localBranchList = utils.createBranchList({
+            placeholder: "Find or create a branch",
+            container: localBranchBox,
+            onselect: function(body) {
+                if (body.current) {
+                    return closeBranchBox();
+                }
+                var spinner = utils.addSpinnerOverlay(localBranchBox);
+                var activeProject = RED.projects.getActiveProject();
+                RED.deploy.setDeployInflight(true);
+                utils.sendRequest({
+                    url: "projects/"+activeProject.name+"/branches",
+                    type: "POST",
+                    requireCleanWorkspace: true,
+                    cancel: function() {
+                        spinner.remove();
+                    },
+                    responses: {
+                        0: function(error) {
+                            spinner.remove();
+                            console.log(error);
+                            // done(error,null);
+                        },
+                        200: function(data) {
+                            // Changing branch will trigger a runtime event
+                            // that leads to a project refresh.
+                            closeBranchBox(function() {
+                                spinner.remove();
+                            });
+                        },
+                        400: {
+                            'git_local_overwrite': function(error) {
+                                spinner.remove();
+                                RED.notify("You have local changes that would be overwritten by changing the branch. You must either commit or undo those changes first.",{
+                                    type:'error',
+                                    timeout: 8000
+                                });
+                            },
+                            'unexpected_error': function(error) {
+                                spinner.remove();
+                                console.log(error);
+                                // done(error,null);
+                            }
+                        },
+                    }
+                },body).always(function(){
+                    setTimeout(function() {
+                        RED.deploy.setDeployInflight(false);
+                    },500);
+                });
+            }
+        });
+
+        var remoteBox = $('<div class="sidebar-version-control-slide-box sidebar-version-control-slide-box-top" style="top:30px"></div>').hide().appendTo(localHistory.content);
+        var closeRemoteBox = function() {
+            $("#sidebar-version-control-repo-toolbar-set-upstream").prop('checked',false);
+            repoStatusButton.removeClass('selected')
+            remoteBox.css("height","0");
+            localCommitListShade.hide();
+            setTimeout(function() {
+                remoteBox.hide();
+                closeRemoteBranchBox();
+            },200);
+        }
+
+        var closeRemoteBranchBox = function(done) {
+            if (remoteBranchButton.hasClass('selected')) {
+                remoteBranchButton.removeClass('selected');
+                remoteBranchSubRow.height(0);
+                remoteBox.css("height","265px");
+                setTimeout(function() {
+                    remoteBranchSubRow.hide();
+                    if (done) { done(); }
+                },200);
+            }
+        }
+        $('<div class="sidebar-version-control-slide-box-header"></div>').text("Manage remote branch").appendTo(remoteBox);
+
+        var remoteBranchRow = $('<div style="margin-bottom: 5px;"></div>').appendTo(remoteBox);
+        var remoteBranchButton = $('<button id="sidebar-version-control-repo-branch" class="sidebar-version-control-repo-action editor-button"><i class="fa fa-code-fork"></i> Remote: <span id="sidebar-version-control-remote-branch"></span></button>')
+            .appendTo(remoteBranchRow)
+            .click(function(evt) {
+                evt.preventDefault();
+                if ($(this).hasClass('selected')) {
+                    closeRemoteBranchBox();
+                } else {
+                    $(this).addClass('selected');
+                    var activeProject = RED.projects.getActiveProject();
+                    remoteBranchList.refresh("projects/"+activeProject.name+"/branches/remote");
+                    remoteBranchSubRow.show();
+                    setTimeout(function() {
+                        remoteBranchSubRow.height(180);
+                        remoteBox.css("height","445px");
+                        remoteBranchList.focus();
+                    },100);
+                }
+            });
+
+        $('<div id="sidebar-version-control-repo-toolbar-message" class="sidebar-version-control-slide-box-header" style="min-height: 100px;"></div>').appendTo(remoteBox);
+
+
+        var errorMessage = $('<div id="sidebar-version-control-repo-toolbar-error-message" class="sidebar-version-control-slide-box-header" style="min-height: 100px;"></div>').hide().appendTo(remoteBox);
+        $('<div style="margin-top: 10px;"><i class="fa fa-warning"></i> Unable to access remote repository</div>').appendTo(errorMessage)
+        var buttonRow = $('<div style="margin: 10px 30px; text-align: center"></div>').appendTo(errorMessage);
+        $('<button class="editor-button" style="width: 80%;"><i class="fa fa-refresh"></i> Retry</button>')
+            .appendTo(buttonRow)
+            .click(function(e) {
+                e.preventDefault();
+                var activeProject = RED.projects.getActiveProject();
+                var spinner = utils.addSpinnerOverlay(remoteBox).addClass("projects-dialog-spinner-contain");
+                utils.sendRequest({
+                    url: "projects/"+activeProject.name+"/branches/remote",
+                    type: "GET",
+                    responses: {
+                        0: function(error) {
+                            console.log(error);
+                            // done(error,null);
+                        },
+                        200: function(data) {
+                            refresh(true);
+                        },
+                        400: {
+                            'git_connection_failed': function(error) {
+                                RED.notify(error.message,'error');
+                            },
+                            'git_not_a_repository': function(error) {
+                                RED.notify(error.message,'error');
+                            },
+                            'git_repository_not_found': function(error) {
+                                RED.notify(error.message,'error');
+                            },
+                            'unexpected_error': function(error) {
+                                console.log(error);
+                                // done(error,null);
+                            }
+                        }
+                    }
+                }).always(function() {
+                    spinner.remove();
+                });
+            })
+
+        $('<div class="sidebar-version-control-slide-box-header" style="height: 20px;"><label id="sidebar-version-control-repo-toolbar-set-upstream-row" for="sidebar-version-control-repo-toolbar-set-upstream" class="hide"><input type="checkbox" id="sidebar-version-control-repo-toolbar-set-upstream"> Set as upstream branch</label></div>').appendTo(remoteBox);
+
+        var remoteBranchSubRow = $('<div style="height: 0;overflow:hidden; transition: height 0.2s ease-in-out;"></div>').hide().appendTo(remoteBranchRow);
+        var remoteBranchList = utils.createBranchList({
+            placeholder: "Find or create a remote branch",
+            currentLabel: "upstream",
+            remote: function() {
+                var project = RED.projects.getActiveProject();
+                var remotes = Object.keys(project.git.remotes);
+                return remotes[0];
+            },
+            container: remoteBranchSubRow,
+            onselect: function(body) {
+                $("#sidebar-version-control-repo-toolbar-set-upstream").prop('checked',false);
+                $("#sidebar-version-control-repo-toolbar-set-upstream").prop('disabled',false);
+                $("#sidebar-version-control-remote-branch").text(body.name+(body.create?" *":""));
+                var activeProject = RED.projects.getActiveProject();
+                if (activeProject.git.branches.remote === body.name) {
+                    delete activeProject.git.branches.remoteAlt;
+                } else {
+                    activeProject.git.branches.remoteAlt = body.name;
+                }
+                $("#sidebar-version-control-repo-toolbar-set-upstream-row").toggle(!!activeProject.git.branches.remoteAlt);
+                closeRemoteBranchBox(function() {
+                    if (!body.create) {
+                        var start = Date.now();
+                        var spinner = utils.addSpinnerOverlay($('#sidebar-version-control-repo-toolbar-message')).addClass("projects-dialog-spinner-contain");
+                        $.getJSON("projects/"+activeProject.name+"/branches/remote/"+body.name+"/status", function(result) {
+                            setTimeout(function() {
+                                updateRemoteStatus(result.commits.ahead, result.commits.behind);
+                                spinner.remove();
+                            },Math.max(400-(Date.now() - start),0));
+                        })
+                    } else {
+                        if (!activeProject.git.branches.remote) {
+                            $('#sidebar-version-control-repo-toolbar-message').text("The created branch will be set as the tracked upstream branch.");
+                            $("#sidebar-version-control-repo-toolbar-set-upstream").prop('checked',true);
+                            $("#sidebar-version-control-repo-toolbar-set-upstream").prop('disabled',true);
+                        } else {
+                            $('#sidebar-version-control-repo-toolbar-message').text("The branch will be created. Select below to set it as the tracked upstream branch.");
+                        }
+                        $("#sidebar-version-control-repo-pull").attr('disabled',true);
+                        $("#sidebar-version-control-repo-push").attr('disabled',false);
+                    }
+                });
+            }
+        });
+
+
+        var row = $('<div style="margin-bottom: 5px;"></div>').appendTo(remoteBox);
+
+        $('<button id="sidebar-version-control-repo-push" class="sidebar-version-control-repo-sub-action editor-button"><i class="fa fa-long-arrow-up"></i> <span>push</span></button>')
+            .appendTo(row)
+            .click(function(e) {
+                e.preventDefault();
+                var spinner = utils.addSpinnerOverlay(remoteBox).addClass("projects-dialog-spinner-contain");
+                var activeProject = RED.projects.getActiveProject();
+                var url = "projects/"+activeProject.name+"/push";
+                if (activeProject.git.branches.remoteAlt) {
+                    url+="/"+activeProject.git.branches.remoteAlt;
+                }
+                var setUpstream = $("#sidebar-version-control-repo-toolbar-set-upstream").prop('checked');
+                if (setUpstream) {
+                    url+="?u=true"
+                }
+                utils.sendRequest({
+                    url: url,
+                    type: "POST",
+                    responses: {
+                        0: function(error) {
+                            console.log(error);
+                            // done(error,null);
+                        },
+                        200: function(data) {
+                            if (setUpstream && activeProject.git.branches.remoteAlt) {
+                                activeProject.git.branches.remote = activeProject.git.branches.remoteAlt;
+                                delete activeProject.git.branches.remoteAlt;
+                            }
+                            refresh(true);
+                            closeRemoteBox();
+                        },
+                        400: {
+                            'git_push_failed': function(err) {
+                                // TODO: better message + NLS
+                                RED.notify("NLS: Push failed as the remote has more recent commits. Pull first and write a better error message!","error");
+                            },
+                            'unexpected_error': function(error) {
+                                console.log(error);
+                                // done(error,null);
+                            }
+                        },
+                    }
+                },{}).always(function() {
+                    spinner.remove();
+                });
+            });
+
+        var pullRemote = function(options) {
+            options = options || {};
+            var spinner = utils.addSpinnerOverlay(remoteBox).addClass("projects-dialog-spinner-contain");
+            var activeProject = RED.projects.getActiveProject();
+            var url = "projects/"+activeProject.name+"/pull";
+            if (activeProject.git.branches.remoteAlt) {
+                url+="/"+activeProject.git.branches.remoteAlt;
+            }
+            if (options.setUpstream || options.allowUnrelatedHistories) {
+                url+="?";
+            }
+            if (options.setUpstream) {
+                url += "setUpstream=true"
+                if (options.allowUnrelatedHistories) {
+                    url += "&";
+                }
+            }
+            if (options.allowUnrelatedHistories) {
+                url += "allowUnrelatedHistories=true"
+            }
+            utils.sendRequest({
+                url: url,
+                type: "POST",
+                responses: {
+                    0: function(error) {
+                        console.log(error);
+                        // done(error,null);
+                    },
+                    200: function(data) {
+                        if (options.setUpstream && activeProject.git.branches.remoteAlt) {
+                            activeProject.git.branches.remote = activeProject.git.branches.remoteAlt;
+                            delete activeProject.git.branches.remoteAlt;
+                        }
+                        refresh(true);
+                        closeRemoteBox();
+                    },
+                    400: {
+                        'git_local_overwrite': function(err) {
+                            RED.notify("<p>Unable to pull remote changes; your unstaged local changes would be overwritten.</p><p>Commit your changes and try again.</p>"+
+                                '<p><a href="#" onclick="RED.sidebar.versionControl.showLocalChanges(); return false;">'+'Show unstaged changes'+'</a></p>',"error",false,10000000);
+                        },
+                        'git_pull_merge_conflict': function(err) {
+                            refresh(true);
+                            closeRemoteBox();
+                        },
+                        'git_connection_failed': function(err) {
+                            RED.notify("Could not connect to remote repository: "+err.toString(),"warning")
+                        },
+                        'git_pull_unrelated_history': function(error) {
+                            var notification = RED.notify("<p>The remote has an unrelated history of commits.</p><p>Are you sure you want to pull the changes into your local repository?</p>",{
+                                type: 'error',
+                                modal: true,
+                                fixed: true,
+                                buttons: [
+                                    {
+                                        text: RED._("common.label.cancel"),
+                                        click: function() {
+                                            notification.close();
+                                        }
+                                    },{
+                                        text: 'Pull changes',
+                                        click: function() {
+                                            notification.close();
+                                            options.allowUnrelatedHistories = true;
+                                            pullRemote(options)
+                                        }
+                                    }
+                                ]
+                            });
+                        },
+                        '*': function(error) {
+                            utils.reportUnexpectedError(error);
+                        }
+                    },
+                }
+            },{}).always(function() {
+                spinner.remove();
+            });
+        }
+        $('<button id="sidebar-version-control-repo-pull" class="sidebar-version-control-repo-sub-action editor-button"><i class="fa fa-long-arrow-down"></i> <span>pull</span></button>')
+            .appendTo(row)
+            .click(function(e) {
+                e.preventDefault();
+                pullRemote({
+                    setUpstream: $("#sidebar-version-control-repo-toolbar-set-upstream").prop('checked')
+                });
+            });
+
+        $('<div class="component-shade sidebar-version-control-shade">').appendTo(sidebarContent);
+
+        RED.sidebar.addTab({
+            id: "version-control",
+            label: "history",
+            name: "Project History",
+            content: sidebarContent,
+            enableOnEdit: false,
+            onchange: function() {
+                setTimeout(function() {
+                    sections.resize();
+                },10);
+            }
+        });
+
+    }
+
+    function humanizeSinceDate(date) {
+        var delta = (Date.now()/1000) - date;
+
+        var daysDelta = Math.floor(delta / (60*60*24));
+        if (daysDelta > 30) {
+            return (new Date(date*1000)).toLocaleDateString();
+        } else if (daysDelta > 0) {
+            return daysDelta+" day"+(daysDelta>1?"s":"")+" ago";
+        }
+        var hoursDelta = Math.floor(delta / (60*60));
+        if (hoursDelta > 0) {
+            return hoursDelta+" hour"+(hoursDelta>1?"s":"")+" ago";
+        }
+        var minutesDelta = Math.floor(delta / 60);
+        if (minutesDelta > 0) {
+            return minutesDelta+" minute"+(minutesDelta>1?"s":"")+" ago";
+        }
+        return "Seconds ago";
+    }
+
+    function updateBulk(files,unstaged) {
+        var activeProject = RED.projects.getActiveProject();
+        if (unstaged) {
+            bulkChangeSpinner = utils.addSpinnerOverlay(unstagedChangesList.parent());
+        } else {
+            bulkChangeSpinner = utils.addSpinnerOverlay(stagedChangesList.parent());
+        }
+        bulkChangeSpinner.addClass('projects-dialog-spinner-sidebar');
+        var body = unstaged?{files:files}:undefined;
+        utils.sendRequest({
+            url: "projects/"+activeProject.name+"/stage",
+            type: unstaged?"POST":"DELETE",
+            responses: {
+                0: function(error) {
+                    console.log(error);
+                    // done(error,null);
+                },
+                200: function(data) {
+                    refreshFiles(data);
+                },
+                400: {
+                    'unexpected_error': function(error) {
+                        console.log(error);
+                        // done(error,null);
+                    }
+                },
+            }
+        },body);
+    }
+
+    var refreshInProgress = false;
+
+    var emptyStagedItem = { label:"None" };
+    var emptyMergedItem = { label:"All conflicts resolved. Commit the changes to complete the merge." };
+
+    function getCommits(url,targetList,spinnerTarget,limit,before) {
+        var spinner = utils.addSpinnerOverlay(spinnerTarget);
+        var fullUrl = url+"?limit="+(limit||20);
+        if (before) {
+            fullUrl+="&before="+before;
+        }
+        utils.sendRequest({
+            url: fullUrl,
+            type: "GET",
+            responses: {
+                0: function(error) {
+                    console.log(error);
+                    // done(error,null);
+                },
+                200: function(result) {
+                    var lastSha;
+                    result.commits.forEach(function(c) {
+                        targetList.editableList('addItem',c);
+                        lastSha = c.sha;
+                    })
+                    if (targetList.loadMoreItem) {
+                        targetList.editableList('removeItem',targetList.loadMoreItem);
+                        delete targetList.loadMoreItem;
+                    }
+                    var totalKnown = targetList.editableList('length');
+                    if (totalKnown < result.total) {
+                        targetList.loadMoreItem = {
+                            totalKnown: totalKnown,
+                            total: result.total,
+                            url: url,
+                            before: lastSha+"~1",
+                            limit: limit,
+                        };
+                        targetList.editableList('addItem',targetList.loadMoreItem);
+                    }
+                    spinner.remove();
+                },
+                400: {
+                    'unexpected_error': function(error) {
+                        console.log(error);
+                        // done(error,null);
+                    }
+                }
+            }
+        });
+    }
+    function refreshLocalCommits() {
+        localCommitList.editableList('empty');
+        var activeProject = RED.projects.getActiveProject();
+        if (activeProject) {
+            getCommits("projects/"+activeProject.name+"/commits",localCommitList,localCommitList.parent());
+        }
+    }
+    // function refreshRemoteCommits() {
+    //     remoteCommitList.editableList('empty');
+    //     var spinner = utils.addSpinnerOverlay(remoteCommitList);
+    //     var activeProject = RED.projects.getActiveProject();
+    //     if (activeProject) {
+    //         getCommits("projects/"+activeProject.name+"/commits/origin",remoteCommitList,remoteCommitList.parent());
+    //     }
+    // }
+
+    function refreshFiles(result) {
+        var files = result.files;
+        if (bulkChangeSpinner) {
+            bulkChangeSpinner.remove();
+            bulkChangeSpinner = null;
+        }
+        isMerging = !!result.merging;
+        if (isMerging) {
+            sidebarContent.addClass("sidebar-version-control-merging");
+            unmergedContent.show();
+        } else {
+            sidebarContent.removeClass("sidebar-version-control-merging");
+            unmergedContent.hide();
+        }
+        unstagedChangesList.editableList('removeItem',emptyStagedItem);
+        stagedChangesList.editableList('removeItem',emptyStagedItem);
+        unmergedChangesList.editableList('removeItem',emptyMergedItem);
+
+        var fileNames = Object.keys(files).filter(function(f) { return files[f].type === 'f'})
+        fileNames.sort();
+        var updateIndex = Date.now()+Math.floor(Math.random()*100);
+        fileNames.forEach(function(fn) {
+            var entry = files[fn];
+            var addEntry = false;
+            if (entry.status) {
+                entry.file = fn;
+                entry.indexStatus = entry.status[0];
+                entry.treeStatus = entry.status[1];
+                if ((entry.indexStatus === 'A' && /[AU]/.test(entry.treeStatus)) ||
+                    (entry.indexStatus === 'U' && /[DAU]/.test(entry.treeStatus)) ||
+                    (entry.indexStatus === 'D' && /[DU]/.test(entry.treeStatus))) {
+                        entry.unmerged = true;
+                }
+                if (allChanges[fn]) {
+                    if (allChanges[fn].unmerged && !entry.unmerged) {
+                        unmergedChangesList.editableList('removeItem', allChanges[fn])
+                        addEntry = true;
+                    } else if (!allChanges[fn].unmerged && entry.unmerged) {
+                        unstagedChangesList.editableList('removeItem', allChanges[fn])
+                        stagedChangesList.editableList('removeItem', allChanges[fn])
+                    }
+                    // Known file
+                    if (allChanges[fn].status !== entry.status) {
+                        // Status changed.
+                        if (allChanges[fn].treeStatus !== ' ') {
+                            // Already in the unstaged list
+                            if (entry.treeStatus === ' ') {
+                                unstagedChangesList.editableList('removeItem', allChanges[fn])
+                            } else if (entry.treeStatus !== allChanges[fn].treeStatus) {
+                                allChanges[fn].updateUnstaged(entry,entry.treeStatus);
+                            }
+                        } else {
+                            addEntry = true;
+                        }
+                        if (allChanges[fn].indexStatus !== ' ' && allChanges[fn].indexStatus !== '?') {
+                            // Already in the staged list
+                            if (entry.indexStatus === ' '||entry.indexStatus === '?') {
+                                stagedChangesList.editableList('removeItem', allChanges[fn])
+                            } else if (entry.indexStatus !== allChanges[fn].indexStatus) {
+                                allChanges[fn].updateStaged(entry,entry.indexStatus);
+                            }
+                        } else {
+                            addEntry = true;
+                        }
+                    }
+                    allChanges[fn].status = entry.status;
+                    allChanges[fn].indexStatus = entry.indexStatus;
+                    allChanges[fn].treeStatus = entry.treeStatus;
+                    allChanges[fn].oldName = entry.oldName;
+                    allChanges[fn].unmerged = entry.unmerged;
+
+                } else {
+                    addEntry = true;
+                    allChanges[fn] = entry;
+                }
+                allChanges[fn].updateIndex = updateIndex;
+                if (addEntry) {
+                    if (entry.unmerged) {
+                        unmergedChangesList.editableList('addItem', allChanges[fn]);
+                    } else {
+                        if (entry.treeStatus !== ' ') {
+                            unstagedChangesList.editableList('addItem', allChanges[fn])
+                        }
+                        if (entry.indexStatus !== ' ' && entry.indexStatus !== '?') {
+                            stagedChangesList.editableList('addItem', allChanges[fn])
+                        }
+                    }
+                }
+            }
+        });
+        Object.keys(allChanges).forEach(function(fn) {
+            if (allChanges[fn].updateIndex !== updateIndex) {
+                unstagedChangesList.editableList('removeItem', allChanges[fn]);
+                stagedChangesList.editableList('removeItem', allChanges[fn]);
+                delete allChanges[fn];
+            }
+        });
+
+        var stagedCount = stagedChangesList.editableList('length');
+        var unstagedCount = unstagedChangesList.editableList('length');
+        var unmergedCount = unmergedChangesList.editableList('length');
+
+        commitButton.attr('disabled',(isMerging && unmergedCount > 0)||(!isMerging && stagedCount === 0));
+        stageAllButton.attr('disabled',unstagedCount === 0);
+        unstageAllButton.attr('disabled',stagedCount === 0);
+
+        if (stagedCount === 0) {
+            stagedChangesList.editableList('addItem',emptyStagedItem);
+        }
+        if (unstagedCount === 0) {
+            unstagedChangesList.editableList('addItem',emptyStagedItem);
+        }
+        if (unmergedCount === 0) {
+            unmergedChangesList.editableList('addItem',emptyMergedItem);
+        }
+    }
+
+    function refresh(full, includeRemote) {
+        if (refreshInProgress) {
+            return;
+        }
+        if (full) {
+            allChanges = {};
+            unstagedChangesList.editableList('empty');
+            stagedChangesList.editableList('empty');
+            unmergedChangesList.editableList('empty');
+        }
+        if (!RED.user.hasPermission("projects.write")) {
+            return;
+        }
+
+
+        refreshInProgress = true;
+        refreshLocalCommits();
+
+        var activeProject = RED.projects.getActiveProject();
+        if (activeProject) {
+            var url = "projects/"+activeProject.name+"/status";
+            if (includeRemote) {
+                url += "?remote=true"
+            }
+            $.getJSON(url,function(result) {
+                refreshFiles(result);
+
+                $('#sidebar-version-control-local-branch').text(result.branches.local);
+                $('#sidebar-version-control-remote-branch').text(result.branches.remote||"none");
+
+                var commitsAhead = result.commits.ahead || 0;
+                var commitsBehind = result.commits.behind || 0;
+
+                if (activeProject.git.hasOwnProperty('remotes')) {
+                    if (result.branches.hasOwnProperty("remoteError") && result.branches.remoteError.code !== 'git_remote_gone') {
+                        $("#sidebar-version-control-repo-status-auth-issue").show();
+                        $("#sidebar-version-control-repo-status-stats").hide();
+                        $('#sidebar-version-control-repo-branch').attr('disabled',true);
+                        $("#sidebar-version-control-repo-pull").attr('disabled',true);
+                        $("#sidebar-version-control-repo-push").attr('disabled',true);
+                        $('#sidebar-version-control-repo-toolbar-message').hide();
+                        $('#sidebar-version-control-repo-toolbar-error-message').show();
+                    } else {
+                        $('#sidebar-version-control-repo-toolbar-message').show();
+                        $('#sidebar-version-control-repo-toolbar-error-message').hide();
+
+                        $("#sidebar-version-control-repo-status-auth-issue").hide();
+                        $("#sidebar-version-control-repo-status-stats").show();
+
+                        $('#sidebar-version-control-repo-branch').attr('disabled',false);
+
+                        $("#sidebar-version-control-repo-status-button").show();
+                        if (result.branches.hasOwnProperty('remote')) {
+                            updateRemoteStatus(commitsAhead, commitsBehind);
+                        } else {
+                            $('#sidebar-version-control-commits-ahead').text("");
+                            $('#sidebar-version-control-commits-behind').text("");
+
+                            $('#sidebar-version-control-repo-toolbar-message').text("Your local branch is not currently tracking a remote branch.");
+                            $("#sidebar-version-control-repo-pull").attr('disabled',true);
+                            $("#sidebar-version-control-repo-push").attr('disabled',true);
+                        }
+                    }
+                } else {
+                    $("#sidebar-version-control-repo-status-button").hide();
+                }
+                refreshInProgress = false;
+                $('.sidebar-version-control-shade').hide();
+            }).fail(function() {
+                refreshInProgress = false;
+            });
+        } else {
+            $('.sidebar-version-control-shade').show();
+            unstagedChangesList.editableList('empty');
+            stagedChangesList.editableList('empty');
+            unmergedChangesList.editableList('empty');
+        }
+    }
+
+
+    function updateRemoteStatus(commitsAhead, commitsBehind) {
+        $('#sidebar-version-control-commits-ahead').text(commitsAhead);
+        $('#sidebar-version-control-commits-behind').text(commitsBehind);
+        if (isMerging) {
+            $('#sidebar-version-control-repo-toolbar-message').text("Your repository has unmerged changes. You need to fix the conflicts and commit the result.");
+            $("#sidebar-version-control-repo-pull").attr('disabled',true);
+            $("#sidebar-version-control-repo-push").attr('disabled',true);
+        } else if (commitsAhead > 0 && commitsBehind === 0) {
+            $('#sidebar-version-control-repo-toolbar-message').text("Your repository is "+commitsAhead+" commit"+(commitsAhead===1?'':'s')+" ahead of the remote. You can push "+(commitsAhead===1?'this commit':'these commits')+" now.");
+            $("#sidebar-version-control-repo-pull").attr('disabled',true);
+            $("#sidebar-version-control-repo-push").attr('disabled',false);
+        } else if (commitsAhead === 0 && commitsBehind > 0) {
+            $('#sidebar-version-control-repo-toolbar-message').text("Your repository is "+commitsBehind+" commit"+(commitsBehind===1?'':'s')+" behind of the remote. You can pull "+(commitsBehind===1?'this commit':'these commits')+" now.");
+            $("#sidebar-version-control-repo-pull").attr('disabled',false);
+            $("#sidebar-version-control-repo-push").attr('disabled',true);
+        } else if (commitsAhead > 0 && commitsBehind > 0) {
+            $('#sidebar-version-control-repo-toolbar-message').text("Your repository is "+commitsBehind+" commit"+(commitsBehind===1?'':'s')+" behind and "+commitsAhead+" commit"+(commitsAhead===1?'':'s')+" ahead of the remote. You must pull the remote commit"+(commitsBehind===1?'':'s')+" down before pushing.");
+            $("#sidebar-version-control-repo-pull").attr('disabled',false);
+            $("#sidebar-version-control-repo-push").attr('disabled',true);
+        } else if (commitsAhead === 0 && commitsBehind === 0) {
+            $('#sidebar-version-control-repo-toolbar-message').text("Your repository is up to date.");
+            $("#sidebar-version-control-repo-pull").attr('disabled',true);
+            $("#sidebar-version-control-repo-push").attr('disabled',true);
+        }
+    }
+    function show() {
+        refresh();
+        RED.sidebar.show("version-control");
+    }
+    function showLocalChanges() {
+        RED.sidebar.show("version-control");
+        localChanges.expand();
+    }
+    return {
+        init: init,
+        show: show,
+        refresh: refresh,
+        showLocalChanges: showLocalChanges
     }
 })();
 ;/**
