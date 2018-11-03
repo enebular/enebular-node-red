@@ -18,10 +18,9 @@ $background-color: #f3f3f3;
 
 $form-placeholder-color: #bbbbbb;
 $form-text-color: #444;
-$form-input-focus-color:  rgba(85,150,230,0.8);
-$form-input-border-color:  #ccc;
-$form-input-border-selected-color:  #aaa;
-
+$form-input-focus-color: rgba(85, 150, 230, 0.8);
+$form-input-border-color: #ccc;
+$form-input-border-selected-color: #aaa;
 
 $node-selected-color: #ff7f0e;
 $port-selected-color: #ff7f0e;
@@ -48,22 +47,22 @@ $workspace-button-color-disabled: #ccc;
 $workspace-button-color-focus: #999;
 $workspace-button-color-hover: #666;
 $workspace-button-color-active: #666;
-$workspace-button-color-selected: #AAA;
+$workspace-button-color-selected: #aaa;
 
 $workspace-button-toggle-color: #999;
 $workspace-button-toggle-color-selected: #888;
 $workspace-button-toggle-color-disabled: #ddd;
 
-$workspace-button-color-focus-outline: rgba(85,150,230,0.2);
+$workspace-button-color-focus-outline: rgba(85, 150, 230, 0.2);
 
 $typedInput-button-background: #efefef;
 $typedInput-button-background-hover: #ddd;
 $typedInput-button-background-active: #ddd;
 
 $editor-button-color-primary: #eee;
-$editor-button-background-primary: #AD1625;
-$editor-button-background-primary-hover: #6E0A1E;
+$editor-button-background-primary: #ad1625;
+$editor-button-background-primary-hover: #6e0a1e;
 $editor-button-color: #999;
 $editor-button-background: #fff;
 
-$shade-color: rgba(160,160,160,0.5);
+$shade-color: transparent;
