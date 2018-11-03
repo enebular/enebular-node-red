@@ -38,7 +38,6 @@
   ],
   "dependencies": {
     "basic-auth": "2.0.0",
-    "bcrypt": "~1.0.3",
     "bcryptjs": "2.4.3",
     "body-parser": "1.18.3",
     "cheerio": "0.22.0",
@@ -71,9 +70,9 @@
     "node-red-node-email": "0.1.*",
     "node-red-node-feedparser": "0.1.*",
     "node-red-node-rbe": "0.2.*",
-    "node-red-node-serialport": "0.6.6",
+    "node-red-node-serialport": "^0.6.6",
     "node-red-node-sqlite": "^0.3.3",
-    "node-red-node-twitter": "^0.1.15",
+    "node-red-node-twitter": "^1.1.0",
     "nopt": "4.0.1",
     "oauth2orize": "1.11.0",
     "on-headers": "1.0.1",
@@ -89,8 +88,7 @@
     "xml2js": "0.4.19"
   },
   "optionalDependencies": {
-    "bcrypt": "~1.0.3",
-    "node-red-node-serialport": "0.6.6"
+    "bcrypt": "~2.0.0"
   },
   "devDependencies": {
     "chromedriver": "^2.33.2",
