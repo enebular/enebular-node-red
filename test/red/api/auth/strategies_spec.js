@@ -1,5 +1,5 @@
 /**
- * Copyright 2015 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ var Users = require("../../../../red/api/auth/users");
 var Tokens = require("../../../../red/api/auth/tokens");
 var Clients = require("../../../../red/api/auth/clients");
 
-describe("Auth strategies", function() {
+describe("api/auth/strategies", function() {
     before(function() {
         strategies.init({log:{audit:function(){}}})
     });

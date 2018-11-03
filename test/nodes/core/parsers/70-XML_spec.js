@@ -1,5 +1,5 @@
 /**
- * Copyright 2014 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
 
 var should = require("should");
 var xmlNode = require("../../../../nodes/core/parsers/70-XML.js");
-var helper = require("../../helper.js");
+var helper = require("node-red-node-test-helper");
 
 describe('XML node', function() {
 
@@ -24,10 +24,14 @@ describe('XML node', function() {
         helper.startServer(done);
     });
 
+    after(function(done) {
+        helper.stopServer(done);
+    });
+
     afterEach(function() {
         helper.unload();
     });
-    
+
     it('should be loaded', function(done) {
         var flow = [{id:"xmlNode1", type:"xml", name: "xmlNode" }];
         helper.load(xmlNode, flow, function() {
@@ -56,7 +60,47 @@ describe('XML node', function() {
             n1.receive({payload:string,topic: "bar"});
         });
     });
-   
+
+    it('should convert a valid xml string to a javascript object - alternative property', function(done) {
+        var flow = [{id:"n1",type:"xml",property:"foo",wires:[["n2"]],func:"return msg;"},
+                    {id:"n2", type:"helper"}];
+        helper.load(xmlNode, flow, function() {
+            var n1 = helper.getNode("n1");
+            var n2 = helper.getNode("n2");
+            n2.on("input", function(msg) {
+                msg.should.have.property('topic', 'bar');
+                msg.foo.should.have.property('employees');
+                msg.foo.employees.should.have.property('firstName');
+                should.equal(msg.foo.employees.firstName[0], 'John');
+                msg.foo.employees.should.have.property('lastName');
+                should.equal(msg.foo.employees.lastName[0], 'Smith');
+                done();
+            });
+            var string = '<employees><firstName>John</firstName><lastName>Smith</lastName></employees>';
+            n1.receive({foo:string,topic: "bar"});
+        });
+    });
+
+    it('should convert a valid xml string to a javascript object with options', function(done) {
+        var flow = [{id:"n1",type:"xml",wires:[["n2"]],func:"return msg;"},
+                    {id:"n2", type:"helper"}];
+        helper.load(xmlNode, flow, function() {
+            var n1 = helper.getNode("n1");
+            var n2 = helper.getNode("n2");
+            n2.on("input", function(msg) {
+                msg.should.have.property('topic', 'bar');
+                msg.payload.should.have.property('employees');
+                msg.payload.employees.should.have.property('firstName');
+                should.equal(msg.payload.employees.firstName[0], 'John');
+                msg.payload.employees.should.have.property('lastName');
+                should.equal(msg.payload.employees.lastName[0], 'Smith');
+                done();
+            });
+            var string = '<employees><firstName>John</firstName><lastName>Smith</lastName></employees>';
+            n1.receive({payload:string, topic:"bar", options:{trim:true}});
+        });
+    });
+
     it('should convert a javascript object to an xml string', function(done) {
         var flow = [{id:"n1",type:"xml",wires:[["n2"]],func:"return msg;"},
                     {id:"n2", type:"helper"}];
@@ -73,7 +117,24 @@ describe('XML node', function() {
             n1.receive({payload:obj,topic: "bar"});
         });
     });
-    
+
+    it('should convert a javascript object to an xml string with options - alternative property', function(done) {
+        var flow = [{id:"n1",type:"xml",property:"foo",wires:[["n2"]],func:"return msg;"},
+                    {id:"n2", type:"helper"}];
+        helper.load(xmlNode, flow, function() {
+            var n1 = helper.getNode("n1");
+            var n2 = helper.getNode("n2");
+            n2.on("input", function(msg) {
+                msg.should.have.property('topic', 'bar');
+                var index = msg.foo.indexOf('<employees>\n  <firstName>John</firstName>\n  <lastName>Smith</lastName>\n</employees>');
+                index.should.be.above(-1);
+                done();
+            });
+            var obj = {"employees":{"firstName":["John"],"lastName":["Smith"] }};
+            n1.receive({foo:obj, topic:"bar", options:{headless:true}});
+        });
+    });
+
     it('should log an error if asked to parse an invalid xml string', function(done) {
         var flow = [{id:"n1",type:"xml",wires:[["n2"]],func:"return msg;"},
                     {id:"n2", type:"helper"}];
@@ -89,7 +150,6 @@ describe('XML node', function() {
                     logEvents.should.have.length(1);
                     logEvents[0][0].should.have.a.property('msg');
                     logEvents[0][0].msg.toString().should.startWith("Error: Attribute without value");
-                    
                     done();
                 } catch(err) {
                     done(err);
@@ -97,7 +157,7 @@ describe('XML node', function() {
             },200);
         });
     });
-    
+
     it('should log an error if asked to parse something thats not xml or js', function(done) {
         var flow = [{id:"n1",type:"xml",wires:[["n2"]],func:"return msg;"},
                     {id:"n2", type:"helper"}];

@@ -1,5 +1,5 @@
 /**
-* Copyright 2015 IBM Corp.
+* Copyright JS Foundation and other contributors, http://js.foundation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -14,31 +14,46 @@
 * limitations under the License.
 **/
 
-var when = require("when");
 var util = require("util");
+var clone = require("clone");
 var bcrypt;
 try { bcrypt = require('bcrypt'); }
 catch(e) { bcrypt = require('bcryptjs'); }
 var users = {};
-var passwords = {};
 var defaultUser = null;
 
-function authenticate(username,password) {
-    var user = users[username];
-    if (user) {
-        return when.promise(function(resolve,reject) {
-            bcrypt.compare(password, passwords[username], function(err, res) {
-                resolve(res?user:null);
-            });
-        });
+function authenticate() {
+    var username = arguments[0];
+    if (typeof username !== 'string') {
+        username = username.username;
     }
-    return when.resolve(null);
+    const args = Array.from(arguments);
+    return api.get(username).then(function(user) {
+        if (user) {
+            if (args.length === 2) {
+                // Username/password authentication
+                var password = args[1];
+                return new Promise(function(resolve,reject) {
+                    bcrypt.compare(password, user.password, function(err, res) {
+                        resolve(res?cleanUser(user):null);
+                    });
+                });
+            } else {
+                // Try to extract common profile information
+                if (args[0].hasOwnProperty('photos') && args[0].photos.length > 0) {
+                    user.image = args[0].photos[0].value;
+                }
+                return cleanUser(user);
+            }
+        }
+        return null;
+    });
 }
 function get(username) {
-    return when.resolve(users[username]);
+    return Promise.resolve(users[username]);
 }
 function getDefaultUser() {
-    return when.resolve(null);
+    return Promise.resolve(null);
 }
 
 var api = {
@@ -49,9 +64,8 @@ var api = {
 
 function init(config) {
     users = {};
-    passwords = {};
     defaultUser = null;
-    if (config.type == "credentials") {
+    if (config.type == "credentials" || config.type == "strategy") {
         if (config.users) {
             if (typeof config.users === "function") {
                 api.get = config.users;
@@ -63,11 +77,7 @@ function init(config) {
                 }
                 for (var i=0;i<us.length;i++) {
                     var u = us[i];
-                    users[u.username] = {
-                        "username":u.username,
-                        "permissions":u.permissions
-                    };
-                    passwords[u.username] = u.password;
+                    users[u.username] = clone(u);
                 }
             }
         }
@@ -82,7 +92,7 @@ function init(config) {
             api.default = config.default;
         } else {
             api.default = function() {
-                return when.resolve({
+                return Promise.resolve({
                     "anonymous": true,
                     "permissions":config.default.permissions
                 });
@@ -92,10 +102,17 @@ function init(config) {
         api.default = getDefaultUser;
     }
 }
+function cleanUser(user) {
+    if (user && user.hasOwnProperty('password')) {
+        user = clone(user);
+        delete user.password;
+    }
+    return user;
+}
 
 module.exports = {
     init: init,
-    get: function(username) { return api.get(username) },
-    authenticate: function(username,password) { return api.authenticate(username,password) },
+    get: function(username) { return api.get(username).then(cleanUser)},
+    authenticate: function() { return api.authenticate.apply(null, arguments) },
     default: function() { return api.default(); }
 };

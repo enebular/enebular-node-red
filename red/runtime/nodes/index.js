@@ -1,5 +1,5 @@
 /**
- * Copyright 2013, 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@
 var when = require("when");
 var path = require("path");
 var fs = require("fs");
+var clone = require("clone");
 
 var registry = require("./registry");
 var credentials = require("./credentials");
@@ -24,11 +25,10 @@ var flows = require("./flows");
 var flowUtil = require("./flows/util")
 var context = require("./context");
 var Node = require("./Node");
-var log = require("../log");
+var log = null;
+var library = require("./library");
 
 var events = require("../events");
-
-var child_process = require('child_process');
 
 var settings;
 
@@ -49,8 +49,17 @@ function registerType(nodeSet,type,constructor,opts) {
         type = nodeSet;
         nodeSet = "";
     }
-    if (opts && opts.credentials) {
-        credentials.register(type,opts.credentials);
+    if (opts) {
+        if (opts.credentials) {
+            credentials.register(type,opts.credentials);
+        }
+        if (opts.settings) {
+            try {
+                settings.registerNodeSettings(type,opts.settings);
+            } catch(err) {
+                log.warn("["+type+"] "+err.message);
+            }
+        }
     }
     registry.registerType(nodeSet,type,constructor);
 }
@@ -69,6 +78,7 @@ function createNode(node,def) {
     }
     var creds = credentials.get(id);
     if (creds) {
+        creds = clone(creds);
         //console.log("Attaching credentials to ",node.id);
         // allow $(foo) syntax to substitute env variables for credentials also...
         for (var p in creds) {
@@ -84,15 +94,53 @@ function createNode(node,def) {
 
 function init(runtime) {
     settings = runtime.settings;
+    log = runtime.log;
     credentials.init(runtime);
     flows.init(runtime);
     registry.init(runtime);
     context.init(runtime.settings);
+    library.init(runtime);
 }
 
 function disableNode(id) {
     flows.checkTypeInUse(id);
-    return registry.disableNode(id);
+    return registry.disableNode(id).then(function(info) {
+        reportNodeStateChange(info,false);
+        return info;
+    });
+}
+
+function enableNode(id) {
+    return registry.enableNode(id).then(function(info) {
+        reportNodeStateChange(info,true);
+        return info;
+    });
+}
+
+function reportNodeStateChange(info,enabled) {
+    if (info.enabled === enabled && !info.err) {
+        events.emit("runtime-event",{id:"node/"+(enabled?"enabled":"disabled"),retain:false,payload:info});
+        log.info(" "+log._("api.nodes."+(enabled?"enabled":"disabled")));
+        for (var i=0;i<info.types.length;i++) {
+            log.info(" - "+info.types[i]);
+        }
+    } else if (enabled && info.err) {
+    log.warn(log._("api.nodes.error-enable"));
+        log.warn(" - "+info.name+" : "+info.err);
+    }
+}
+
+function installModule(module,version) {
+    var ex_module = registry.getModuleInfo(module);
+    var isUpgrade = !!ex_module;
+    return registry.installModule(module,version).then(function(info) {
+        if (isUpgrade) {
+            events.emit("runtime-event",{id:"node/upgraded",retain:false,payload:{module:module,version:version}});
+        } else {
+            events.emit("runtime-event",{id:"node/added",retain:false,payload:info.nodes});
+        }
+        return info;
+    });
 }
 
 function uninstallModule(module) {
@@ -103,7 +151,10 @@ function uninstallModule(module) {
         for (var i=0;i<info.nodes.length;i++) {
             flows.checkTypeInUse(module+"/"+info.nodes[i].name);
         }
-        return registry.uninstallModule(module);
+        return registry.uninstallModule(module).then(function(list) {
+            events.emit("runtime-event",{id:"node/removed",retain:false,payload:list});
+            return list;
+        });
     }
 }
 
@@ -118,10 +169,10 @@ module.exports = {
     eachNode: flows.eachNode,
 
     paletteEditorEnabled: registry.paletteEditorEnabled,
-    installModule: registry.installModule,
+    installModule: installModule,
     uninstallModule: uninstallModule,
 
-    enableNode: registry.enableNode,
+    enableNode: enableNode,
     disableNode: disableNode,
 
     // Node type registry
@@ -135,6 +186,10 @@ module.exports = {
 
     getNodeConfigs: registry.getNodeConfigs,
     getNodeConfig: registry.getNodeConfig,
+    getNodeIconPath: registry.getNodeIconPath,
+    getNodeIcons: registry.getNodeIcons,
+    getNodeExampleFlows: library.getExampleFlows,
+    getNodeExampleFlowPath: library.getExampleFlowPath,
 
     clearRegistry: registry.clear,
     cleanModuleList: registry.cleanModuleList,
@@ -157,5 +212,9 @@ module.exports = {
     addCredentials: credentials.add,
     getCredentials: credentials.get,
     deleteCredentials: credentials.delete,
-    getCredentialDefinition: credentials.getDefinition
+    getCredentialDefinition: credentials.getDefinition,
+    setCredentialSecret: credentials.setKey,
+    clearCredentials: credentials.clear,
+    exportCredentials: credentials.export,
+    getCredentialKeyType: credentials.getKeyType
 };

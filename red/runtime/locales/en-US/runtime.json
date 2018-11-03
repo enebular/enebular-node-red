@@ -2,8 +2,10 @@
     "runtime": {
         "welcome": "Welcome to Node-RED",
         "version": "__component__ version: __version__",
+        "unsupported_version": "Unsupported version of __component__. Requires: __requires__ Found: __version__",
         "paths": {
-            "settings": "Settings file  : __path__"
+            "settings": "Settings file  : __path__",
+            "httpStatic": "HTTP Static    : __path__"
         }
     },
 
@@ -18,17 +20,21 @@
         "errors-help": "Run with -v for details",
         "missing-modules": "Missing node modules:",
         "node-version-mismatch": "Node module cannot be loaded on this version. Requires: __version__ ",
+        "type-already-registered": "'__type__' already registered by module __module__",
         "removing-modules": "Removing modules from config",
         "added-types": "Added node types:",
         "removed-types": "Removed node types:",
         "install": {
             "invalid": "Invalid module name",
-            "installing": "Installing module: __name__",
+            "installing": "Installing module: __name__, version: __version__",
             "installed": "Installed module: __name__",
             "install-failed": "Install failed",
             "install-failed-long": "Installation of module __name__ failed:",
             "install-failed-not-found": "$t(install-failed-long) module not found",
-
+            "upgrading": "Upgrading module: __name__ to version: __version__",
+            "upgraded": "Upgraded module: __name__. Restart Node-RED to use the new version",
+            "upgrade-failed-not-found": "$t(server.install.install-failed-long) version not found",
+            "install-failed-not-found": "$t(server.install.install-failed-long) module not found",
             "uninstalling": "Uninstalling module: __name__",
             "uninstall-failed": "Uninstall failed",
             "uninstall-failed-long": "Uninstall of module __name__ failed:",
@@ -69,6 +75,7 @@
     },
 
     "settings": {
+        "user-not-available": "Cannot save user settings: __message__",
         "not-available": "Settings not available",
         "property-read-only": "Property '__prop__' is read-only"
     },
@@ -77,7 +84,8 @@
         "credentials": {
             "error":"Error loading credentials: __message__",
             "error-saving":"Error saving credentials: __message__",
-            "not-registered": "Credential type '__type__' is not registered"
+            "not-registered": "Credential type '__type__' is not registered",
+            "system-key-warning": "\n\n---------------------------------------------------------------------\nYour flow credentials file is encrypted using a system-generated key.\n\nIf the system-generated key is lost for any reason, your credentials\nfile will not be recoverable, you will have to delete it and re-enter\nyour credentials.\n\nYou should set your own key using the 'credentialSecret' option in\nyour settings file. Node-RED will then re-encrypt your credentials\nfile using your chosen key the next time you deploy a change.\n---------------------------------------------------------------------\n"
         },
         "flows": {
             "registered-missing": "Missing type registered: __type__",
@@ -95,6 +103,7 @@
             "stopped-modified-flows": "Stopped modified flows",
             "stopped-flows": "Stopped flows",
             "stopped": "Stopped",
+            "stopping-error": "Error stopping node: __message__",
             "added-flow": "Adding flow: __label__",
             "updated-flow": "Updated flow: __label__",
             "removed-flow": "Removed flow: __label__",
@@ -131,7 +140,18 @@
             "empty": "Existing __type__ file is empty",
             "invalid": "Existing __type__ file is not valid json",
             "restore": "Restoring __type__ file backup : __path__",
-            "restore-fail": "Restoring __type__ file backup failed : __message__"
+            "restore-fail": "Restoring __type__ file backup failed : __message__",
+            "fsync-fail": "Flushing file __path__ to disk failed : __message__",
+            "projects": {
+                "changing-project": "Setting active project : __project__",
+                "active-project": "Active project : __project__",
+                "project-not-found": "Project not found : __project__",
+                "no-active-project": "No active project : using default flows file",
+                "disabled": "Projects disabled : editorTheme.projects.enabled=false",
+                "disabledNoFlag": "Projects disabled : set editorTheme.projects.enabled=true to enable",
+                "git-not-found": "Projects disabled : git command not found",
+                "git-version-old": "Projects disabled : git __version__ not supported. Requires 2.x"
+            }
         }
     }
 }

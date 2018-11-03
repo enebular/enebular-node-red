@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,6 +27,9 @@
  *   - removable : boolean - whether to display delete button on items
  *   - addItem : function(row,index,itemData) - when an item is added
  *   - removeItem : function(itemData) - called when an item is removed
+ *   - filter : function(itemData) - called for each item to determine if it should be shown
+ *   - sort : function(itemDataA,itemDataB) - called to sort items
+ *   - scrollOnAdd : boolean - whether to scroll to newly added items
  * methods:
  *   - addItem(itemData)
  *   - removeItem(itemData)
@@ -34,6 +37,9 @@
  *   - height(height)
  *   - items()
  *   - empty()
+ *   - filter(filter)
+ *   - sort(sort)
+ *   - length()
  */
     $.widget( "nodered.editableList", {
         _create: function() {
@@ -44,9 +50,19 @@
             this.uiContainer = this.element
                 .wrap( "<div>" )
                 .parent();
-            this.topContainer = this.uiContainer.wrap("<div>").parent();
 
+            if (this.options.header) {
+                this.options.header.addClass("red-ui-editableList-header");
+                this.borderContainer = this.uiContainer.wrap("<div>").parent();
+                this.borderContainer.prepend(this.options.header);
+                this.topContainer = this.borderContainer.wrap("<div>").parent();
+            } else {
+                this.topContainer = this.uiContainer.wrap("<div>").parent();
+            }
             this.topContainer.addClass('red-ui-editableList');
+            if (this.options.class) {
+                this.topContainer.addClass(this.options.class);
+            }
 
             if (this.options.addButton !== false) {
                 var addLabel;
@@ -59,7 +75,7 @@
                         addLabel = 'add';
                     }
                 }
-                $('<a href="#" class="editor-button editor-button-small" style="margin-top: 4px;"><i class="fa fa-plus"></i> '+addLabel+'</a>')
+                $('<a href="#" class="editor-button editor-button-small red-ui-editableList-addButton" style="margin-top: 4px;"><i class="fa fa-plus"></i> '+addLabel+'</a>')
                     .appendTo(this.topContainer)
                     .click(function(evt) {
                         evt.preventDefault();
@@ -69,7 +85,7 @@
             if (this.element.css("position") === "absolute") {
                 ["top","left","bottom","right"].forEach(function(s) {
                     var v = that.element.css(s);
-                    if (s!=="auto" && s!=="") {
+                    if (v!=="auto" && v!=="") {
                         that.topContainer.css(s,v);
                         that.uiContainer.css(s,"0");
                         that.element.css(s,'auto');
@@ -79,6 +95,11 @@
                 this.topContainer.css("position","absolute");
                 this.uiContainer.css("position","absolute");
 
+            }
+            if (this.options.header) {
+                this.borderContainer.addClass("red-ui-editableList-border");
+            } else {
+                this.uiContainer.addClass("red-ui-editableList-border");
             }
             this.uiContainer.addClass("red-ui-editableList-container");
 
@@ -94,6 +115,11 @@
             if (minHeight !== '0px') {
                 this.uiContainer.css("minHeight",minHeight);
                 this.element.css("minHeight",0);
+            }
+            var maxHeight = this.element.css("maxHeight");
+            if (maxHeight !== '0px') {
+                this.uiContainer.css("maxHeight",maxHeight);
+                this.element.css("maxHeight",null);
             }
             if (this.options.height !== 'auto') {
                 this.uiContainer.css("overflow-y","scroll");
@@ -164,7 +190,7 @@
             var that = this;
             var count = 0;
             if (!this.activeFilter) {
-                this.element.children().show();
+                return this.element.children().show();
             }
             var items = this.items();
             items.each(function (i,el) {
@@ -234,7 +260,8 @@
                 var deleteButton = $('<a/>',{href:"#",class:"red-ui-editableList-item-remove editor-button editor-button-small"}).appendTo(li);
                 $('<i/>',{class:"fa fa-remove"}).appendTo(deleteButton);
                 li.addClass("red-ui-editableList-item-removable");
-                deleteButton.click(function() {
+                deleteButton.click(function(evt) {
+                    evt.preventDefault();
                     var data = row.data('data');
                     li.addClass("red-ui-editableList-item-deleting")
                     li.fadeOut(300, function() {
@@ -264,6 +291,11 @@
                         },0);
                     }
                 },0);
+            }
+        },
+        addItems: function(items) {
+            for (var i=0; i<items.length;i++) {
+                this.addItem(items[i]);
             }
         },
         removeItem: function(data) {

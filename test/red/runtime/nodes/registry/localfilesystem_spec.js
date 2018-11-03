@@ -1,5 +1,5 @@
 /**
- * Copyright 2015 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,6 +36,7 @@ describe("red/nodes/registry/localfilesystem",function() {
         for (var i=0;i<shouldHaveNodes.length;i++) {
             nodes.should.have.a.property(shouldHaveNodes[i]);
             nodes[shouldHaveNodes[i]].should.have.a.property('file');
+	        nodes[shouldHaveNodes[i]].file.should.equal(path.resolve(nodes[shouldHaveNodes[i]].file));
             nodes[shouldHaveNodes[i]].should.have.a.property('module',module||'node-red');
             nodes[shouldHaveNodes[i]].should.have.a.property('name',shouldHaveNodes[i]);
         }
@@ -53,6 +54,16 @@ describe("red/nodes/registry/localfilesystem",function() {
             nm.should.have.a.property("nodes");
             var nodes = nm.nodes;
             checkNodes(nm.nodes,['TestNode1','MultipleNodes1','NestedNode','TestNode2','TestNode3','TestNode4'],['TestNodeModule']);
+            done();
+        });
+        it("Includes node files from settings",function(done) {
+            localfilesystem.init({i18n:{registerMessageCatalog:function(){}},events:{emit:function(){}},settings:{nodesIncludes:['TestNode1.js'],coreNodesDir:resourcesDir}});
+            var nodeList = localfilesystem.getNodeFiles(true);
+            nodeList.should.have.a.property("node-red");
+            var nm = nodeList['node-red'];
+            nm.should.have.a.property('name','node-red');
+            nm.should.have.a.property("nodes");
+            checkNodes(nm.nodes,['TestNode1'],['MultipleNodes1','NestedNode','TestNode2','TestNode3','TestNode4','TestNodeModule']);
             done();
         });
         it("Excludes node files from settings",function(done) {
@@ -86,7 +97,18 @@ describe("red/nodes/registry/localfilesystem",function() {
             checkNodes(nm.nodes,['TestNode5'],['TestNode1']);
             done();
         });
-        it("Finds nodes in settings.nodesDir (array)",function(done) {
+	    it("Finds nodes in settings.nodesDir (string,relative path)",function(done) {
+		    var relativeUserDir = path.join("test","red","runtime","nodes","resources","userDir");
+		    localfilesystem.init({i18n:{registerMessageCatalog:function(){}},events:{emit:function(){}},settings:{nodesDir:relativeUserDir,coreNodesDir:__dirname}});
+		    var nodeList = localfilesystem.getNodeFiles(true);
+		    nodeList.should.have.a.property("node-red");
+		    var nm = nodeList['node-red'];
+		    nm.should.have.a.property('name','node-red');
+		    nm.should.have.a.property("nodes");
+		    checkNodes(nm.nodes,['TestNode5'],['TestNode1']);
+		    done();
+	    });
+	    it("Finds nodes in settings.nodesDir (array)",function(done) {
             localfilesystem.init({i18n:{registerMessageCatalog:function(){}},events:{emit:function(){}},settings:{nodesDir:[userDir],coreNodesDir:__dirname}});
             var nodeList = localfilesystem.getNodeFiles(true);
             nodeList.should.have.a.property("node-red");
@@ -128,7 +150,46 @@ describe("red/nodes/registry/localfilesystem",function() {
         });
         it.skip("finds locales directory");
         it.skip("finds icon path directory");
-
+        it("scans icon files in the resources tree",function(done) {
+            var count = 0;
+            localfilesystem.init({
+                i18n:{registerMessageCatalog:function(){}},
+                events:{emit:function(eventName,dir){
+                    if (count === 0) {
+                        eventName.should.equal("node-icon-dir");
+                        dir.name.should.equal("node-red");
+                        dir.icons.should.be.an.Array();
+                        count = 1;
+                    } else if (count === 1) {
+                        done();
+                    }
+                }},
+                settings:{coreNodesDir:resourcesDir}
+            });
+            localfilesystem.getNodeFiles(true);
+        });
+        it("scans icons dir in library",function(done) {
+            var count = 0;
+            localfilesystem.init({
+                i18n:{registerMessageCatalog:function(){}},
+                events:{emit:function(eventName,dir){
+                    eventName.should.equal("node-icon-dir");
+                    if (count === 0) {
+                        dir.name.should.equal("node-red");
+                        dir.icons.should.be.an.Array();
+                        count = 1;
+                    } else if (count === 1) {
+                        dir.name.should.equal("Library");
+                        dir.icons.should.be.an.Array();
+                        dir.icons.length.should.equal(1);
+                        dir.icons[0].should.be.equal("test_icon.png");
+                        done();
+                    }
+                }},
+                settings:{userDir:userDir}
+            });
+            localfilesystem.getNodeFiles(true);
+        });
     });
     describe("#getModuleFiles",function() {
         it("gets a nodes module files",function(done) {
@@ -174,5 +235,27 @@ describe("red/nodes/registry/localfilesystem",function() {
         });
         it.skip("finds locales directory");
         it.skip("finds icon path directory");
+        it("scans icon files with a module file",function(done) {
+            var _join = path.join;
+            stubs.push(sinon.stub(path,"join",function() {
+                if (arguments[0] == resourcesDir) {
+                    // This stops the module tree scan from going any higher
+                    // up the tree than resourcesDir.
+                    return arguments[0];
+                }
+                return _join.apply(null,arguments);
+            }));
+            localfilesystem.init({
+                i18n:{registerMessageCatalog:function(){}},
+                events:{emit:function(eventName,dir){
+                    eventName.should.equal("node-icon-dir");
+                    dir.name.should.equal("TestNodeModule");
+                    dir.icons.should.be.an.Array();
+                    done();
+                }},
+                settings:{coreNodesDir:moduleDir}
+            });
+            var nodeModule = localfilesystem.getModuleFiles('TestNodeModule');
+        });
     });
 });

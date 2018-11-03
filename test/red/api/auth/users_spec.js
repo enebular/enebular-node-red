@@ -1,5 +1,5 @@
 /**
- * Copyright 2015 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ var sinon = require('sinon');
 
 var Users = require("../../../../red/api/auth/users");
 
-describe("Users", function() {
+describe("api/auth/users", function() {
     describe('Initalised with a credentials object, no anon',function() {
         before(function() {
             Users.init({

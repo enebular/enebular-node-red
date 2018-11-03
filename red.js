@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Copyright 2013, 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -44,6 +44,8 @@ var shortHands = {
     "?":["--help"],
     "p":["--port"],
     "s":["--settings"],
+    // As we want to reserve -t for now, adding a shorthand to help so it
+    // doesn't get treated as --title
     "t":["--help"],
     "u":["--userDir"],
     "v":["--verbose"]
@@ -70,6 +72,7 @@ if (parsedArgs.help) {
     console.log("Documentation can be found at http://nodered.org");
     process.exit();
 }
+
 if (parsedArgs.argv.remain.length > 0) {
     flowFile = parsedArgs.argv.remain[0];
 }
@@ -84,8 +87,11 @@ if (parsedArgs.settings) {
     if (fs.existsSync(path.join(process.env.NODE_RED_HOME,".config.json"))) {
         // NODE_RED_HOME contains user data - use its settings.js
         settingsFile = path.join(process.env.NODE_RED_HOME,"settings.js");
+    } else if (process.env.HOMEPATH && fs.existsSync(path.join(process.env.HOMEPATH,".node-red",".config.json"))) {
+        // Consider compatibility for older versions
+        settingsFile = path.join(process.env.HOMEPATH,".node-red","settings.js");
     } else {
-        var userDir = parsedArgs.userDir || path.join(process.env.HOME || process.env.HOMEPATH || process.env.USERPROFILE,".node-red");
+        var userDir = parsedArgs.userDir || path.join(process.env.HOME || process.env.USERPROFILE || process.env.HOMEPATH,".node-red");
         var userSettingsFile = path.join(userDir,"settings.js");
         if (fs.existsSync(userSettingsFile)) {
             // $HOME/.node-red/settings.js exists
@@ -93,7 +99,7 @@ if (parsedArgs.settings) {
         } else {
             var defaultSettings = path.join(__dirname,"settings.js");
             var settingsStat = fs.statSync(defaultSettings);
-            if (settingsStat.mtime.getTime() < settingsStat.ctime.getTime()) {
+            if (settingsStat.mtime.getTime() <= settingsStat.ctime.getTime()) {
                 // Default settings file has not been modified - safe to copy
                 fs.copySync(defaultSettings,userSettingsFile);
                 settingsFile = userSettingsFile;
@@ -120,7 +126,7 @@ try {
     process.exit();
 }
 
-if (parsedArgs.v) {
+if (parsedArgs.verbose) {
     settings.verbose = true;
 }
 
@@ -161,7 +167,16 @@ if (settings.httpNodeRoot !== false) {
     settings.httpNodeAuth = settings.httpNodeAuth || settings.httpAuth;
 }
 
-settings.uiPort = parsedArgs.port||settings.uiPort||1880;
+// if we got a port from command line, use it (even if 0)
+// replicate (settings.uiPort = parsedArgs.port||settings.uiPort||1880;) but allow zero
+if (parsedArgs.port !== undefined){
+    settings.uiPort = parsedArgs.port;
+} else {
+    if (settings.uiPort === undefined){
+        settings.uiPort = 1880;
+    }
+}
+
 settings.uiHost = settings.uiHost||"0.0.0.0";
 
 if (flowFile) {
@@ -174,7 +189,10 @@ if (parsedArgs.userDir) {
 try {
     RED.init(server,settings);
 } catch(err) {
-    if (err.code == "not_built") {
+    if (err.code == "unsupported_version") {
+        console.log("Unsupported version of node.js:",process.version);
+        console.log("Node-RED requires node.js v4 or later");
+    } else if (err.code == "not_built") {
         console.log("Node-RED has not been built. See README.md for details");
     } else {
         console.log("Failed to start server:");
@@ -190,6 +208,7 @@ try {
 function basicAuthMiddleware(user,pass) {
     var basicAuth = require('basic-auth');
     var checkPassword;
+    var localCachedPassword;
     if (pass.length == "32") {
         // Assume its a legacy md5 password
         checkPassword = function(p) {
@@ -201,12 +220,26 @@ function basicAuthMiddleware(user,pass) {
         }
     }
 
+    var checkPasswordAndCache = function(p) {
+        // For BasicAuth routes we know the password cannot change without
+        // a restart of Node-RED. This means we can cache the provided crypted
+        // version to save recalculating each time.
+        if (localCachedPassword === p) {
+            return true;
+        }
+        var result = checkPassword(p);
+        if (result) {
+            localCachedPassword = p;
+        }
+        return result;
+    }
+
     return function(req,res,next) {
         if (req.method === 'OPTIONS') {
             return next();
         }
         var requestUser = basicAuth(req);
-        if (!requestUser || requestUser.name !== user || !checkPassword(requestUser.pass)) {
+        if (!requestUser || requestUser.name !== user || !checkPasswordAndCache(requestUser.pass)) {
             res.set('WWW-Authenticate', 'Basic realm=Authorization Required');
             return res.sendStatus(401);
         }
@@ -237,9 +270,14 @@ if (settings.httpStatic) {
 }
 
 function getListenPath() {
+    var port = settings.serverPort;
+    if (port === undefined){
+        port = settings.uiPort;
+    }
+
     var listenPath = 'http'+(settings.https?'s':'')+'://'+
-                    (settings.uiHost == '0.0.0.0'?'127.0.0.1':settings.uiHost)+
-                    ':'+settings.uiPort;
+                    (settings.uiHost == '::'?'localhost':(settings.uiHost == '0.0.0.0'?'127.0.0.1':settings.uiHost))+
+                    ':'+port;
     if (settings.httpAdminRoot !== false) {
         listenPath += settings.httpAdminRoot;
     } else if (settings.httpStatic) {
@@ -268,6 +306,7 @@ RED.start().then(function() {
             if (settings.httpAdminRoot === false) {
                 RED.log.info(RED.log._("server.admin-ui-disabled"));
             }
+            settings.serverPort = server.address().port;
             process.title = parsedArgs.title || 'node-red';
             RED.log.info(RED.log._("server.now-running", {listenpath:getListenPath()}));
         });
@@ -294,8 +333,7 @@ process.on('uncaughtException',function(err) {
 });
 
 process.on('SIGINT', function () {
-    RED.stop();
-    // TODO: need to allow nodes to close asynchronously before terminating the
-    // process - ie, promises
-    process.exit();
+    RED.stop().then(function() {
+        process.exit();
+    });
 });

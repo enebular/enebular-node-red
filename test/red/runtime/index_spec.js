@@ -1,5 +1,5 @@
 /**
- * Copyright 2014, 2015 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -141,7 +141,7 @@ describe("runtime", function() {
                     {  module:"node-red",enabled:true,loaded:false,types:["typeC","typeD"]} // missing
                 ].filter(cb);
             });
-            var serverInstallModule = sinon.stub(redNodes,"installModule",function(name) { return when.resolve();});
+            var serverInstallModule = sinon.stub(redNodes,"installModule",function(name) { return when.resolve({nodes:[]});});
             runtime.init({testSettings: true, autoInstallModules:true, httpAdminRoot:"/", load:function() { return when.resolve();}});
             sinon.stub(console,"log");
             runtime.start().then(function() {

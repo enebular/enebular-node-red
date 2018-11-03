@@ -1,5 +1,5 @@
 /**
- * Copyright 2014,2015 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,6 +28,9 @@ module.exports = function(RED) {
         this.hdrin = n.hdrin || false;
         this.hdrout = n.hdrout || false;
         this.goodtmpl = true;
+        this.skip = parseInt(n.skip || 0);
+        this.store = [];
+        var tmpwarn = true;
         var node = this;
 
         // pass in an array of column names to be trimed, de-quoted and retrimed
@@ -71,7 +74,30 @@ module.exports = function(RED) {
                             }
                             else {
                                 if ((node.template.length === 1) && (node.template[0] === '')) {
-                                    node.warn(RED._("csv.errors.obj_csv"));
+                                    /* istanbul ignore else */
+                                    if (tmpwarn === true) { // just warn about missing template once
+                                        node.warn(RED._("csv.errors.obj_csv"));
+                                        tmpwarn = false;
+                                    }
+                                    ou = "";
+                                    for (var p in msg.payload[0]) {
+                                        /* istanbul ignore else */
+                                        if (msg.payload[0].hasOwnProperty(p)) {
+                                            /* istanbul ignore else */
+                                            if (typeof msg.payload[0][p] !== "object") {
+                                                var q = "" + msg.payload[0][p];
+                                                if (q.indexOf(node.quo) !== -1) { // add double quotes if any quotes
+                                                    q = q.replace(/"/g, '""');
+                                                    ou += node.quo + q + node.quo + node.sep;
+                                                }
+                                                else if (q.indexOf(node.sep) !== -1) { // add quotes if any "commas"
+                                                    ou += node.quo + q + node.quo + node.sep;
+                                                }
+                                                else { ou += q + node.sep; } // otherwise just add
+                                            }
+                                        }
+                                    }
+                                    ou = ou.slice(0,-1) + node.ret;
                                 }
                                 else {
                                     for (var t=0; t < node.template.length; t++) {
@@ -79,9 +105,8 @@ module.exports = function(RED) {
                                             ou += node.sep;
                                         }
                                         else {
-                                            // aaargh - resorting to eval here - but fairly contained front and back.
-                                            var p = RED.util.ensureString(eval("msg.payload[s]."+node.template[t]));
-
+                                            var p = RED.util.ensureString(RED.util.getMessageProperty(msg,"payload["+s+"]['"+node.template[t]+"']"));
+                                            /* istanbul ignore else */
                                             if (p === "undefined") { p = ""; }
                                             if (p.indexOf(node.quo) !== -1) { // add double quotes if any quotes
                                                 p = p.replace(/"/g, '""');
@@ -111,16 +136,26 @@ module.exports = function(RED) {
                         var a = []; // output array is needed for multiline option
                         var first = true; // is this the first line
                         var line = msg.payload;
+                        var linecount = 0;
                         var tmp = "";
-                        var reg = new RegExp("^[-]?[0-9.]*[\.]?[0-9]*$");
+                        var reg = /^[-]?[0-9]*\.?[0-9]+$/;
+                        if (msg.hasOwnProperty("parts")) {
+                            linecount = msg.parts.index;
+                            if (msg.parts.index > node.skip) { first = false; }
+                        }
 
                         // For now we are just going to assume that any \r or \n means an end of line...
                         //   got to be a weird csv that has singleton \r \n in it for another reason...
 
                         // Now process the whole file/line
                         for (var i = 0; i < line.length; i++) {
+                            if (first && (linecount < node.skip)) {
+                                if (line[i] === "\n") { linecount += 1; }
+                                continue;
+                            }
                             if ((node.hdrin === true) && first) { // if the template is in the first line
-                                if ((line[i] === "\n")||(line[i] === "\r")) { // look for first line break
+                                if ((line[i] === "\n")||(line[i] === "\r")||(line.length - i === 1)) { // look for first line break
+                                    if (line.length - i === 1) { tmp += line[i]; }
                                     node.template = clean(tmp.split(node.sep));
                                     first = false;
                                 }
@@ -129,7 +164,9 @@ module.exports = function(RED) {
                             else {
                                 if (line[i] === node.quo) { // if it's a quote toggle inside or outside
                                     f = !f;
-                                    if (line[i-1] === node.quo) { k[j] += '\"'; } // if it's a quotequote then it's actually a quote
+                                    if (line[i-1] === node.quo) {
+                                        if (f === false) { k[j] += '\"'; }
+                                    } // if it's a quotequote then it's actually a quote
                                     //if ((line[i-1] !== node.sep) && (line[i+1] !== node.sep)) { k[j] += line[i]; }
                                 }
                                 else if ((line[i] === node.sep) && f) { // if it is the end of the line then finish
@@ -150,12 +187,7 @@ module.exports = function(RED) {
                                         o[node.template[j]] = k[j];
                                     }
                                     if (JSON.stringify(o) !== "{}") { // don't send empty objects
-                                        if (node.multi === "one") {
-                                            var newMessage = RED.util.cloneMessage(msg);
-                                            newMessage.payload = o;
-                                            node.send(newMessage); // either send
-                                        }
-                                        else { a.push(o); } // or add to the array
+                                        a.push(o); // add to the array
                                     }
                                     j = 0;
                                     k = [""];
@@ -176,17 +208,50 @@ module.exports = function(RED) {
                             o[node.template[j]] = k[j];
                         }
                         if (JSON.stringify(o) !== "{}") { // don't send empty objects
-                            if (node.multi === "one") {
-                                var newMessage = RED.util.cloneMessage(msg);
-                                newMessage.payload = o;
-                                node.send(newMessage); // either send
-                            }
-                            else { a.push(o); } // or add to the aray
+                            a.push(o); // add to the array
                         }
+                        var has_parts = msg.hasOwnProperty("parts");
                         if (node.multi !== "one") {
                             msg.payload = a;
-                            node.send(msg); // finally send the array
+                            if (has_parts) {
+                                if (JSON.stringify(o) !== "{}") {
+                                    node.store.push(o);
+                                }
+                                if (msg.parts.index + 1 === msg.parts.count) {
+                                    msg.payload = node.store;
+                                    delete msg.parts;
+                                    node.send(msg);
+                                    node.store = [];
+                                }
+                            }
+                            else {
+                                node.send(msg); // finally send the array
+                            }
                         }
+            			else {
+            			    var len = a.length;
+            			    for (var i = 0; i < len; i++) {
+                                var newMessage = RED.util.cloneMessage(msg);
+                                newMessage.payload = a[i];
+                                if (!has_parts) {
+                				    newMessage.parts = {
+                    				    id: msg._msgid,
+                    				    index: i,
+                    				    count: len
+                    				};
+                                }
+                                else {
+                                    newMessage.parts.index -= node.skip;
+                                    newMessage.parts.count -= node.skip;
+                                    if (node.hdrin) { // if we removed the header line then shift the counts by 1
+                                        newMessage.parts.index -= 1;
+                                        newMessage.parts.count -= 1;
+                                    }
+                                }
+                                node.send(newMessage);
+            			    }
+            			}
+                        node.linecount = 0;
                     }
                     catch(e) { node.error(e,msg); }
                 }

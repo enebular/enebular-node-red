@@ -1,5 +1,5 @@
 /**
- * Copyright 2013, 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,9 +34,18 @@ module.exports = function(RED) {
         // match absolute url
         node.isServer = !/^ws{1,2}:\/\//i.test(node.path);
         node.closing = false;
+        node.tls = n.tls;
 
         function startconn() {    // Connect to remote endpoint
-            var socket = new ws(node.path);
+            node.tout = null;
+            var options = {};
+            if (node.tls) {
+                var tlsNode = RED.nodes.getNode(node.tls);
+                if (tlsNode) {
+                    tlsNode.addTLSOptions(options);
+                }
+            }
+            var socket = new ws(node.path,options);
             socket.setMaxListeners(0);
             node.server = socket; // keep for closing
             handleConnection(socket);
@@ -52,6 +61,7 @@ module.exports = function(RED) {
                 if (node.isServer) { delete node._clients[id]; node.emit('closed',Object.keys(node._clients).length); }
                 else { node.emit('closed'); }
                 if (!node.closing && !node.isServer) {
+                    clearTimeout(node.tout);
                     node.tout = setTimeout(function() { startconn(); }, 3000); // try to reconnect every 3 secs... bit fast ?
                 }
             });
@@ -61,6 +71,7 @@ module.exports = function(RED) {
             socket.on('error', function(err) {
                 node.emit('erro');
                 if (!node.closing && !node.isServer) {
+                    clearTimeout(node.tout);
                     node.tout = setTimeout(function() { startconn(); }, 3000); // try to reconnect every 3 secs... bit fast ?
                 }
             });
@@ -82,16 +93,15 @@ module.exports = function(RED) {
 
             RED.server.addListener('newListener',storeListener);
 
-            // Create a WebSocket Server
-            node.server = new ws.Server({
+            var serverOptions = {
                 server:RED.server,
-                path:path,
-                // Disable the deflate option due to this issue
-                //  https://github.com/websockets/ws/pull/632
-                // that is fixed in the 1.x release of the ws module
-                // that we cannot currently pickup as it drops node 0.10 support
-                perMessageDeflate: false
-            });
+                path:path
+            }
+            if (RED.settings.webSocketNodeVerifyClient) {
+                serverOptions.verifyClient = RED.settings.webSocketNodeVerifyClient;
+            }
+            // Create a WebSocket Server
+            node.server = new ws.Server(serverOptions);
 
             // Workaround https://github.com/einaros/ws/pull/253
             // Stop listening for new listener events
@@ -124,7 +134,10 @@ module.exports = function(RED) {
             else {
                 node.closing = true;
                 node.server.close();
-                if (node.tout) { clearTimeout(node.tout); }
+                if (node.tout) {
+                    clearTimeout(node.tout);
+                    node.tout = null;
+                }
             }
         });
     }
@@ -201,12 +214,17 @@ module.exports = function(RED) {
             // TODO: nls
             this.serverConfig.on('opened', function(n) { node.status({fill:"green",shape:"dot",text:"connected "+n}); });
             this.serverConfig.on('erro', function() { node.status({fill:"red",shape:"ring",text:"error"}); });
-            this.serverConfig.on('closed', function() { node.status({fill:"red",shape:"ring",text:"disconnected"}); });
+            this.serverConfig.on('closed', function(n) {
+                if (n > 0) { node.status({fill:"green",shape:"dot",text:"connected "+n}); }
+                else { node.status({fill:"red",shape:"ring",text:"disconnected"}); }
+            });
         } else {
             this.error(RED._("websocket.errors.missing-conf"));
         }
         this.on('close', function() {
-            node.serverConfig.removeInputNode(node);
+            if (node.serverConfig) {
+                node.serverConfig.removeInputNode(node);
+            }
             node.status({});
         });
     }
@@ -218,13 +236,16 @@ module.exports = function(RED) {
         this.server = (n.client)?n.client:n.server;
         this.serverConfig = RED.nodes.getNode(this.server);
         if (!this.serverConfig) {
-            this.error(RED._("websocket.errors.missing-conf"));
+            return this.error(RED._("websocket.errors.missing-conf"));
         }
         else {
             // TODO: nls
             this.serverConfig.on('opened', function(n) { node.status({fill:"green",shape:"dot",text:"connected "+n}); });
             this.serverConfig.on('erro', function() { node.status({fill:"red",shape:"ring",text:"error"}); });
-            this.serverConfig.on('closed', function() { node.status({fill:"red",shape:"ring",text:"disconnected"}); });
+            this.serverConfig.on('closed', function(n) {
+                if (n > 0) { node.status({fill:"green",shape:"dot",text:"connected "+n}); }
+                else { node.status({fill:"red",shape:"ring",text:"disconnected"}); }
+            });
         }
         this.on("input", function(msg) {
             var payload;

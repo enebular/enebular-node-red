@@ -1,5 +1,5 @@
 /**
- * Copyright 2013, 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,8 +15,8 @@
  **/
 RED.library = (function() {
 
-
     var exportToLibraryDialog;
+    var elementPrefix = "node-input-";
 
     function loadFlowLibrary() {
         $.getJSON("library/flows",function(data) {
@@ -38,7 +38,7 @@ RED.library = (function() {
                             li.className = "dropdown-submenu pull-left";
                             a = document.createElement("a");
                             a.href="#";
-                            var label = i.replace(/^node-red-contrib-/,"").replace(/^node-red-node-/,"").replace(/-/," ").replace(/_/," ");
+                            var label = i.replace(/^@.*\//,"").replace(/^node-red-contrib-/,"").replace(/^node-red-node-/,"").replace(/-/," ").replace(/_/," ");
                             a.innerHTML = label;
                             li.appendChild(a);
                             li.appendChild(buildMenu(data.d[i],root+(root!==""?"/":"")+i));
@@ -86,6 +86,7 @@ RED.library = (function() {
         var libraryData = {};
         var selectedLibraryItem = null;
         var libraryEditor = null;
+        elementPrefix = options.elementPrefix || "node-input-";
 
         // Orion editor has set/getText
         // ACE editor has set/getValue
@@ -110,7 +111,7 @@ RED.library = (function() {
         function buildFileList(root,data) {
             var ul = document.createElement("ul");
             var li;
-            for (var i=0;i<data.length;i++) {
+            for (var i=0; i<data.length; i++) {
                 var v = data[i];
                 if (typeof v === "string") {
                     // directory
@@ -157,16 +158,14 @@ RED.library = (function() {
             return ul;
         }
 
-        $('#node-input-name').css("width","60%").after(
-            '<div class="btn-group" style="margin-left: 5px;">'+
+        $('#'+elementPrefix+"name").css("width","calc(100% - 52px)").after(
+            '<div class="btn-group" style="margin-left:5px;">'+
             '<a id="node-input-'+options.type+'-lookup" class="editor-button" data-toggle="dropdown"><i class="fa fa-book"></i> <i class="fa fa-caret-down"></i></a>'+
             '<ul class="dropdown-menu pull-right" role="menu">'+
             '<li><a id="node-input-'+options.type+'-menu-open-library" tabindex="-1" href="#">'+RED._("library.openLibrary")+'</a></li>'+
             '<li><a id="node-input-'+options.type+'-menu-save-library" tabindex="-1" href="#">'+RED._("library.saveToLibrary")+'</a></li>'+
             '</ul></div>'
         );
-
-
 
         $('#node-input-'+options.type+'-menu-open-library').click(function(e) {
             $("#node-select-library").children().remove();
@@ -189,7 +188,7 @@ RED.library = (function() {
 
         $('#node-input-'+options.type+'-menu-save-library').click(function(e) {
             //var found = false;
-            var name = $("#node-input-name").val().replace(/(^\s*)|(\s*$)/g,"");
+            var name = $("#"+elementPrefix+"name").val().replace(/(^\s*)|(\s*$)/g,"");
 
             //var buildPathList = function(data,root) {
             //    var paths = [];
@@ -264,9 +263,9 @@ RED.library = (function() {
                     class: "primary",
                     click: function() {
                         if (selectedLibraryItem) {
-                            for (var i=0;i<options.fields.length;i++) {
+                            for (var i=0; i<options.fields.length; i++) {
                                 var field = options.fields[i];
-                                $("#node-input-"+field).val(selectedLibraryItem[field]);
+                                $("#"+elementPrefix+field).val(selectedLibraryItem[field]);
                             }
                             options.editor.setValue(libraryEditor.getValue(),-1);
                         }
@@ -288,7 +287,7 @@ RED.library = (function() {
         });
 
         function saveToLibrary(overwrite) {
-            var name = $("#node-input-name").val().replace(/(^\s*)|(\s*$)/g,"");
+            var name = $("#"+elementPrefix+"name").val().replace(/(^\s*)|(\s*$)/g,"");
             if (name === "") {
                 name = RED._("library.unnamedType",{type:options.type});
             }
@@ -327,12 +326,12 @@ RED.library = (function() {
             }
             var queryArgs = [];
             var data = {};
-            for (var i=0;i<options.fields.length;i++) {
+            for (var i=0; i<options.fields.length; i++) {
                 var field = options.fields[i];
                 if (field == "name") {
                     data.name = name;
                 } else {
-                    data[field] = $("#node-input-"+field).val();
+                    data[field] = $("#"+elementPrefix+field).val();
                 }
             }
 
@@ -410,6 +409,9 @@ RED.library = (function() {
 
     return {
         init: function() {
+
+            RED.actions.add("core:library-export",exportFlow);
+
             RED.events.on("view:selection-changed",function(selection) {
                 if (!selection.nodes) {
                     RED.menu.setDisabled("menu-item-export",true);

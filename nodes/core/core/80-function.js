@@ -1,5 +1,5 @@
 /**
- * Copyright 2013, 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,19 +26,24 @@ module.exports = function(RED) {
             msgs = [msgs];
         }
         var msgCount = 0;
-        for (var m=0;m<msgs.length;m++) {
+        for (var m=0; m<msgs.length; m++) {
             if (msgs[m]) {
-                if (util.isArray(msgs[m])) {
-                    for (var n=0; n < msgs[m].length; n++) {
-                        if (msgs[m][n] !== null && msgs[m][n] !== undefined) {
-                            msgs[m][n]._msgid = _msgid;
+                if (!util.isArray(msgs[m])) {
+                    msgs[m] = [msgs[m]];
+                }
+                for (var n=0; n < msgs[m].length; n++) {
+                    var msg = msgs[m][n];
+                    if (msg !== null && msg !== undefined) {
+                        if (typeof msg === 'object' && !Buffer.isBuffer(msg) && !util.isArray(msg)) {
+                            msg._msgid = _msgid;
                             msgCount++;
+                        } else {
+                            var type = typeof msg;
+                            if (type === 'object') {
+                                type = Buffer.isBuffer(msg)?'Buffer':(util.isArray(msg)?'Array':'Date');
+                            }
+                            node.error(RED._("function.error.non-message-returned",{ type: type }))
                         }
-                    }
-                } else {
-                    if (msgs[m] !== null && msgs[m] !== undefined) {
-                        msgs[m]._msgid = _msgid;
-                        msgCount++;
                     }
                 }
             }
@@ -60,6 +65,8 @@ module.exports = function(RED) {
                                  "log:__node__.log,"+
                                  "error:__node__.error,"+
                                  "warn:__node__.warn,"+
+                                 "debug:__node__.debug,"+
+                                 "trace:__node__.trace,"+
                                  "on:__node__.on,"+
                                  "status:__node__.status,"+
                                  "send:function(msgs){ __node__.send(__msgid__,msgs);}"+
@@ -86,6 +93,12 @@ module.exports = function(RED) {
                 warn: function() {
                     node.warn.apply(node, arguments);
                 },
+                debug: function() {
+                    node.debug.apply(node, arguments);
+                },
+                trace: function() {
+                    node.trace.apply(node, arguments);
+                },
                 send: function(id, msgs) {
                     sendResults(node, id, msgs);
                 },
@@ -106,6 +119,9 @@ module.exports = function(RED) {
                 get: function() {
                     return node.context().get.apply(node,arguments);
                 },
+                keys: function() {
+                    return node.context().keys.apply(node,arguments);
+                },
                 get global() {
                     return node.context().global;
                 },
@@ -119,6 +135,9 @@ module.exports = function(RED) {
                 },
                 get: function() {
                     return node.context().flow.get.apply(node,arguments);
+                },
+                keys: function() {
+                    return node.context().flow.keys.apply(node,arguments);
                 }
             },
             global: {
@@ -127,6 +146,9 @@ module.exports = function(RED) {
                 },
                 get: function() {
                     return node.context().global.get.apply(node,arguments);
+                },
+                keys: function() {
+                    return node.context().global.keys.apply(node,arguments);
                 }
             },
             setTimeout: function () {
@@ -173,9 +195,23 @@ module.exports = function(RED) {
                 }
             }
         };
+        if (util.hasOwnProperty('promisify')) {
+            sandbox.setTimeout[util.promisify.custom] = function(after, value) {
+                return new Promise(function(resolve, reject) {
+                    sandbox.setTimeout(function(){ resolve(value) }, after);
+                });
+            }
+        }
         var context = vm.createContext(sandbox);
         try {
-            this.script = vm.createScript(functionText);
+            this.script = vm.createScript(functionText, {
+                filename: 'Function node:'+this.id+(this.name?' ['+this.name+']':''), // filename for stack traces
+                displayErrors: true
+                // Using the following options causes node 4/6 to not include the line number
+                // in the stack output. So don't use them.
+                // lineOffset: -11, // line number offset to be used for stack traces
+                // columnOffset: 0, // column number offset to be used for stack traces
+            });
             this.on("input", function(msg) {
                 try {
                     var start = process.hrtime();
@@ -190,6 +226,13 @@ module.exports = function(RED) {
                         this.status({fill:"yellow",shape:"dot",text:""+converted});
                     }
                 } catch(err) {
+                    //remove unwanted part
+                    var index = err.stack.search(/\n\s*at ContextifyScript.Script.runInContext/);
+                    err.stack = err.stack.slice(0, index).split('\n').slice(0,-1).join('\n');
+                    var stack = err.stack.split(/\r?\n/);
+
+                    //store the error in msg to be used in flows
+                    msg.error = err;
 
                     var line = 0;
                     var errorMessage;

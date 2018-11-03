@@ -1,5 +1,5 @@
 /**
- * Copyright 2013, 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,8 +21,8 @@ RED.palette = (function() {
 
     var categoryContainers = {};
 
-    function createCategoryContainer(category, label){
-        label = label || category.replace("_", " ");
+    function createCategoryContainer(category, label) {
+        label = (label || category).replace(/_/g, " ");
         var catDiv = $('<div id="palette-container-'+category+'" class="palette-category palette-close hide">'+
             '<div id="palette-header-'+category+'" class="palette-header"><i class="expanded fa fa-angle-down"></i><span>'+label+'</span></div>'+
             '<div class="palette-content" id="palette-base-category-'+category+'">'+
@@ -101,7 +101,7 @@ RED.palette = (function() {
             if (label != type) {
                 l = "<p><b>"+RED.text.bidi.enforceTextDirectionWithUCC(label)+"</b><br/><i>"+type+"</i></p>";
             }
-            popOverContent = $(l+(info?info:$("script[data-help-name$='"+type+"']").html()||"<p>"+RED._("palette.noInfo")+"</p>").trim())
+            popOverContent = $(l+(info?info:$("script[data-help-name='"+type+"']").html()||"<p>"+RED._("palette.noInfo")+"</p>").trim())
                                 .filter(function(n) {
                                     return (this.nodeType == 1 && this.nodeName == "P") || (this.nodeType == 3 && this.textContent.trim().length > 0)
                                 }).slice(0,2);
@@ -116,6 +116,12 @@ RED.palette = (function() {
         el.data('popover').setContent(popOverContent);
     }
 
+    function setIcon(element,sf) {
+        var iconElement = element.find(".palette_icon");
+        var icon_url = RED.utils.getNodeIcon(sf._def,sf);
+        iconElement.attr("style", "background-image: url("+icon_url+")");
+    }
+
     function escapeNodeType(nt) {
         return nt.replace(" ","_").replace(".","_").replace(":","_");
     }
@@ -127,7 +133,7 @@ RED.palette = (function() {
         }
         if (exclusion.indexOf(def.category)===-1) {
 
-            var category = def.category.replace(" ","_");
+            var category = def.category.replace(/ /g,"_");
             var rootCategory = category.split("-")[0];
 
             var d = document.createElement("div");
@@ -149,14 +155,9 @@ RED.palette = (function() {
 
 
             if (def.icon) {
-                var icon_url = "arrow-in.png";
-                try {
-                    icon_url = (typeof def.icon === "function" ? def.icon.call({}) : def.icon);
-                } catch(err) {
-                    console.log("Definition error: "+nt+".icon",err);
-                }
+                var icon_url = RED.utils.getNodeIcon(def);
                 var iconContainer = $('<div/>',{class:"palette_icon_container"+(def.align=="right"?" palette_icon_container_right":"")}).appendTo(d);
-                $('<div/>',{class:"palette_icon",style:"background-image: url(icons/"+icon_url+")"}).appendTo(iconContainer);
+                $('<div/>',{class:"palette_icon",style:"background-image: url("+icon_url+")"}).appendTo(iconContainer);
             }
 
             d.style.backgroundColor = def.color;
@@ -190,11 +191,14 @@ RED.palette = (function() {
             $("#palette-"+category).append(d);
             d.onmousedown = function(e) { e.preventDefault(); };
 
-            RED.popover.create({
+            var popover = RED.popover.create({
                 target:$(d),
+                trigger: "hover",
+                width: "300px",
                 content: "hi",
                 delay: { show: 750, hide: 50 }
             });
+            $(d).data('popover',popover);
 
             // $(d).popover({
             //     title:d.type,
@@ -208,12 +212,11 @@ RED.palette = (function() {
                 RED.view.focus();
                 var helpText;
                 if (nt.indexOf("subflow:") === 0) {
-                    helpText = marked(RED.nodes.subflow(nt.substring(8)).info||"");
+                    helpText = marked(RED.nodes.subflow(nt.substring(8)).info||"")||('<span class="node-info-none">'+RED._("sidebar.info.none")+'</span>');
                 } else {
-                    helpText = $("script[data-help-name$='"+d.type+"']").html()||"";
+                    helpText = $("script[data-help-name='"+d.type+"']").html()||('<span class="node-info-none">'+RED._("sidebar.info.none")+'</span>');
                 }
-                var help = '<div class="node-help">'+helpText+"</div>";
-                RED.sidebar.info.set(help);
+                RED.sidebar.info.set(helpText,RED._("sidebar.info.nodeHelp"));
             });
             var chart = $("#chart");
             var chartOffset = chart.offset();
@@ -222,13 +225,19 @@ RED.palette = (function() {
             var mouseX;
             var mouseY;
             var spliceTimer;
+            var paletteWidth;
+            var paletteTop;
             $(d).draggable({
                 helper: 'clone',
                 appendTo: 'body',
                 revert: true,
                 revertDuration: 50,
                 containment:'#main-container',
-                start: function() {RED.view.focus();},
+                start: function() {
+                    paletteWidth = $("#palette").width();
+                    paletteTop = $("#palette").parent().position().top + $("#palette-container").position().top;
+                    RED.view.focus();
+                },
                 stop: function() { d3.select('.link_splice').classed('link_splice',false); if (spliceTimer) { clearTimeout(spliceTimer); spliceTimer = null;}},
                 drag: function(e,ui) {
 
@@ -236,11 +245,10 @@ RED.palette = (function() {
                     // it here makes me sad
                     //console.log(ui.helper.position());
                     ui.position.left += 17.5;
-                    
-                    if (def.inputs > 0 && def.outputs > 0) {
-                        mouseX = ui.position.left+(ui.helper.width()/2) - chartOffset.left + chart.scrollLeft();
-                        mouseY = ui.position.top+(ui.helper.height()/2) - chartOffset.top + chart.scrollTop();
 
+                    if (def.inputs > 0 && def.outputs > 0) {
+                        mouseX = ui.position.left-paletteWidth+(ui.helper.width()/2) - chartOffset.left + chart.scrollLeft();
+                        mouseY = ui.position.top-paletteTop+(ui.helper.height()/2) - chartOffset.top + chart.scrollTop();
                         if (!spliceTimer) {
                             spliceTimer = setTimeout(function() {
                                 var nodes = [];
@@ -262,6 +270,7 @@ RED.palette = (function() {
                                     mouseY /= RED.view.scale();
                                     nodes = RED.view.getLinksAtPoint(mouseX,mouseY);
                                 }
+
                                 for (var i=0;i<nodes.length;i++) {
                                     if (d3.select(nodes[i]).classed('link_background')) {
                                         var length = nodes[i].getTotalLength();
@@ -328,14 +337,26 @@ RED.palette = (function() {
             }
         }
     }
+
     function hideNodeType(nt) {
         var nodeTypeId = escapeNodeType(nt);
-        $("#palette_node_"+nodeTypeId).hide();
+        var paletteNode = $("#palette_node_"+nodeTypeId);
+        paletteNode.hide();
+        var categoryNode = paletteNode.closest(".palette-category");
+        var cl = categoryNode.find(".palette_node");
+        var c = 0;
+        for (var i = 0; i < cl.length; i++) {
+            if ($(cl[i]).css('display') === 'none') { c += 1; }
+        }
+        if (c === cl.length) { categoryNode.hide(); }
     }
 
     function showNodeType(nt) {
         var nodeTypeId = escapeNodeType(nt);
-        $("#palette_node_"+nodeTypeId).show();
+        var paletteNode = $("#palette_node_"+nodeTypeId);
+        var categoryNode = paletteNode.closest(".palette-category");
+        categoryNode.show();
+        paletteNode.show();
     }
 
     function refreshNodeTypes() {
@@ -360,6 +381,7 @@ RED.palette = (function() {
                 portOutput.remove();
             }
             setLabel(sf.type+":"+sf.id,paletteNode,sf.name,marked(sf.info||""));
+            setIcon(paletteNode,sf);
         });
     }
 
@@ -399,21 +421,21 @@ RED.palette = (function() {
         RED.events.on('registry:node-type-removed', function(nodeType) {
             removeNodeType(nodeType);
         });
-
         RED.events.on('registry:node-set-enabled', function(nodeSet) {
             for (var j=0;j<nodeSet.types.length;j++) {
                 showNodeType(nodeSet.types[j]);
                 var def = RED.nodes.getType(nodeSet.types[j]);
-                if (def.onpaletteadd && typeof def.onpaletteadd === "function") {
+                if (def && def.onpaletteadd && typeof def.onpaletteadd === "function") {
                     def.onpaletteadd.call(def);
                 }
             }
         });
         RED.events.on('registry:node-set-disabled', function(nodeSet) {
+            console.log(nodeSet);
             for (var j=0;j<nodeSet.types.length;j++) {
                 hideNodeType(nodeSet.types[j]);
                 var def = RED.nodes.getType(nodeSet.types[j]);
-                if (def.onpaletteremove && typeof def.onpaletteremove === "function") {
+                if (def && def.onpaletteremove && typeof def.onpaletteremove === "function") {
                     def.onpaletteremove.call(def);
                 }
             }
@@ -423,13 +445,12 @@ RED.palette = (function() {
                 for (var j=0;j<nodeSet.types.length;j++) {
                     removeNodeType(nodeSet.types[j]);
                     var def = RED.nodes.getType(nodeSet.types[j]);
-                    if (def.onpaletteremove && typeof def.onpaletteremove === "function") {
+                    if (def && def.onpaletteremove && typeof def.onpaletteremove === "function") {
                         def.onpaletteremove.call(def);
                     }
                 }
             }
         });
-
 
         $("#palette > .palette-spinner").show();
 

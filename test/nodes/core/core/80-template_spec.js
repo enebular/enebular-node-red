@@ -1,5 +1,5 @@
 /**
- * Copyright 2014 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
 
 var should = require("should");
 var templateNode = require("../../../../nodes/core/core/80-template.js");
-var helper = require("../../helper.js");
+var helper = require("node-red-node-test-helper");
 
 describe('template node', function() {
 
@@ -24,22 +24,154 @@ describe('template node', function() {
         helper.startServer(done);
     });
 
+    after(function(done) {
+        helper.stopServer(done);
+    });
+
     afterEach(function() {
         helper.unload();
     });
 
 
-    it('should modify payload', function(done) {
+    it('should modify payload using node-configured template', function(done) {
         var flow = [{id:"n1", type:"template", field:"payload", template:"payload={{payload}}",wires:[["n2"]]},{id:"n2",type:"helper"}];
         helper.load(templateNode, flow, function() {
             var n1 = helper.getNode("n1");
             var n2 = helper.getNode("n2");
+            n2.on("input", function(msg) {
+                try {
+                    msg.should.have.property('topic', 'bar');
+                    msg.should.have.property('payload', 'payload=foo');
+                    msg.should.have.property('template', 'this should be ignored as the node has its own template {{payload}}');
+                    done();
+                } catch(err) {
+                    done(err);
+                }
+            });
+            n1.receive({payload:"foo",topic: "bar", template: "this should be ignored as the node has its own template {{payload}}"});
+        });
+    });
+
+    it('should modify the configured property using msg.template', function(done) {
+        var flow = [{id:"n1", type:"template", field:"randomProperty", template:"",wires:[["n2"]]},{id:"n2",type:"helper"}];
+        helper.load(templateNode, flow, function() {
+            var n1 = helper.getNode("n1");
+            var n2 = helper.getNode("n2");
+            n2.on("input", function(msg) {
+                msg.should.have.property('topic', 'bar');
+                msg.should.have.property('payload', 'foo');
+                msg.should.have.property('template', 'payload={{payload}}');
+                msg.should.have.property('randomProperty', 'payload=foo');
+                done();
+            });
+            n1.receive({payload:"foo", topic: "bar", template: "payload={{payload}}"});
+        });
+    });
+
+    it('should be able to overwrite msg.template using the template from msg.template', function(done) {
+        var flow = [{id:"n1", type:"template", field:"payload", template:"",wires:[["n2"]]},{id:"n2",type:"helper"}];
+        helper.load(templateNode, flow, function() {
+            var n1 = helper.getNode("n1");
+            var n2 = helper.getNode("n2");
+            n2.on("input", function(msg) {
+                msg.should.have.property('topic', 'bar');
+                msg.should.have.property('payload', 'topic=bar');
+                msg.should.have.property('template', 'topic={{topic}}');
+                done();
+            });
+            n1.receive({payload:"foo", topic: "bar", template: "topic={{topic}}"});
+        });
+    });
+
+    it('should modify payload from msg.template', function(done) {
+        var flow = [{id:"n1", type:"template", field:"payload", template:"",wires:[["n2"]]},{id:"n2",type:"helper"}];
+        helper.load(templateNode, flow, function() {
+            var n1 = helper.getNode("n1");
+            var n2 = helper.getNode("n2");
+            var received = [];
+            n2.on("input", function(msg) {
+                try {
+                    received.push(msg);
+                    if (received.length === 3) {
+                        received[0].should.have.property('topic', 'bar');
+                        received[0].should.have.property('payload', 'topic=bar');
+                        received[0].should.have.property('template', 'topic={{topic}}');
+
+                        received[1].should.have.property('topic', 'another bar');
+                        received[1].should.have.property('payload', 'topic=another bar');
+                        received[1].should.have.property('template', 'topic={{topic}}');
+
+                        received[2].should.have.property('topic', 'bar');
+                        received[2].should.have.property('payload', 'payload=foo');
+                        received[2].should.have.property('template', 'payload={{payload}}');
+                        done();
+                    }
+                } catch(err) {
+                    done(err);
+                }
+            });
+            n1.receive({payload:"foo", topic: "bar", template: "topic={{topic}}"});
+            n1.receive({payload:"foo", topic: "another bar", template: "topic={{topic}}"});
+            n1.receive({payload:"foo", topic: "bar", template: "payload={{payload}}"});
+        });
+    });
+
+
+    it('should modify payload from flow context', function(done) {
+        var flow = [{id:"n1",z:"t1", type:"template", field:"payload", template:"payload={{flow.value}}",wires:[["n2"]]},{id:"n2",z:"t1",type:"helper"}];
+        helper.load(templateNode, flow, function() {
+            var n1 = helper.getNode("n1");
+            var n2 = helper.getNode("n2");
+            n1.context().flow.set("value","foo");
             n2.on("input", function(msg) {
                 msg.should.have.property('topic', 'bar');
                 msg.should.have.property('payload', 'payload=foo');
                 done();
             });
             n1.receive({payload:"foo",topic: "bar"});
+        });
+    });
+
+    it('should modify payload from global context', function(done) {
+        var flow = [{id:"n1",z:"t1", type:"template", field:"payload", template:"payload={{global.value}}",wires:[["n2"]]},{id:"n2",z:"t1",type:"helper"}];
+        helper.load(templateNode, flow, function() {
+            var n1 = helper.getNode("n1");
+            var n2 = helper.getNode("n2");
+            n1.context().global.set("value","foo");
+            n2.on("input", function(msg) {
+                msg.should.have.property('topic', 'bar');
+                msg.should.have.property('payload', 'payload=foo');
+                done();
+            });
+            n1.receive({payload:"foo",topic: "bar"});
+        });
+    });
+
+    it('should handle missing node context', function(done) {
+        // this is artificial test because in flow there is missing z property (probably never happen in real usage)
+        var flow = [{id:"n1",type:"template", field:"payload", template:"payload={{flow.value}},{{global.value}}",wires:[["n2"]]},{id:"n2",type:"helper"}];
+        helper.load(templateNode, flow, function() {
+            var n1 = helper.getNode("n1");
+            var n2 = helper.getNode("n2");
+            n2.on("input", function(msg) {
+                msg.should.have.property('topic', 'bar');
+                msg.should.have.property('payload', 'payload=,');
+                done();
+            });
+            n1.receive({payload:"foo",topic: "bar"});
+        });
+    });
+
+    it('should handle escape characters in Mustache format and JSON output mode', function(done) {
+        var flow = [{id:"n1", type:"template", field:"payload", syntax:"mustache", template:"{\"data\":\"{{payload}}\"}", output:"json", wires:[["n2"]]},{id:"n2",type:"helper"}];
+        helper.load(templateNode, flow, function() {
+            var n1 = helper.getNode("n1");
+            var n2 = helper.getNode("n2");
+            n2.on("input", function(msg) {
+                msg.payload.should.have.property('data', 'line\t1\nline\\2\r\nline\b3\f');
+                done();
+            });
+            n1.receive({payload:"line\t1\nline\\2\r\nline\b3\f"});
         });
     });
 
@@ -57,32 +189,36 @@ describe('template node', function() {
         });
     });
 
-    xit('should modify flow context', function(done) {
-        var flow = [{id:"n1", type:"template", field:"payload", fieldType:"flow", template:"payload={{payload}}",wires:[["n2"]]},{id:"n2",type:"helper"}];
+    it('should modify flow context', function(done) {
+        var flow = [{id:"n1",z:"t1", type:"template", field:"payload", fieldType:"flow", template:"payload={{payload}}",wires:[["n2"]]},{id:"n2",z:"t1",type:"helper"}];
         helper.load(templateNode, flow, function() {
             var n1 = helper.getNode("n1");
             var n2 = helper.getNode("n2");
-            setTimeout( function() {
-                console.log(n2);
-                console.log(n2.context().global.get("payload"));
-                //c.should.equal(1); // should only have had one output.
+            n2.on("input", function(msg) {
+                // mesage is intact
+                msg.should.have.property('topic', 'bar');
+                msg.should.have.property('payload', 'foo');
+                // result is in flow context
+                n2.context().flow.get("payload").should.equal("payload=foo");
                 done();
-            },50);
+            });
             n1.receive({payload:"foo",topic: "bar"});
         });
     });
 
-    xit('should modify global context', function(done) {
-        var flow = [{id:"n1", type:"template", field:"payload", fieldType:"global", template:"payload={{payload}}",wires:[["n2"]]},{id:"n2",type:"helper"}];
+    it('should modify global context', function(done) {
+        var flow = [{id:"n1",z:"t1", type:"template", field:"payload", fieldType:"global", template:"payload={{payload}}",wires:[["n2"]]},{id:"n2",z:"t1",type:"helper"}];
         helper.load(templateNode, flow, function() {
             var n1 = helper.getNode("n1");
             var n2 = helper.getNode("n2");
-            setTimeout( function() {
-                console.log(n2);
-                console.log(n2.context().global.get("payload"));
-                //c.should.equal(1); // should only have had one output.
+            n2.on("input", function(msg) {
+                // mesage is intact
+                msg.should.have.property('topic', 'bar');
+                msg.should.have.property('payload', 'foo');
+                // result is in global context
+                n2.context().global.get("payload").should.equal("payload=foo");
                 done();
-            },50);
+            });
             n1.receive({payload:"foo",topic: "bar"});
         });
     });
@@ -116,6 +252,18 @@ describe('template node', function() {
         });
     });
 
+    it('should handle block contexts objects', function(done) {
+        var flow = [{id:"n1", type:"template", template: "A{{#payload.A}}{{payload.A}}{{.}}{{/payload.A}}B",wires:[["n2"]]},{id:"n2",type:"helper"}];
+        helper.load(templateNode, flow, function() {
+            var n1 = helper.getNode("n1");
+            var n2 = helper.getNode("n2");
+            n2.on("input", function(msg) {
+                msg.should.have.property('payload','AabcabcB');
+                done();
+            });
+            n1.receive({payload:{A:"abc"}});
+        });
+    });
     it('should raise error if passed bad template', function(done) {
         var flow = [{id:"n1", type:"template", field: "payload", template: "payload={{payload",wires:[["n2"]]},{id:"n2",type:"helper"}];
         helper.load(templateNode, flow, function() {

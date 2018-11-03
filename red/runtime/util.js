@@ -1,5 +1,5 @@
 /**
- * Copyright 2014, 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
  **/
 
 var clone = require("clone");
+var jsonata = require("jsonata");
 
 function generateId() {
     return (1+Math.random()*4294967295).toString(16);
@@ -128,7 +129,13 @@ function compareObjects(obj1,obj2) {
 }
 
 function normalisePropertyExpression(str) {
+    // This must be kept in sync with validatePropertyExpression
+    // in editor/js/ui/utils.js
+
     var length = str.length;
+    if (length === 0) {
+        throw new Error("Invalid property expression: zero-length");
+    }
     var parts = [];
     var start = 0;
     var inString = false;
@@ -139,7 +146,7 @@ function normalisePropertyExpression(str) {
         var c = str[i];
         if (!inString) {
             if (c === "'" || c === '"') {
-                if (!inBox) {
+                if (i != start) {
                     throw new Error("Invalid property expression: unexpected "+c+" at position "+i);
                 }
                 inString = true;
@@ -160,7 +167,7 @@ function normalisePropertyExpression(str) {
                 if (i===length-1) {
                     throw new Error("Invalid property expression: unterminated expression");
                 }
-                // Next char is a-z
+                // Next char is first char of an identifier: a-z 0-9 $ _
                 if (!/[a-z0-9\$\_]/i.test(str[i+1])) {
                     throw new Error("Invalid property expression: unexpected "+str[i+1]+" at position "+(i+1));
                 }
@@ -200,10 +207,15 @@ function normalisePropertyExpression(str) {
             }
         } else {
             if (c === quoteChar) {
+                if (i-start === 0) {
+                    throw new Error("Invalid property expression: zero-length string at position "+start);
+                }
                 parts.push(str.substring(start,i));
-                // Next char must be a ]
-                if (!/\]/.test(str[i+1])) {
+                // If inBox, next char must be a ]. Otherwise it may be [ or .
+                if (inBox && !/\]/.test(str[i+1])) {
                     throw new Error("Invalid property expression: unexpected array expression at position "+start);
+                } else if (!inBox && i+1!==length && !/[\[\.]/.test(str[i+1])) {
+                    throw new Error("Invalid property expression: unexpected "+str[i+1]+" expression at position "+(i+1));
                 }
                 start = i+1;
                 inString = false;
@@ -302,6 +314,9 @@ function evaluateNodeProperty(value, type, node, msg) {
         return new RegExp(value);
     } else if (type === 'date') {
         return Date.now();
+    } else if (type === 'bin') {
+        var data = JSON.parse(value);
+        return Buffer.from(data);
     } else if (type === 'msg' && msg) {
         return getMessageProperty(msg,value);
     } else if (type === 'flow' && node) {
@@ -310,10 +325,47 @@ function evaluateNodeProperty(value, type, node, msg) {
         return node.context().global.get(value);
     } else if (type === 'bool') {
         return /^true$/i.test(value);
+    } else if (type === 'jsonata') {
+        var expr = prepareJSONataExpression(value,node);
+        return evaluateJSONataExpression(expr,msg);
     }
     return value;
 }
 
+function prepareJSONataExpression(value,node) {
+    var expr = jsonata(value);
+    expr.assign('flowContext',function(val) {
+        return node.context().flow.get(val);
+    });
+    expr.assign('globalContext',function(val) {
+        return node.context().global.get(val);
+    });
+    expr.registerFunction('clone', cloneMessage, '<(oa)-:o>');
+    expr._legacyMode = /(^|[^a-zA-Z0-9_'"])msg([^a-zA-Z0-9_'"]|$)/.test(value);
+    return expr;
+}
+
+function evaluateJSONataExpression(expr,msg) {
+    var context = msg;
+    if (expr._legacyMode) {
+        context = {msg:msg};
+    }
+    return expr.evaluate(context);
+}
+
+
+function normaliseNodeTypeName(name) {
+    var result = name.replace(/[^a-zA-Z0-9]/g, " ");
+    result = result.trim();
+    result = result.replace(/ +/g, " ");
+    result = result.replace(/ ./g,
+        function(s) {
+            return s.charAt(1).toUpperCase();
+        }
+    );
+    result = result.charAt(0).toLowerCase() + result.slice(1);
+    return result;
+}
 
 module.exports = {
     ensureString: ensureString,
@@ -324,5 +376,8 @@ module.exports = {
     getMessageProperty: getMessageProperty,
     setMessageProperty: setMessageProperty,
     evaluateNodeProperty: evaluateNodeProperty,
-    normalisePropertyExpression: normalisePropertyExpression
+    normalisePropertyExpression: normalisePropertyExpression,
+    normaliseNodeTypeName: normaliseNodeTypeName,
+    prepareJSONataExpression: prepareJSONataExpression,
+    evaluateJSONataExpression: evaluateJSONataExpression
 };

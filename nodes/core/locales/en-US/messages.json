@@ -5,7 +5,8 @@
             "topic": "Topic",
             "name": "Name",
             "username": "Username",
-            "password": "Password"
+            "password": "Password",
+            "property": "Property"
         },
         "status": {
             "connected": "connected",
@@ -59,16 +60,18 @@
             "Sunday"
         ],
         "on": "on",
-        "onstart": "Inject once at start?",
-        "tip": "<b>Note:</b> \"interval between times\" and \"at a specific time\" will use cron.<br/>See info box for details.",
+        "onstart": "Inject once after",
+        "onceDelay": "seconds, then",
+        "tip": "<b>Note:</b> \"interval between times\" and \"at a specific time\" will use cron.<br/>\"interval\" should be less than 596 hours.<br/>See info box for details.",
         "success": "Successfully injected: __label__",
         "errors": {
-            "failed": "inject failed, see log for details"
+            "failed": "inject failed, see log for details",
+            "toolong": "Interval too large"
         }
     },
     "catch": {
-        "catch": "catch all",
-        "catchNodes": "catch (__number__)",
+        "catch": "catch: all",
+        "catchNodes": "catch: __number__",
         "label": {
             "source": "Catch errors from",
             "node": "node",
@@ -83,8 +86,8 @@
         }
     },
     "status": {
-        "status": "status (all)",
-        "statusNodes": "status (__number__)",
+        "status": "status: all",
+        "statusNodes": "status: __number__",
         "label": {
             "source": "Report status from",
             "node": "node",
@@ -102,9 +105,13 @@
         "output": "Output",
         "msgprop": "message property",
         "msgobj": "complete msg object",
-        "to": "to",
+        "to": "To",
         "debtab": "debug tab",
         "tabcon": "debug tab and console",
+        "toSidebar": "debug window",
+        "toConsole": "system console",
+        "toStatus": "node status (32 characters)",
+        "severity": "Level",
         "notification": {
             "activated": "Successfully activated: __label__",
             "deactivated": "Successfully deactivated: __label__"
@@ -112,75 +119,112 @@
         "sidebar": {
             "label": "debug",
             "name": "Debug messages",
-            "filterAll": "all flows",
-            "filterCurrent": "current flow"
+            "filterAll": "all nodes",
+            "filterSelected": "selected nodes",
+            "filterCurrent": "current flow",
+            "debugNodes": "Debug nodes",
+            "clearLog": "clear log",
+            "openWindow": "open in new window"
+        },
+        "messageMenu": {
+            "collapseAll": "Collapse all paths",
+            "clearPinned": "Clear pinned paths",
+            "filterNode": "Filter this node",
+            "clearFilter": "Clear filter"
         }
     },
     "link": {
         "linkIn": "link in",
         "linkOut": "link out",
         "label": {
-            "event": "Event name"
+            "event": "Event name",
+            "node": "name",
+            "type": "flow",
+            "sortByFlow":"Sort by flow",
+            "sortByLabel": "Sort by name"
         }
     },
     "tls": {
         "tls": "TLS configuration",
         "label": {
+            "use-local-files": "Use key and certificates from local files",
+            "upload": "Upload",
             "cert": "Certificate",
             "key": "Private Key",
+            "passphrase": "Passphrase",
             "ca": "CA Certificate",
             "verify-server-cert":"Verify server certificate"
         },
         "placeholder": {
             "cert":"path to certificate (PEM format)",
             "key":"path to private key (PEM format)",
-            "ca":"path to CA certificate (PEM format)"
+            "ca":"path to CA certificate (PEM format)",
+            "passphrase":"private key passphrase (optional)"
         },
         "error": {
             "missing-file": "No certificate/key file provided"
         }
     },
     "exec": {
+        "exec": "exec",
+        "spawn": "spawn",
         "label": {
             "command": "Command",
             "append": "Append",
             "timeout": "Timeout",
-            "timeoutplace": "optional"
+            "timeoutplace": "optional",
+            "return": "Output",
+            "seconds": "seconds"
         },
         "placeholder": {
             "extraparams": "extra input parameters"
         },
-        "spawn": "Use spawn() instead of exec()?"
+        "opt": {
+            "exec": "when the command is complete - exec mode",
+            "spawn": "while the command is running - spawn mode"
+        },
+        "oldrc": "Use old style output (compatibility mode)"
     },
     "function": {
+        "function": "",
         "label": {
             "function": "Function",
             "outputs": "Outputs"
         },
         "error": {
-            "inputListener":"Cannot add listener to 'input' event within Function"
+            "inputListener":"Cannot add listener to 'input' event within Function",
+            "non-message-returned":"Function tried to send a message of type __type__"
         },
         "tip": "See the Info tab for help writing functions."
     },
     "template": {
+        "template": "template",
         "label": {
             "template": "Template",
             "property": "Set property",
             "format": "Syntax Highlight",
             "syntax": "Format",
+            "output": "Output as",
             "mustache": "Mustache template",
-            "plain": "Plain text"
+            "plain": "Plain text",
+            "json": "Parsed JSON",
+            "yaml": "Parsed YAML",
+            "none": "none"
         },
         "templatevalue": "This is the payload: {{payload}} !"
     },
     "delay": {
         "action": "Action",
         "for": "For",
-        "delaymsg": "Delay message",
+        "delaymsg": "Delay each message",
+        "delayfixed": "Fixed delay",
+        "delayvarmsg": "Override delay with msg.delay",
         "randomdelay": "Random delay",
-        "limitrate": "Limit rate to",
-        "fairqueue": "Topic based fair queue",
-        "timedqueue": "Timed release queue",
+        "limitrate": "Rate Limit",
+        "limitall": "All messages",
+        "limittopic": "For each msg.topic",
+        "fairqueue": "Send each topic in turn",
+        "timedqueue": "Send all topics",
         "milisecs": "Miliseconds",
         "secs": "Seconds",
         "sec": "Second",
@@ -191,15 +235,16 @@
         "days": "Days",
         "day": "Day",
         "between": "Between",
+        "and": "&",
         "rate": "Rate",
         "msgper": "msg(s) per",
         "dropmsg": "drop intermediate messages",
         "label": {
             "delay": "delay",
+            "variable": "variable",
             "limit": "limit",
+            "limitTopic": "limit topic",
             "random": "random",
-            "queue": "queue",
-            "timed": "releases per",
             "units" : {
                 "second": {
                     "plural" : "Seconds",
@@ -231,13 +276,17 @@
         "output": {
             "string": "the string",
             "number": "the number",
-            "existing": "the existing msg.payload",
-            "original": "the original msg.payload",
-            "latest": "the latest msg.payload",
+            "existing": "the existing msg object",
+            "original": "the original msg object",
+            "latest": "the latest msg object",
             "nothing": "nothing"
         },
         "wait-reset": "wait to be reset",
         "wait-for": "wait for",
+        "wait-loop": "resend it every",
+        "for": "Handling",
+        "bytopics": "each msg.topic independently",
+        "alltopics": "all messages",
         "duration": {
             "ms": "Milliseconds",
             "s": "Seconds",
@@ -248,6 +297,7 @@
         "label": {
             "trigger": "trigger",
             "trigger-block": "trigger & block",
+            "trigger-loop": "resend every",
             "reset": "Reset the trigger if:",
             "resetMessage":"msg.reset is set",
             "resetPayload":"msg.payload equals",
@@ -255,11 +305,12 @@
         }
     },
     "comment": {
+        "comment": "comment",
         "label": {
             "title": "Title",
             "body": "Body"
         },
-        "tip": "Tip: The text can be styled as <a href=\"https://help.github.com/articles/markdown-basics/\" target=\"_blank\">Github flavoured Markdown</a>"
+        "tip": "Tip: The body text can be styled as <a href=\"https://help.github.com/articles/markdown-basics/\" target=\"_blank\">Github flavoured Markdown</a>"
     },
     "unknown": {
         "label": {
@@ -270,7 +321,9 @@
     "mqtt": {
         "label": {
             "broker": "Server",
+            "example": "e.g. localhost",
             "qos": "QoS",
+            "retain": "Retain",
             "clientid": "Client ID",
             "port": "Port",
             "keepalive": "Keep alive time (s)",
@@ -280,17 +333,22 @@
             "verify-server-cert":"Verify server certificate",
             "compatmode": "Use legacy MQTT 3.1 support"
         },
+        "sections-label":{
+            "birth-message": "Message sent on connection (birth message)",
+            "will-message":"Message sent on an unexpected disconnection (will message)",
+            "close-message":"Message sent before disconnecting (close message)"
+        },
         "tabs-label": {
             "connection": "Connection",
             "security": "Security",
-            "will": "Will Message",
-            "birth": "Birth Message"
+            "messages": "Messages"
         },
         "placeholder": {
             "clientid": "Leave blank for auto generated",
             "clientid-nonclean":"Must be set for non-clean sessions",
             "will-topic": "Leave blank to disable will message",
-            "birth-topic": "Leave blank to disable birth message"
+            "birth-topic": "Leave blank to disable birth message",
+            "close-topic": "Leave blank to disable close message"
         },
         "state": {
             "connected": "Connected to broker: __broker__",
@@ -313,7 +371,11 @@
             "method": "Method",
             "url": "URL",
             "doc": "Docs",
-            "return": "Return"
+            "return": "Return",
+            "upload": "Accept file uploads?",
+            "status": "Status code",
+            "headers": "Headers",
+            "other": "other"
         },
         "setby": "- set by msg.method -",
         "basicauth": "Use basic authentication",
@@ -334,7 +396,8 @@
             "no-response": "No response object",
             "json-error": "JSON parse error",
             "no-url": "No url specified",
-            "deprecated-call":"Deprecated call to __method__"
+            "deprecated-call":"Deprecated call to __method__",
+            "invalid-transport":"non-http transport requested"
         },
         "status": {
             "requesting": "requesting"
@@ -348,8 +411,9 @@
         },
         "listenon": "Listen on",
         "connectto": "Connect to",
-        "payload": "Send/Receive payload",
-        "message": "Send/Receive entire message",
+        "sendrec": "Send/Receive",
+        "payload": "payload",
+        "message": "entire message",
         "tip": {
             "path1": "By default, <code>payload</code> will contain the data to be sent over, or received from a websocket. The listener can be configured to send or receive the entire message object as a JSON formatted string.",
             "path2": "This path will be relative to ",
@@ -363,8 +427,10 @@
         }
     },
     "watch": {
+        "watch": "watch",
         "label": {
-            "files": "File(s)"
+            "files": "File(s)",
+            "recursive": "Watch sub-directories recursively"
         },
         "placeholder": {
             "files": "Comma-separated list of files and/or directories"
@@ -382,7 +448,9 @@
             "close-connection": "Close connection after each message is sent?",
             "decode-base64": "Decode Base64 message?",
             "server": "Server",
-            "return": "Return"
+            "return": "Return",
+            "ms": "ms",
+            "chars": "chars"
         },
         "type": {
             "listen": "Listen on",
@@ -400,7 +468,8 @@
             "timeout": "after a fixed timeout of",
             "character": "when character received is",
             "number": "a fixed number of chars",
-            "never": "never - keep connection open"
+            "never": "never - keep connection open",
+            "immed": "immediately - don't wait for reply"
         },
         "status": {
             "connecting": "connecting to __host__:__port__",
@@ -432,15 +501,15 @@
             "using": "using",
             "output": "Output",
             "group": "Group",
-            "interface": "Local IP",
-            "interfaceprompt": "(optional) local ip address to bind to",
+            "interface": "Local IF",
             "send": "Send a",
             "toport": "to port",
             "address": "Address",
             "decode-base64": "Decode Base64 encoded payload?"
         },
         "placeholder": {
-            "interface": "(optional) ip address of eth0",
+            "interface": "(optional) local interface or address to bind to",
+            "interfaceprompt": "(optional) local interface or address to bind to",
             "address": "destination ip"
         },
         "udpmsgs": "udp messages",
@@ -468,10 +537,11 @@
             "mc-group": "udp multicast group __group__",
             "listener-stopped": "udp listener stopped",
             "output-stopped": "udp output stopped",
-            "mc-ready": "udp multicast ready: __outport__ -> __host__:__port__",
+            "mc-ready": "udp multicast ready: __iface__:__outport__ -> __host__:__port__",
             "bc-ready": "udp broadcast ready: __outport__ -> __host__:__port__",
             "ready": "udp ready: __outport__ -> __host__:__port__",
-            "ready-nolocal": "udp ready: __host__:__port__"
+            "ready-nolocal": "udp ready: __host__:__port__",
+            "re-use": "udp re-use socket: __outport__ -> __host__:__port__"
         },
         "errors": {
             "access-error": "UDP access error, you may need root access for ports below 1024",
@@ -481,13 +551,16 @@
             "ip-notset": "udp: ip address not set",
             "port-notset": "udp: port not set",
             "port-invalid": "udp: port number not valid",
-            "alreadyused": "udp: port already in use"
+            "alreadyused": "udp: port __port__ already in use",
+            "ifnotfound": "udp: interface __iface__ not found"
         }
     },
     "switch": {
+        "switch": "switch",
         "label": {
             "property": "Property",
-            "rule": "rule"
+            "rule": "rule",
+            "repair" :  "recreate message sequences"
         },
         "and": "and",
         "checkall": "checking all rules",
@@ -501,7 +574,16 @@
             "false":"is false",
             "null":"is null",
             "nnull":"is not null",
+            "istype":"is of type",
+            "head":"head",
+            "tail":"tail",
+            "index":"index between",
+            "exp":"JSONata exp",
             "else":"otherwise"
+        },
+        "errors": {
+            "invalid-expr": "Invalid JSONata expression: __error__",
+            "too-many" : "too many pending messages in switch node"
         }
     },
     "change": {
@@ -526,10 +608,12 @@
         },
         "errors": {
             "invalid-from": "Invalid 'from' property: __error__",
-            "invalid-json": "Invalid 'to' JSON property"
+            "invalid-json": "Invalid 'to' JSON property",
+            "invalid-expr": "Invalid JSONata expression: __error__"
         }
     },
     "range": {
+        "range": "range",
         "label": {
             "action": "Action",
             "inputrange": "Map the input range",
@@ -544,7 +628,7 @@
             "maxout": "e.g. 255"
         },
         "scale": {
-            "payload": "Scale msg.payload",
+            "payload": "Scale the message property",
             "limit": "Scale and limit to the target range",
             "wrap": "Scale and wrap within the target range"
         },
@@ -557,9 +641,11 @@
         "label": {
             "columns": "Columns",
             "separator": "Separator",
-            "c2o": "CSV-to-Object options",
-            "o2c": "Object-to-CSV options",
+            "c2o": "CSV to Object options",
+            "o2c": "Object to CSV options",
             "input": "Input",
+            "skip-s": "Skip first",
+            "skip-e": "lines",
             "firstrow": "first row contains column names",
             "output": "Output",
             "includerow": "include column name row",
@@ -587,14 +673,15 @@
             "windows": "Windows (\\r\\n)"
         },
         "errors": {
-            "csv_js": "This node only handles csv strings or js objects.",
-            "obj_csv": "No columns template specified for object -> csv."
+            "csv_js": "This node only handles CSV strings or js objects.",
+            "obj_csv": "No columns template specified for object -> CSV."
         }
     },
     "html": {
         "label": {
-            "select": "Select",
-            "output": "Output"
+            "select": "Selector",
+            "output": "Output",
+            "in": "in"
         },
         "output": {
             "html": "the html content of the elements",
@@ -604,10 +691,27 @@
         "format": {
             "single": "as a single message containing an array",
             "multi": "as multiple messages, one for each element"
-        },
-        "tip": "Tip: The <b>Select</b> value is a <a href=\"https://github.com/fb55/CSSselect#user-content-supported-selectors\" target=\"_blank\"><i><u>CSS Selector</u></i></a>, similar to a jQuery selector."
+        }
     },
     "json": {
+        "errors": {
+            "dropped-object": "Ignored non-object payload",
+            "dropped": "Ignored unsupported payload type",
+            "dropped-error": "Failed to convert payload"
+        },
+        "label": {
+            "o2j": "Object to JSON options",
+            "pretty": "Format JSON string",
+            "action": "Action",
+            "property": "Property",
+            "actions": {
+                "toggle": "Convert between JSON String & Object",
+                "str":"Always convert to JSON String",
+                "obj":"Always convert to JavaScript Object"
+            }
+        }
+    },
+    "yaml": {
         "errors": {
             "dropped-object": "Ignored non-object payload",
             "dropped": "Ignored unsupported payload type",
@@ -616,11 +720,11 @@
     },
     "xml": {
         "label": {
-            "represent": "Represent XML tag attributes as a property named",
-            "prefix": "Prefix to access character content",
-            "advanced": "Advanced options"
+            "represent": "Property name for XML tag attributes",
+            "prefix": "Property name for tag text content",
+            "advanced": "Advanced options",
+            "x2o": "XML to Object options"
         },
-        "tip": "There is no simple way to convert XML attributes to JSON so the approach taken here is to add a property, named $ by default, to the JSON structure.",
         "errors": {
             "xml_js": "This node only handles xml strings or js objects."
         }
@@ -634,6 +738,7 @@
             "type": "Type",
             "initpin": "Initialise pin state?",
             "debounce": "Debounce",
+            "freq": "Frequency",
             "button": "Button",
             "pimouse": "Pi Mouse",
             "pikeyboard": "Pi Keyboard",
@@ -648,6 +753,7 @@
         },
         "digout": "Digital output",
         "pwmout": "PWM output",
+        "servo": "Servo output",
         "initpin0": "initial level of pin - low (0)",
         "initpin1": "initial level of pin - high (1)",
         "left": "left",
@@ -661,19 +767,23 @@
             "pin": "<b>Pins in Use</b>: ",
             "in": "Tip: Only Digital Input is supported - input must be 0 or 1.",
             "dig": "Tip: For digital output - input must be 0 or 1.",
-            "pwm": "Tip: For PWM output - input must be between 0 to 100."
+            "pwm": "Tip: For PWM output - input must be between 0 to 100; setting high frequency might occupy more CPU than expected.",
+            "ser": "<b>Tip</b>: For Servo output - input must be between 0 to 100. 50 is centre."
         },
         "types": {
             "digout": "digital output",
             "input": "input",
             "pullup": "input with pull up",
             "pulldown": "input with pull down",
-            "pwmout": "PWM output"
+            "pwmout": "PWM output",
+            "servo": "Servo output"
         },
         "status": {
             "stopped": "stopped",
             "closed": "closed",
-            "not-running": "not running"
+            "not-running": "not running",
+            "not-available": "not available",
+            "na": "N/A : __value__"
         },
         "errors": {
             "ignorenode": "Ignoring Raspberry Pi specific node",
@@ -692,6 +802,7 @@
         }
     },
     "tail": {
+        "tail": "tail",
         "label": {
             "filename": "Filename",
             "type": "File type",
@@ -711,8 +822,11 @@
             "action": "Action",
             "addnewline": "Add newline (\\n) to each payload?",
             "createdir": "Create directory if it doesn't exist?",
-            "outputas": "Output as",
+            "outputas": "Output",
+            "breakchunks": "Break into chunks",
+            "breaklines": "Break into lines",
             "filelabel": "file",
+            "sendError": "Send message on error (legacy mode)",
             "deletelabel": "delete __file__"
         },
         "action": {
@@ -721,8 +835,10 @@
             "delete": "delete file"
         },
         "output": {
-            "utf8": "a utf8 string",
-            "buffer": "a Buffer"
+            "utf8": "a single utf8 string",
+            "buffer": "a single Buffer object",
+            "lines": "a msg per line",
+            "stream": "a stream of Buffers"
         },
         "status": {
             "wrotefile": "wrote to file: __file__",
@@ -737,6 +853,106 @@
             "appendfail": "failed to append to file: __error__",
             "createfail": "failed to create file: __error__"
         },
-        "tip": "Tip: You should fully path the Filename."
+        "tip": "Tip: The filename should be an absolute path, otherwise it will be relative to the working directory of the Node-RED process."
+    },
+    "split": {
+        "split": "split",
+        "intro":"Split <code>msg.payload</code> based on type:",
+        "object":"<b>Object</b>",
+        "objectSend":"Send a message for each key/value pair",
+        "strBuff":"<b>String</b> / <b>Buffer</b>",
+        "array":"<b>Array</b>",
+        "splitUsing":"Split using",
+        "splitLength":"Fixed length of",
+        "stream":"Handle as a stream of messages",
+        "addname":" Copy key to "
+    },
+    "join":{
+        "join": "join",
+        "mode":{
+            "mode":"Mode",
+            "auto":"automatic",
+            "merge":"merge sequences",
+            "reduce":"reduce sequence",
+            "custom":"manual"
+        },
+        "combine":"Combine each",
+        "create":"to create",
+        "type":{
+            "string":"a String",
+            "array":"an Array",
+            "buffer":"a Buffer",
+            "object":"a key/value Object",
+            "merged":"a merged Object"
+        },
+        "using":"using the value of",
+        "key":"as the key",
+        "joinedUsing":"joined using",
+        "send":"Send the message:",
+        "afterCount":"After a number of message parts",
+        "count":"count",
+        "subsequent":"and every subsequent message.",
+        "afterTimeout":"After a timeout following the first message",
+        "seconds":"seconds",
+        "complete":"After a message with the <code>msg.complete</code> property set",
+        "tip":"This mode assumes this node is either paired with a <i>split</i> node or the received messages will have a properly configured <code>msg.parts</code> property.",
+        "too-many" : "too many pending messages in join node",
+        "merge": {
+            "topics-label":"Merged Topics",
+            "topics":"topics",
+            "topic" : "topic",
+            "on-change":"Send merged message on arrival of a new topic"
+        },
+        "reduce": {
+            "exp": "Reduce exp",
+            "exp-value": "exp",
+            "init": "Initial value",
+            "right": "Evaluate in reverse order (last to first)",
+            "fixup": "Fix-up exp"
+        },
+        "errors": {
+            "invalid-expr": "Invalid JSONata expression: __error__"
+        }
+    },
+    "sort" : {
+        "sort": "sort",
+        "target" : "Sort",
+        "seq" : "message sequence",
+        "key" : "Key",
+        "elem" : "element value",
+        "order" : "Order",
+        "ascending" : "ascending",
+        "descending" : "descending",
+        "as-number" : "as number",
+        "invalid-exp" : "invalid JSONata expression in sort node",
+        "too-many" : "too many pending messages in sort node",
+        "clear" : "clear pending message in sort node"
+    },
+    "batch" : {
+        "batch": "batch",
+        "mode": {
+            "label" : "Mode",
+            "num-msgs" : "Group by number of messages",
+            "interval" : "Group by time interval",
+            "concat" : "Concatenate sequences"
+        },
+        "count": {
+            "label" : "Number of messages",
+            "overlap" : "Overlap",
+            "count" : "count",
+            "invalid" : "Invalid count and overlap"
+        },
+        "interval": {
+            "label" : "Interval",
+            "seconds" : "seconds",
+            "empty" : "send empty message when no message arrives"
+        },
+        "concat": {
+            "topics-label": "Topics",
+            "topic" : "topic"
+        },
+        "too-many" : "too many pending messages in batch node",
+        "unexpected" : "unexpected mode",
+        "no-parts" : "no parts property in message"
     }
 }

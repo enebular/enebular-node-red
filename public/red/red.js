@@ -1,5 +1,5 @@
 /**
- * Copyright 2013, 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,400 +13,494 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  **/
-var RED = (function() {
-  function loadNodeList() {
-    $.ajax({
-      headers: {
-        Accept: 'application/json'
-      },
-      cache: false,
-      url: 'nodes',
-      success: function(data) {
-        RED.nodes.setNodeList(data)
+(function() {
 
-        var nsCount = 0
-        for (var i = 0; i < data.length; i++) {
-          var ns = data[i]
-          if (ns.module != 'node-red') {
-            nsCount++
-            RED.i18n.loadCatalog(ns.id, function() {
-              nsCount--
-              if (nsCount === 0) {
-                loadNodes()
-              }
-            })
-          }
+    function appendNodeConfig(nodeConfig) {
+        var m = /<!-- --- \[red-module:(\S+)\] --- -->/.exec(nodeConfig.trim());
+        var moduleId;
+        if (m) {
+            moduleId = m[1];
+        } else {
+            moduleId = "unknown";
         }
-        if (nsCount === 0) {
-          loadNodes()
+        try {
+            $("body").append(nodeConfig);
+        } catch(err) {
+            RED.notify(RED._("notification.errors.failedToAppendNode",{module:moduleId, error:err.toString()}),{
+                type: "error",
+                timeout: 10000
+            });
+            console.log("["+moduleId+"] "+err.toString());
         }
-      }
-    })
-  }
-
-  function loadNodes() {
-    $.ajax({
-      headers: {
-        Accept: 'text/html'
-      },
-      cache: false,
-      url: 'nodes',
-      success: function(data) {
-        $('body').append(data)
-        $('body').i18n()
-        $('#palette > .palette-spinner').hide()
-        $('.palette-scroll').removeClass('hide')
-        $('#palette-search').removeClass('hide')
-        loadFlows()
-      }
-    })
-  }
-
-  function loadFlows() {
-    $.ajax({
-      headers: {
-        Accept: 'application/json'
-      },
-      cache: false,
-      url: 'flows',
-      success: function(nodes) {
-        var currentHash = window.location.hash
-        RED.nodes.version(nodes.rev)
-        RED.nodes.import(nodes.flows)
-        RED.nodes.dirty(false)
-        RED.view.redraw(true)
-        if (/^#flow\/.+$/.test(currentHash)) {
-          RED.workspaces.show(currentHash.substring(6))
-        }
-        RED.comms.subscribe('status/#', function(topic, msg) {
-          var parts = topic.split('/')
-          var node = RED.nodes.node(parts[1])
-          if (node) {
-            if (msg.hasOwnProperty('text')) {
-              msg.text = node._(msg.text.toString(), {
-                defaultValue: msg.text.toString()
-              })
-            }
-            node.status = msg
-            if (statusEnabled) {
-              node.dirty = true
-              RED.view.redraw()
-            }
-          }
-        })
-        RED.comms.subscribe('node/#', function(topic, msg) {
-          var i, m
-          var typeList
-          var info
-
-          if (topic == 'node/added') {
-            var addedTypes = []
-            for (i = 0; i < msg.length; i++) {
-              m = msg[i]
-              var id = m.id
-              RED.nodes.addNodeSet(m)
-              addedTypes = addedTypes.concat(m.types)
-              RED.i18n.loadCatalog(id, function() {
-                $.get('nodes/' + id, function(data) {
-                  $('body').append(data)
-                })
-              })
-            }
-            if (addedTypes.length) {
-              typeList =
-                '<ul><li>' + addedTypes.join('</li><li>') + '</li></ul>'
-              RED.notify(
-                RED._('palette.event.nodeAdded', { count: addedTypes.length }) +
-                  typeList,
-                'success'
-              )
-            }
-          } else if (topic == 'node/removed') {
-            for (i = 0; i < msg.length; i++) {
-              m = msg[i]
-              info = RED.nodes.removeNodeSet(m.id)
-              if (info.added) {
-                typeList = '<ul><li>' + m.types.join('</li><li>') + '</li></ul>'
-                RED.notify(
-                  RED._('palette.event.nodeRemoved', {
-                    count: m.types.length
-                  }) + typeList,
-                  'success'
-                )
-              }
-            }
-          } else if (topic == 'node/enabled') {
-            if (msg.types) {
-              info = RED.nodes.getNodeSet(msg.id)
-              if (info.added) {
-                RED.nodes.enableNodeSet(msg.id)
-                typeList =
-                  '<ul><li>' + msg.types.join('</li><li>') + '</li></ul>'
-                RED.notify(
-                  RED._('palette.event.nodeEnabled', {
-                    count: msg.types.length
-                  }) + typeList,
-                  'success'
-                )
-              } else {
-                $.get('nodes/' + msg.id, function(data) {
-                  $('body').append(data)
-                  typeList =
-                    '<ul><li>' + msg.types.join('</li><li>') + '</li></ul>'
-                  RED.notify(
-                    RED._('palette.event.nodeAdded', {
-                      count: msg.types.length
-                    }) + typeList,
-                    'success'
-                  )
-                })
-              }
-            }
-          } else if (topic == 'node/disabled') {
-            if (msg.types) {
-              RED.nodes.disableNodeSet(msg.id)
-              typeList = '<ul><li>' + msg.types.join('</li><li>') + '</li></ul>'
-              RED.notify(
-                RED._('palette.event.nodeDisabled', {
-                  count: msg.types.length
-                }) + typeList,
-                'success'
-              )
-            }
-          }
-          // Refresh flow library to ensure any examples are updated
-          RED.library.loadFlowLibrary()
-        })
-      }
-    })
-  }
-
-  function showAbout() {
-    $.get('red/about', function(data) {
-      var aboutHeader =
-        '<div style="text-align:center;">' +
-        '<img width="50px" src="red/images/node-red-icon.svg" />' +
-        '</div>'
-
-      RED.sidebar.info.set(aboutHeader + marked(data))
-      RED.sidebar.info.show()
-    })
-  }
-
-  var statusEnabled = false
-  function toggleStatus(state) {
-    statusEnabled = state
-    RED.view.status(statusEnabled)
-  }
-
-  function loadEditor() {
-    var menuOptions = []
-    menuOptions.push({
-      id: 'menu-item-view-menu',
-      label: RED._('menu.label.view.view'),
-      options: [
-        {
-          id: 'menu-item-view-show-grid',
-          label: RED._('menu.label.view.showGrid'),
-          toggle: true,
-          onselect: RED.view.toggleShowGrid
-        },
-        {
-          id: 'menu-item-view-snap-grid',
-          label: RED._('menu.label.view.snapGrid'),
-          toggle: true,
-          onselect: RED.view.toggleSnapGrid
-        },
-        {
-          id: 'menu-item-status',
-          label: RED._('menu.label.displayStatus'),
-          toggle: true,
-          onselect: toggleStatus,
-          selected: true
-        },
-        null,
-        // {id:"menu-item-bidi",label:RED._("menu.label.view.textDir"),options:[
-        //     {id:"menu-item-bidi-default",toggle:"text-direction",label:RED._("menu.label.view.defaultDir"),selected: true, onselect:function(s) { if(s){RED.text.bidi.setTextDirection("")}}},
-        //     {id:"menu-item-bidi-ltr",toggle:"text-direction",label:RED._("menu.label.view.ltr"), onselect:function(s) { if(s){RED.text.bidi.setTextDirection("ltr")}}},
-        //     {id:"menu-item-bidi-rtl",toggle:"text-direction",label:RED._("menu.label.view.rtl"), onselect:function(s) { if(s){RED.text.bidi.setTextDirection("rtl")}}},
-        //     {id:"menu-item-bidi-auto",toggle:"text-direction",label:RED._("menu.label.view.auto"), onselect:function(s) { if(s){RED.text.bidi.setTextDirection("auto")}}}
-        // ]},
-        // null,
-        {
-          id: 'menu-item-sidebar',
-          label: RED._('menu.label.sidebar.show'),
-          toggle: true,
-          onselect: RED.sidebar.toggleSidebar,
-          selected: true
-        }
-      ]
-    })
-    menuOptions.push(null)
-    menuOptions.push({
-      id: 'menu-item-import',
-      label: RED._('menu.label.import'),
-      options: [
-        {
-          id: 'menu-item-import-clipboard',
-          label: RED._('menu.label.clipboard'),
-          onselect: RED.clipboard.import
-        },
-        {
-          id: 'menu-item-import-library',
-          label: RED._('menu.label.library'),
-          options: []
-        }
-      ]
-    })
-    menuOptions.push({
-      id: 'menu-item-export',
-      label: RED._('menu.label.export'),
-      disabled: true,
-      options: [
-        {
-          id: 'menu-item-export-clipboard',
-          label: RED._('menu.label.clipboard'),
-          disabled: true,
-          onselect: RED.clipboard.export
-        },
-        {
-          id: 'menu-item-export-library',
-          label: RED._('menu.label.library'),
-          disabled: true,
-          onselect: RED.library.export
-        }
-      ]
-    })
-    menuOptions.push(null)
-    menuOptions.push({
-      id: 'menu-item-search',
-      label: RED._('menu.label.search'),
-      onselect: RED.search.show
-    })
-    menuOptions.push(null)
-    menuOptions.push({
-      id: 'menu-item-config-nodes',
-      label: RED._('menu.label.displayConfig'),
-      onselect: function() {}
-    })
-    menuOptions.push({
-      id: 'menu-item-workspace',
-      label: RED._('menu.label.flows'),
-      options: [
-        {
-          id: 'menu-item-workspace-add',
-          label: RED._('menu.label.add'),
-          onselect: RED.workspaces.add
-        },
-        {
-          id: 'menu-item-workspace-edit',
-          label: RED._('menu.label.rename'),
-          onselect: RED.workspaces.edit
-        },
-        {
-          id: 'menu-item-workspace-delete',
-          label: RED._('menu.label.delete'),
-          onselect: RED.workspaces.remove
-        }
-      ]
-    })
-    menuOptions.push({
-      id: 'menu-item-subflow',
-      label: RED._('menu.label.subflows'),
-      options: [
-        {
-          id: 'menu-item-subflow-create',
-          label: RED._('menu.label.createSubflow'),
-          onselect: RED.subflow.createSubflow
-        },
-        {
-          id: 'menu-item-subflow-convert',
-          label: RED._('menu.label.selectionToSubflow'),
-          disabled: true,
-          onselect: RED.subflow.convertToSubflow
-        }
-      ]
-    })
-    menuOptions.push(null)
-    if (RED.settings.theme('palette.editable') !== false) {
-      RED.palette.editor.init()
-      menuOptions.push({
-        id: 'menu-item-edit-palette',
-        label: RED._('menu.label.editPalette'),
-        onselect: RED.palette.editor.show
-      })
-      menuOptions.push(null)
     }
 
-    menuOptions.push({
-      id: 'menu-item-keyboard-shortcuts',
-      label: RED._('menu.label.keyboardShortcuts'),
-      onselect: RED.keyboard.showHelp
-    })
-    menuOptions.push({
-      id: 'menu-item-help',
-      label: RED.settings.theme(
-        'menu.menu-item-help.label',
-        'Node-RED website'
-      ),
-      href: RED.settings.theme(
-        'menu.menu-item-help.url',
-        'http://nodered.org/docs'
-      )
-    })
-    menuOptions.push({
-      id: 'menu-item-node-red-version',
-      label: 'v' + RED.settings.version,
-      onselect: showAbout
-    })
-
-    RED.menu.init({ id: 'btn-sidemenu', options: menuOptions })
-
-    RED.user.init()
-
-    RED.library.init()
-    RED.palette.init()
-    RED.sidebar.init()
-    RED.subflow.init()
-    RED.workspaces.init()
-    RED.clipboard.init()
-    RED.search.init()
-    RED.view.init()
-    RED.editor.init()
-
-    RED.deploy.init(RED.settings.theme('deployButton', null))
-
-    RED.keyboard.add('workspace', /* ? */ 191, { shift: true }, function() {
-      RED.keyboard.showHelp()
-      d3.event.preventDefault()
-    })
-    RED.comms.connect()
-
-    $('#main-container').show()
-    $('.header-toolbar').show()
-
-    loadNodeList()
-  }
-
-  $(function() {
-    if (
-      window.location.hostname !== 'localhost' &&
-      window.location.hostname !== '127.0.0.1'
-    ) {
-      document.title = document.title + ' : ' + window.location.hostname
+    function loadNodeList() {
+        $.ajax({
+            headers: {
+                "Accept":"application/json"
+            },
+            cache: false,
+            url: 'nodes',
+            success: function(data) {
+                RED.nodes.setNodeList(data);
+                RED.i18n.loadNodeCatalogs(function() {
+                    loadIconList(loadNodes);
+                });
+            }
+        });
     }
 
-    ace.require('ace/ext/language_tools')
+    function loadIconList(done) {
+        $.ajax({
+            headers: {
+                "Accept":"application/json"
+            },
+            cache: false,
+            url: 'icons',
+            success: function(data) {
+                RED.nodes.setIconSets(data);
+                if (done) {
+                    done();
+                }
+            }
+        });
+    }
 
-    RED.i18n.init(function() {
-      RED.settings.init(loadEditor)
-    })
-  })
+    function loadNodes() {
+        $.ajax({
+            headers: {
+                "Accept":"text/html"
+            },
+            cache: false,
+            url: 'nodes',
+            success: function(data) {
+                var configs = data.trim().split(/(?=<!-- --- \[red-module:\S+\] --- -->)/);
+                configs.forEach(function(data) {
+                    appendNodeConfig(data);
+                });
 
-  return {}
-})()
+                $("body").i18n();
+                $("#palette > .palette-spinner").hide();
+                $(".palette-scroll").removeClass("hide");
+                $("#palette-search").removeClass("hide");
+                loadFlows(function() {
+                    if (RED.settings.theme("projects.enabled",false)) {
+                        RED.projects.refresh(function(activeProject) {
+                            RED.sidebar.info.refresh()
+                            if (!activeProject) {
+                                // Projects enabled but no active project
+                                RED.menu.setDisabled('menu-item-projects-open',true);
+                                RED.menu.setDisabled('menu-item-projects-settings',true);
+                                if (activeProject === false) {
+                                    // User previously decline the migration to projects.
+                                } else { // null/undefined
+                                    RED.projects.showStartup();
+                                }
+                            }
+                            completeLoad();
+                        });
+                    } else {
+                        // Projects disabled by the user
+                        RED.sidebar.info.refresh()
+                        completeLoad();
+                    }
+                });
+            }
+        });
+    }
+
+    function loadFlows(done) {
+        $.ajax({
+            headers: {
+                "Accept":"application/json",
+            },
+            cache: false,
+            url: 'flows',
+            success: function(nodes) {
+                if (nodes) {
+                    var currentHash = window.location.hash;
+                    RED.nodes.version(nodes.rev);
+                    RED.nodes.import(nodes.flows);
+                    RED.nodes.dirty(false);
+                    RED.view.redraw(true);
+                    if (/^#flow\/.+$/.test(currentHash)) {
+                        RED.workspaces.show(currentHash.substring(6));
+                    }
+                }
+                done();
+            }
+        });
+    }
+
+    function completeLoad() {
+        var persistentNotifications = {};
+        RED.comms.subscribe("notification/#",function(topic,msg) {
+            var parts = topic.split("/");
+            var notificationId = parts[1];
+            if (notificationId === "runtime-deploy") {
+                // handled in ui/deploy.js
+                return;
+            }
+            if (notificationId === "node") {
+                // handled below
+                return;
+            }
+            if (notificationId === "project-update") {
+                RED.nodes.clear();
+                RED.history.clear();
+                RED.view.redraw(true);
+                RED.projects.refresh(function() {
+                    loadFlows(function() {
+                        var project = RED.projects.getActiveProject();
+                        var message = {
+                            "change-branch":"Change to local branch '"+project.git.branches.local+"'",
+                            "merge-abort":"Git merge aborted",
+                            "loaded":"Project '"+msg.project+"' loaded",
+                            "updated":"Project '"+msg.project+"' updated",
+                            "pull":"Project '"+msg.project+"' reloaded",
+                            "revert": "Project '"+msg.project+"' reloaded",
+                            "merge-complete":"Git merge completed"
+                        }[msg.action];
+                        RED.notify("<p>"+message+"</p>");
+                        RED.sidebar.info.refresh()
+                    });
+                });
+                return;
+            }
+
+            if (msg.text) {
+                msg.default = msg.text;
+                var text = RED._(msg.text,msg);
+                var options = {
+                    type: msg.type,
+                    fixed: msg.timeout === undefined,
+                    timeout: msg.timeout,
+                    id: notificationId
+                }
+                if (notificationId === "runtime-state") {
+                    if (msg.error === "missing-types") {
+                        text+="<ul><li>"+msg.types.join("</li><li>")+"</li></ul>";
+                        if (!!RED.projects.getActiveProject()) {
+                            options.buttons = [
+                                {
+                                    text: "Manage project dependencies",
+                                    click: function() {
+                                        persistentNotifications[notificationId].hideNotification();
+                                        RED.projects.settings.show('deps');
+                                    }
+                                }
+                            ]
+                        // } else if (RED.settings.theme('palette.editable') !== false) {
+                        } else {
+                            options.buttons = [
+                                {
+                                    text: "Close",
+                                    click: function() {
+                                        persistentNotifications[notificationId].hideNotification();
+                                    }
+                                }
+                            ]
+                        }
+                    } else if (msg.error === "credentials_load_failed") {
+                        if (RED.settings.theme("projects.enabled",false)) {
+                            // projects enabled
+                            if (RED.user.hasPermission("projects.write")) {
+                                options.buttons = [
+                                    {
+                                        text: "Setup credentials",
+                                        click: function() {
+                                            persistentNotifications[notificationId].hideNotification();
+                                            RED.projects.showCredentialsPrompt();
+                                        }
+                                    }
+                                ]
+                            }
+                        } else {
+                            options.buttons = [
+                                {
+                                    text: "Close",
+                                    click: function() {
+                                        persistentNotifications[notificationId].hideNotification();
+                                    }
+                                }
+                            ]
+                        }
+                    } else if (msg.error === "missing_flow_file") {
+                        if (RED.user.hasPermission("projects.write")) {
+                            options.buttons = [
+                                {
+                                    text: "Setup project files",
+                                    click: function() {
+                                        persistentNotifications[notificationId].hideNotification();
+                                        RED.projects.showFilesPrompt();
+                                    }
+                                }
+                            ]
+                        }
+                    } else if (msg.error === "missing_package_file") {
+                        if (RED.user.hasPermission("projects.write")) {
+                            options.buttons = [
+                                {
+                                    text: "Create default package file",
+                                    click: function() {
+                                        persistentNotifications[notificationId].hideNotification();
+                                        RED.projects.createDefaultPackageFile();
+                                    }
+                                }
+                            ]
+                        }
+                    } else if (msg.error === "project_empty") {
+                        if (RED.user.hasPermission("projects.write")) {
+                            options.buttons = [
+                                {
+                                    text: "No thanks",
+                                    click: function() {
+                                        persistentNotifications[notificationId].hideNotification();
+                                    }
+                                },
+                                {
+                                    text: "Create default project files",
+                                    click: function() {
+                                        persistentNotifications[notificationId].hideNotification();
+                                        RED.projects.createDefaultFileSet();
+                                    }
+                                }
+                            ]
+                        }
+                    } else if (msg.error === "git_merge_conflict") {
+                        RED.nodes.clear();
+                        RED.sidebar.versionControl.refresh(true);
+                        if (RED.user.hasPermission("projects.write")) {
+                            options.buttons = [
+                                {
+                                    text: "Show merge conflicts",
+                                    click: function() {
+                                        persistentNotifications[notificationId].hideNotification();
+                                        RED.sidebar.versionControl.showLocalChanges();
+                                    }
+                                }
+                            ]
+                        }
+                    }
+                }
+                if (!persistentNotifications.hasOwnProperty(notificationId)) {
+                    persistentNotifications[notificationId] = RED.notify(text,options);
+                } else {
+                    persistentNotifications[notificationId].update(text,options);
+                }
+            } else if (persistentNotifications.hasOwnProperty(notificationId)) {
+                persistentNotifications[notificationId].close();
+                delete persistentNotifications[notificationId];
+            }
+        });
+        RED.comms.subscribe("status/#",function(topic,msg) {
+            var parts = topic.split("/");
+            var node = RED.nodes.node(parts[1]);
+            if (node) {
+                if (msg.hasOwnProperty("text")) {
+                    if (msg.text[0] !== ".") {
+                        msg.text = node._(msg.text.toString(),{defaultValue:msg.text.toString()});
+                    }
+                }
+                node.status = msg;
+                node.dirty = true;
+                RED.view.redraw();
+            }
+        });
+        RED.comms.subscribe("notification/node/#",function(topic,msg) {
+            var i,m;
+            var typeList;
+            var info;
+            if (topic == "notification/node/added") {
+                var addedTypes = [];
+                msg.forEach(function(m) {
+                    var id = m.id;
+                    RED.nodes.addNodeSet(m);
+                    addedTypes = addedTypes.concat(m.types);
+                    RED.i18n.loadCatalog(id, function() {
+                        $.get('nodes/'+id, function(data) {
+                            appendNodeConfig(data);
+                        });
+                    });
+                });
+                if (addedTypes.length) {
+                    typeList = "<ul><li>"+addedTypes.join("</li><li>")+"</li></ul>";
+                    RED.notify(RED._("palette.event.nodeAdded", {count:addedTypes.length})+typeList,"success");
+                }
+                loadIconList();
+            } else if (topic == "notification/node/removed") {
+                for (i=0;i<msg.length;i++) {
+                    m = msg[i];
+                    info = RED.nodes.removeNodeSet(m.id);
+                    if (info.added) {
+                        typeList = "<ul><li>"+m.types.join("</li><li>")+"</li></ul>";
+                        RED.notify(RED._("palette.event.nodeRemoved", {count:m.types.length})+typeList,"success");
+                    }
+                }
+                loadIconList();
+            } else if (topic == "notification/node/enabled") {
+                if (msg.types) {
+                    info = RED.nodes.getNodeSet(msg.id);
+                    if (info.added) {
+                        RED.nodes.enableNodeSet(msg.id);
+                        typeList = "<ul><li>"+msg.types.join("</li><li>")+"</li></ul>";
+                        RED.notify(RED._("palette.event.nodeEnabled", {count:msg.types.length})+typeList,"success");
+                    } else {
+                        $.get('nodes/'+msg.id, function(data) {
+                            appendNodeConfig(data);
+                            typeList = "<ul><li>"+msg.types.join("</li><li>")+"</li></ul>";
+                            RED.notify(RED._("palette.event.nodeAdded", {count:msg.types.length})+typeList,"success");
+                        });
+                    }
+                }
+            } else if (topic == "notification/node/disabled") {
+                if (msg.types) {
+                    RED.nodes.disableNodeSet(msg.id);
+                    typeList = "<ul><li>"+msg.types.join("</li><li>")+"</li></ul>";
+                    RED.notify(RED._("palette.event.nodeDisabled", {count:msg.types.length})+typeList,"success");
+                }
+            } else if (topic == "node/upgraded") {
+                RED.notify(RED._("palette.event.nodeUpgraded", {module:msg.module,version:msg.version}),"success");
+                RED.nodes.registry.setModulePendingUpdated(msg.module,msg.version);
+            }
+            // Refresh flow library to ensure any examples are updated
+            RED.library.loadFlowLibrary();
+        });
+    }
+
+    function showAbout() {
+        $.get('red/about', function(data) {
+            var aboutHeader = '<div style="text-align:center;">'+
+                                '<img width="50px" src="red/images/node-red-icon.svg" />'+
+                              '</div>';
+
+            RED.sidebar.info.set(aboutHeader+marked(data));
+            RED.sidebar.info.show();
+        });
+    }
+
+    function loadEditor() {
+        var menuOptions = [];
+        if (RED.settings.theme("projects.enabled",false)) {
+            menuOptions.push({id:"menu-item-projects-menu",label:"Projects",options:[
+                {id:"menu-item-projects-new",label:"New",disabled:false,onselect:"core:new-project"},
+                {id:"menu-item-projects-open",label:"Open",disabled:false,onselect:"core:open-project"},
+                {id:"menu-item-projects-settings",label:"Project Settings",disabled:false,onselect:"core:show-project-settings"}
+            ]});
+        }
+
+
+        menuOptions.push({id:"menu-item-view-menu",label:RED._("menu.label.view.view"),options:[
+            // {id:"menu-item-view-show-grid",setting:"view-show-grid",label:RED._("menu.label.view.showGrid"),toggle:true,onselect:"core:toggle-show-grid"},
+            // {id:"menu-item-view-snap-grid",setting:"view-snap-grid",label:RED._("menu.label.view.snapGrid"),toggle:true,onselect:"core:toggle-snap-grid"},
+            // {id:"menu-item-status",setting:"node-show-status",label:RED._("menu.label.displayStatus"),toggle:true,onselect:"core:toggle-status", selected: true},
+            //null,
+            // {id:"menu-item-bidi",label:RED._("menu.label.view.textDir"),options:[
+            //     {id:"menu-item-bidi-default",toggle:"text-direction",label:RED._("menu.label.view.defaultDir"),selected: true, onselect:function(s) { if(s){RED.text.bidi.setTextDirection("")}}},
+            //     {id:"menu-item-bidi-ltr",toggle:"text-direction",label:RED._("menu.label.view.ltr"), onselect:function(s) { if(s){RED.text.bidi.setTextDirection("ltr")}}},
+            //     {id:"menu-item-bidi-rtl",toggle:"text-direction",label:RED._("menu.label.view.rtl"), onselect:function(s) { if(s){RED.text.bidi.setTextDirection("rtl")}}},
+            //     {id:"menu-item-bidi-auto",toggle:"text-direction",label:RED._("menu.label.view.auto"), onselect:function(s) { if(s){RED.text.bidi.setTextDirection("auto")}}}
+            // ]},
+            // null,
+            {id:"menu-item-sidebar",label:RED._("menu.label.sidebar.show"),toggle:true,onselect:"core:toggle-sidebar", selected: true},
+            null
+        ]});
+        menuOptions.push(null);
+        menuOptions.push({id:"menu-item-import",label:RED._("menu.label.import"),options:[
+            {id:"menu-item-import-clipboard",label:RED._("menu.label.clipboard"),onselect:"core:show-import-dialog"},
+            {id:"menu-item-import-library",label:RED._("menu.label.library"),options:[]}
+        ]});
+        menuOptions.push({id:"menu-item-export",label:RED._("menu.label.export"),disabled:true,options:[
+            {id:"menu-item-export-clipboard",label:RED._("menu.label.clipboard"),disabled:true,onselect:"core:show-export-dialog"},
+            {id:"menu-item-export-library",label:RED._("menu.label.library"),disabled:true,onselect:"core:library-export"}
+        ]});
+        menuOptions.push(null);
+        menuOptions.push({id:"menu-item-search",label:RED._("menu.label.search"),onselect:"core:search"});
+        menuOptions.push(null);
+        menuOptions.push({id:"menu-item-config-nodes",label:RED._("menu.label.displayConfig"),onselect:"core:show-config-tab"});
+        menuOptions.push({id:"menu-item-workspace",label:RED._("menu.label.flows"),options:[
+            {id:"menu-item-workspace-add",label:RED._("menu.label.add"),onselect:"core:add-flow"},
+            {id:"menu-item-workspace-edit",label:RED._("menu.label.rename"),onselect:"core:edit-flow"},
+            {id:"menu-item-workspace-delete",label:RED._("menu.label.delete"),onselect:"core:remove-flow"}
+        ]});
+        menuOptions.push({id:"menu-item-subflow",label:RED._("menu.label.subflows"), options: [
+            {id:"menu-item-subflow-create",label:RED._("menu.label.createSubflow"),onselect:"core:create-subflow"},
+            {id:"menu-item-subflow-convert",label:RED._("menu.label.selectionToSubflow"),disabled:true,onselect:"core:convert-to-subflow"},
+        ]});
+        menuOptions.push(null);
+        if (RED.settings.theme('palette.editable') !== false) {
+            menuOptions.push({id:"menu-item-edit-palette",label:RED._("menu.label.editPalette"),onselect:"core:manage-palette"});
+            menuOptions.push(null);
+        }
+
+        menuOptions.push({id:"menu-item-user-settings",label:RED._("menu.label.settings"),onselect:"core:show-user-settings"});
+        menuOptions.push(null);
+
+        menuOptions.push({id:"menu-item-keyboard-shortcuts",label:RED._("menu.label.keyboardShortcuts"),onselect:"core:show-help"});
+        menuOptions.push({id:"menu-item-help",
+            label: RED.settings.theme("menu.menu-item-help.label",RED._("menu.label.help")),
+            href: RED.settings.theme("menu.menu-item-help.url","http://nodered.org/docs")
+        });
+        menuOptions.push({id:"menu-item-node-red-version", label:"v"+RED.settings.version, onselect: "core:show-about" });
+
+
+        RED.view.init();
+        RED.userSettings.init();
+        RED.user.init();
+        RED.library.init();
+        RED.keyboard.init();
+        RED.palette.init();
+        if (RED.settings.theme('palette.editable') !== false) {
+            RED.palette.editor.init();
+        } else {
+            console.log("Palette editor disabled");
+        }
+
+        RED.sidebar.init();
+
+        if (RED.settings.theme("projects.enabled",false)) {
+            RED.projects.init();
+        } else {
+            console.log("Projects disabled");
+        }
+
+        RED.subflow.init();
+        RED.workspaces.init();
+        RED.clipboard.init();
+        RED.search.init();
+        RED.editor.init();
+        RED.diff.init();
+
+        RED.menu.init({id:"btn-sidemenu",options: menuOptions});
+
+        RED.deploy.init(RED.settings.theme("deployButton",null));
+        RED.notifications.init();
+
+        RED.actions.add("core:show-about", showAbout);
+        RED.nodes.init();
+        RED.comms.connect();
+
+        $("#main-container").show();
+        $(".header-toolbar").show();
+
+        loadNodeList();
+    }
+
+    $(function() {
+
+        if ((window.location.hostname !== "localhost") && (window.location.hostname !== "127.0.0.1")) {
+            document.title = document.title+" : "+window.location.hostname;
+        }
+
+        ace.require("ace/ext/language_tools");
+
+        RED.i18n.init(function() {
+            RED.settings.init(loadEditor);
+        })
+    });
+})();
 ;/**
- * Copyright 2015, 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -459,7 +553,7 @@ var RED = (function() {
      }
  })();
 ;/**
- * Copyright 2013, 2015 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -479,11 +573,11 @@ RED.i18n = (function() {
     return {
         init: function(done) {
             i18n.init({
-                resGetPath: 'locales/__ns__',
+                resGetPath: 'locales/__ns__?lng=__lng__',
                 dynamicLoad: false,
                 load:'current',
                 ns: {
-                    namespaces: ["editor","node-red"],
+                    namespaces: ["editor","node-red","jsonata","infotips"],
                     defaultNs: "editor"
                 },
                 fallbackLng: ['en-US'],
@@ -497,12 +591,55 @@ RED.i18n = (function() {
 
         },
         loadCatalog: function(namespace,done) {
-            i18n.loadNamespace(namespace,done);
+            var languageList = i18n.functions.toLanguages(i18n.detectLanguage());
+            var toLoad = languageList.length;
+            languageList.forEach(function(lang) {
+                $.ajax({
+                    headers: {
+                        "Accept":"application/json"
+                    },
+                    cache: false,
+                    url: 'locales/'+namespace+'?lng='+lang,
+                    success: function(data) {
+                        i18n.addResourceBundle(lang,namespace,data);
+                        toLoad--;
+                        if (toLoad === 0) {
+                            done();
+                        }
+                    }
+                });
+            })
+
+        },
+
+        loadNodeCatalogs: function(done) {
+            var languageList = i18n.functions.toLanguages(i18n.detectLanguage());
+            var toLoad = languageList.length;
+
+            languageList.forEach(function(lang) {
+                $.ajax({
+                    headers: {
+                        "Accept":"application/json"
+                    },
+                    cache: false,
+                    url: 'locales/nodes?lng='+lang,
+                    success: function(data) {
+                        var namespaces = Object.keys(data);
+                        namespaces.forEach(function(ns) {
+                            i18n.addResourceBundle(lang,ns,data[ns]);
+                        });
+                        toLoad--;
+                        if (toLoad === 0) {
+                            done();
+                        }
+                    }
+                });
+            })
         }
     }
 })();
 ;/**
- * Copyright 2014 IBM, Antoine Aflalo
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -521,6 +658,9 @@ RED.i18n = (function() {
 RED.settings = (function () {
 
     var loadedSettings = {};
+    var userSettings = {};
+    var settingsDirty = false;
+    var pendingSave;
 
     var hasLocalStorage = function () {
         try {
@@ -534,7 +674,12 @@ RED.settings = (function () {
         if (!hasLocalStorage()) {
             return;
         }
-        localStorage.setItem(key, JSON.stringify(value));
+        if (key === "auth-tokens") {
+            localStorage.setItem(key, JSON.stringify(value));
+        } else {
+            userSettings[key] = value;
+            saveUserSettings();
+        }
     };
 
     /**
@@ -547,14 +692,23 @@ RED.settings = (function () {
         if (!hasLocalStorage()) {
             return undefined;
         }
-        return JSON.parse(localStorage.getItem(key));
+        if (key === "auth-tokens") {
+            return JSON.parse(localStorage.getItem(key));
+        } else {
+            return userSettings[key];
+        }
     };
 
     var remove = function (key) {
         if (!hasLocalStorage()) {
             return;
         }
-        localStorage.removeItem(key);
+        if (key === "auth-tokens") {
+            localStorage.removeItem(key);
+        } else {
+            delete userSettings[key];
+            saveUserSettings();
+        }
     };
 
     var setProperties = function(data) {
@@ -570,6 +724,10 @@ RED.settings = (function () {
         }
         loadedSettings = data;
     };
+
+    var setUserSettings = function(data) {
+        userSettings = data;
+    }
 
     var init = function (done) {
         var accessTokenMatch = /[?&]access_token=(.*?)(?:$|&)/.exec(window.location.search);
@@ -605,11 +763,11 @@ RED.settings = (function () {
             url: 'settings',
             success: function (data) {
                 setProperties(data);
-                if (RED.settings.user && RED.settings.user.anonymous) {
+                if (!RED.settings.user || RED.settings.user.anonymous) {
                     RED.settings.remove("auth-tokens");
                 }
                 console.log("Node-RED: " + data.version);
-                done();
+                loadUserSettings(done);
             },
             error: function(jqXHR,textStatus,errorThrown) {
                 if (jqXHR.status === 401) {
@@ -618,11 +776,51 @@ RED.settings = (function () {
                     }
                     RED.user.login(function() { load(done); });
                 } else {
-                    console.log("Unexpected error:",jqXHR.status,textStatus);
+                    console.log("Unexpected error loading settings:",jqXHR.status,textStatus);
                 }
             }
         });
     };
+
+    function loadUserSettings(done) {
+        $.ajax({
+            headers: {
+                "Accept": "application/json"
+            },
+            dataType: "json",
+            cache: false,
+            url: 'settings/user',
+            success: function (data) {
+                setUserSettings(data);
+                done();
+            },
+            error: function(jqXHR,textStatus,errorThrown) {
+                console.log("Unexpected error loading user settings:",jqXHR.status,textStatus);
+            }
+        });
+    }
+
+    function saveUserSettings() {
+        if (RED.user.hasPermission("settings.write")) {
+            if (pendingSave) {
+                clearTimeout(pendingSave);
+            }
+            pendingSave = setTimeout(function() {
+                pendingSave = null;
+                $.ajax({
+                    method: 'POST',
+                    contentType: 'application/json',
+                    url: 'settings/user',
+                    data: JSON.stringify(userSettings),
+                    success: function (data) {
+                    },
+                    error: function(jqXHR,textStatus,errorThrown) {
+                        console.log("Unexpected error saving user settings:",jqXHR.status,textStatus);
+                    }
+                });
+            },300);
+        }
+    }
 
     function theme(property,defaultValue) {
         if (!RED.settings.editorTheme) {
@@ -646,15 +844,15 @@ RED.settings = (function () {
     return {
         init: init,
         load: load,
+        loadUserSettings: loadUserSettings,
         set: set,
         get: get,
         remove: remove,
         theme: theme
     }
-})
-();
+})();
 ;/**
- * Copyright 2014, 2015 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -669,182 +867,341 @@ RED.settings = (function () {
  * limitations under the License.
  **/
 RED.user = (function() {
+  function login(opts, done) {
+    if (typeof opts == 'function') {
+      done = opts
+      opts = {}
+    }
 
-    function login(opts,done) {
-        if (typeof opts == 'function') {
-            done = opts;
-            opts = {};
+    var dialog = $(
+      '<div id="node-dialog-login" class="hide">' +
+        '<div style="display: inline-block;width: 250px; vertical-align: top; margin-right: 10px; margin-bottom: 20px;"><img id="node-dialog-login-image" src=""/></div>' +
+        '<div style="display: inline-block; width: 250px; vertical-align: bottom; margin-left: 10px; margin-bottom: 20px;">' +
+        '<form id="node-dialog-login-fields" class="form-horizontal" style="margin-bottom: 0px;"></form>' +
+        '</div>' +
+        '</div>'
+    )
+
+    dialog.dialog({
+      autoOpen: false,
+      dialogClass: 'ui-dialog-no-close',
+      modal: true,
+      closeOnEscape: !!opts.cancelable,
+      width: 600,
+      resizable: false,
+      draggable: false
+    })
+
+    $('#node-dialog-login-fields').empty()
+    $.ajax({
+      dataType: 'json',
+      url: 'auth/login',
+      success: function(data) {
+        var i = 0
+
+        if (data.type == 'credentials') {
+          for (; i < data.prompts.length; i++) {
+            var field = data.prompts[i]
+            var row = $('<div/>', { class: 'form-row' })
+            $(
+              '<label for="node-dialog-login-' +
+                field.id +
+                '">' +
+                RED._(field.label) +
+                ':</label><br/>'
+            ).appendTo(row)
+            var input = $(
+              '<input style="width: 100%" id="node-dialog-login-' +
+                field.id +
+                '" type="' +
+                field.type +
+                '" tabIndex="' +
+                (i + 1) +
+                '"/>'
+            ).appendTo(row)
+
+            if (i < data.prompts.length - 1) {
+              input.keypress(
+                (function() {
+                  var r = row
+                  return function(event) {
+                    if (event.keyCode == 13) {
+                      r.next('div')
+                        .find('input')
+                        .focus()
+                      event.preventDefault()
+                    }
+                  }
+                })()
+              )
+            }
+            row.appendTo('#node-dialog-login-fields')
+          }
+          $(
+            '<div class="form-row" style="text-align: right; margin-top: 10px;"><span id="node-dialog-login-failed" style="line-height: 2em;float:left;" class="hide">' +
+              RED._('user.loginFailed') +
+              '</span><img src="red/images/spin.svg" style="height: 30px; margin-right: 10px; " class="login-spinner hide"/>' +
+              (opts.cancelable
+                ? '<a href="#" id="node-dialog-login-cancel" style="margin-right: 20px;" tabIndex="' +
+                  (i + 1) +
+                  '">' +
+                  RED._('common.label.cancel') +
+                  '</a>'
+                : '') +
+              '<input type="submit" id="node-dialog-login-submit" style="width: auto;" tabIndex="' +
+              (i + 2) +
+              '" value="' +
+              RED._('user.login') +
+              '"></div>'
+          ).appendTo('#node-dialog-login-fields')
+
+          $('#node-dialog-login-submit').button()
+          $('#node-dialog-login-fields').submit(function(event) {
+            $('#node-dialog-login-submit').button('option', 'disabled', true)
+            $('#node-dialog-login-failed').hide()
+            $('.login-spinner').show()
+
+            var body = {
+              client_id: 'node-red-editor',
+              grant_type: 'password',
+              scope: ''
+            }
+            for (var i = 0; i < data.prompts.length; i++) {
+              var field = data.prompts[i]
+              body[field.id] = $('#node-dialog-login-' + field.id).val()
+            }
+            $.ajax({
+              url: 'auth/token',
+              type: 'POST',
+              data: body
+            })
+              .done(function(data, textStatus, xhr) {
+                RED.settings.set('auth-tokens', data)
+                $('#node-dialog-login')
+                  .dialog('destroy')
+                  .remove()
+                if (opts.updateMenu) {
+                  updateUserMenu()
+                }
+                done()
+              })
+              .fail(function(jqXHR, textStatus, errorThrown) {
+                RED.settings.remove('auth-tokens')
+                $('#node-dialog-login-failed').show()
+              })
+              .always(function() {
+                $('#node-dialog-login-submit').button(
+                  'option',
+                  'disabled',
+                  false
+                )
+                $('.login-spinner').hide()
+              })
+            event.preventDefault()
+          })
+        } else if (data.type == 'strategy') {
+          i = 0
+          for (; i < data.prompts.length; i++) {
+            var field = data.prompts[i]
+            var row = $('<div/>', {
+              class: 'form-row',
+              style: 'text-align: center'
+            }).appendTo('#node-dialog-login-fields')
+
+            var loginButton = $('<a href="#"></a>', { style: 'padding: 10px' })
+              .appendTo(row)
+              .click(function() {
+                document.location = field.url
+              })
+            if (field.image) {
+              $('<img>', { src: field.image }).appendTo(loginButton)
+            } else if (field.label) {
+              var label = $('<span></span>').text(field.label)
+              if (field.icon) {
+                $('<i></i>', {
+                  class: 'fa fa-2x ' + field.icon,
+                  style: 'vertical-align: middle'
+                }).appendTo(loginButton)
+                label.css({
+                  verticalAlign: 'middle',
+                  marginLeft: '8px'
+                })
+              }
+              label.appendTo(loginButton)
+            }
+            loginButton.button()
+          }
+        }
+        if (opts.cancelable) {
+          $('#node-dialog-login-cancel')
+            .button()
+            .click(function(event) {
+              $('#node-dialog-login')
+                .dialog('destroy')
+                .remove()
+            })
         }
 
-        var dialog = $('<div id="node-dialog-login" class="hide">'+
-                       '<div style="display: inline-block;width: 250px; vertical-align: top; margin-right: 10px; margin-bottom: 20px;"><img id="node-dialog-login-image" src=""/></div>'+
-                       '<div style="display: inline-block; width: 250px; vertical-align: bottom; margin-left: 10px; margin-bottom: 20px;">'+
-                       '<form id="node-dialog-login-fields" class="form-horizontal" style="margin-bottom: 0px;"></form>'+
-                       '</div>'+
-                       '</div>'); 
+        var loginImageSrc = data.image || 'red/images/enebular-logo.png'
 
-        dialog.dialog({
-            autoOpen: false,
-            dialogClass: "ui-dialog-no-close",
-            modal: true,
-            closeOnEscape: false,
-            width: 600,
-            resizable: false,
-            draggable: false
-        });
+        $('#node-dialog-login-image')
+          .load(function() {
+            dialog.dialog('open')
+          })
+          .attr('src', loginImageSrc)
+      }
+    })
+  }
 
-        $("#node-dialog-login-fields").empty();
-        $.ajax({
-            dataType: "json",
-            url: "auth/login",
-            success: function(data) {
-                if (data.type == "credentials") {
-                    var i=0;
-
-                    if (data.image) {
-                        $("#node-dialog-login-image").attr("src",data.image);
-                    } else {
-                        $("#node-dialog-login-image").attr("src","red/images/enebular-logo.png");
-                    }
-                    for (;i<data.prompts.length;i++) {
-                        var field = data.prompts[i];
-                        var row = $("<div/>",{id:"rrr"+i,class:"form-row"});
-                        $('<label for="node-dialog-login-'+field.id+'">'+field.label+':</label><br/>').appendTo(row);
-                        var input = $('<input style="width: 100%" id="node-dialog-login-'+field.id+'" type="'+field.type+'" tabIndex="'+(i+1)+'"/>').appendTo(row);
-
-                        if (i<data.prompts.length-1) {
-                            input.keypress(
-                                (function() {
-                                    var r = row;
-                                    return function(event) {
-                                        if (event.keyCode == 13) {
-                                            r.next("div").find("input").focus();
-                                            event.preventDefault();
-                                        }
-                                    }
-                                })()
-                            );
-                        }
-                        row.appendTo("#node-dialog-login-fields");
-                    }
-                    $('<div class="form-row" style="text-align: right; margin-top: 10px;"><span id="node-dialog-login-failed" style="line-height: 2em;float:left;" class="hide">'+RED._("user.loginFailed")+'</span><img src="red/images/spin.svg" style="height: 30px; margin-right: 10px; " class="login-spinner hide"/>'+
-                        (opts.cancelable?'<a href="#" id="node-dialog-login-cancel" style="margin-right: 20px;" tabIndex="'+(i+1)+'">'+RED._("common.label.cancel")+'</a>':'')+
-                        '<input type="submit" id="node-dialog-login-submit" style="width: auto;" tabIndex="'+(i+2)+'" value="'+RED._("user.login")+'"></div>').appendTo("#node-dialog-login-fields");
-
-
-                    $("#node-dialog-login-submit").button();
-                    $("#node-dialog-login-fields").submit(function(event) {
-                        $("#node-dialog-login-submit").button("option","disabled",true);
-                        $("#node-dialog-login-failed").hide();
-                        $(".login-spinner").show();
-
-                        var body = {
-                            client_id: "node-red-editor",
-                            grant_type: "password",
-                            scope:""
-                        }
-                        for (var i=0;i<data.prompts.length;i++) {
-                            var field = data.prompts[i];
-                            body[field.id] = $("#node-dialog-login-"+field.id).val();
-                        }
-                        $.ajax({
-                            url:"auth/token",
-                            type: "POST",
-                            data: body
-                        }).done(function(data,textStatus,xhr) {
-                            RED.settings.set("auth-tokens",data);
-                            $("#node-dialog-login").dialog('destroy').remove();
-                            if (opts.updateMenu) {
-                                updateUserMenu();
-                            }
-                            done();
-                        }).fail(function(jqXHR,textStatus,errorThrown) {
-                            RED.settings.remove("auth-tokens");
-                            $("#node-dialog-login-failed").show();
-                        }).always(function() {
-                            $("#node-dialog-login-submit").button("option","disabled",false);
-                            $(".login-spinner").hide();
-                        });
-                        event.preventDefault();
-                    });
-                    if (opts.cancelable) {
-                        $("#node-dialog-login-cancel").button().click(function( event ) {
-                            $("#node-dialog-login").dialog('destroy').remove();
-                        });
-                    }
-                }
-                dialog.dialog("open");
-            }
-        });
-    }
-
-    function logout() {
-        $.ajax({
-            url: "auth/revoke",
-            type: "POST",
-            data: {token:RED.settings.get("auth-tokens").access_token},
-            success: function() {
-                RED.settings.remove("auth-tokens");
-                document.location.reload(true);
-            }
-        })
-    }
-
-    function updateUserMenu() {
-        $("#btn-usermenu-submenu li").remove();
-        if (RED.settings.user.anonymous) {
-            RED.menu.addItem("btn-usermenu",{
-                id:"usermenu-item-login",
-                label:RED._("menu.label.login"),
-                onselect: function() {
-                    RED.user.login({cancelable:true},function() {
-                        RED.settings.load(function() {
-                            RED.notify(RED._("user.loggedInAs",{name:RED.settings.user.username}),"success");
-                            updateUserMenu();
-                        });
-                    });
-                }
-            });
+  function logout() {
+    var tokens = RED.settings.get('auth-tokens')
+    var token = tokens ? tokens.access_token : ''
+    $.ajax({
+      url: 'auth/revoke',
+      type: 'POST',
+      data: { token: token }
+    })
+      .done(function(data, textStatus, xhr) {
+        RED.settings.remove('auth-tokens')
+        if (data && data.redirect) {
+          document.location.href = data.redirect
         } else {
-            RED.menu.addItem("btn-usermenu",{
-                id:"usermenu-item-username",
-                label:"<b>"+RED.settings.user.username+"</b>"
-            });
-            RED.menu.addItem("btn-usermenu",{
-                id:"usermenu-item-logout",
-                label:RED._("menu.label.logout"),
-                onselect: function() {
-                    RED.user.logout();
-                }
-            });
+          document.location.reload(true)
+        }
+      })
+      .fail(function(jqXHR, textStatus, errorThrown) {
+        if (jqXHR.status === 401) {
+          document.location.reload(true)
+        } else {
+          console.log(textStatus)
+        }
+      })
+  }
+
+  function updateUserMenu() {
+    $('#btn-usermenu-submenu li').remove()
+    if (RED.settings.user.anonymous) {
+      RED.menu.addItem('btn-usermenu', {
+        id: 'usermenu-item-login',
+        label: RED._('menu.label.login'),
+        onselect: function() {
+          RED.user.login({ cancelable: true }, function() {
+            RED.settings.load(function() {
+              RED.notify(
+                RED._('user.loggedInAs', { name: RED.settings.user.username }),
+                'success'
+              )
+              updateUserMenu()
+              RED.events.emit('login', RED.settings.user.username)
+            })
+          })
+        }
+      })
+    } else {
+      RED.menu.addItem('btn-usermenu', {
+        id: 'usermenu-item-username',
+        label: '<b>' + RED.settings.user.username + '</b>'
+      })
+      RED.menu.addItem('btn-usermenu', {
+        id: 'usermenu-item-logout',
+        label: RED._('menu.label.logout'),
+        onselect: function() {
+          RED.user.logout()
+        }
+      })
+    }
+  }
+
+  function init() {
+    if (RED.settings.user) {
+      if (
+        !RED.settings.editorTheme ||
+        !RED.settings.editorTheme.hasOwnProperty('userMenu')
+      ) {
+        var userMenu = $(
+          '<li><a id="btn-usermenu" class="button hide" data-toggle="dropdown" href="#"></a></li>'
+        ).prependTo('.header-toolbar')
+        if (RED.settings.user.image) {
+          $('<span class="user-profile"></span>')
+            .css({
+              backgroundImage: 'url(' + RED.settings.user.image + ')'
+            })
+            .appendTo(userMenu.find('a'))
+        } else {
+          $('<i class="fa fa-user"></i>').appendTo(userMenu.find('a'))
         }
 
+        RED.menu.init({
+          id: 'btn-usermenu',
+          options: []
+        })
+        updateUserMenu()
+      }
     }
+  }
 
-    function init() {
-        if (RED.settings.user) {
-            if (!RED.settings.editorTheme || !RED.settings.editorTheme.hasOwnProperty("userMenu")) {
+  var readRE = /^((.+)\.)?read$/
+  var writeRE = /^((.+)\.)?write$/
 
-                $('<li><a id="btn-usermenu" class="button hide" data-toggle="dropdown" href="#"><i class="fa fa-user"></i></a></li>')
-                    .prependTo(".header-toolbar");
+  function hasPermission(permission) {
+    if (permission === '') {
+      return true
+    }
+    if (!RED.settings.user) {
+      return true
+    }
+    return checkPermission(RED.settings.user.permissions || '', permission)
+  }
+  function checkPermission(userScope, permission) {
+    if (permission === '') {
+      return true
+    }
+    var i
 
-                RED.menu.init({id:"btn-usermenu",
-                    options: []
-                });
-                updateUserMenu();
-            }
+    if (Array.isArray(permission)) {
+      // Multiple permissions requested - check each one
+      for (i = 0; i < permission.length; i++) {
+        if (!checkPermission(userScope, permission[i])) {
+          return false
         }
-
-    }
-    return {
-        init: init,
-        login: login,
-        logout: logout
+      }
+      // All permissions check out
+      return true
     }
 
-})();
+    if (Array.isArray(userScope)) {
+      if (userScope.length === 0) {
+        return false
+      }
+      for (i = 0; i < userScope.length; i++) {
+        if (checkPermission(userScope[i], permission)) {
+          return true
+        }
+      }
+      return false
+    }
+
+    if (userScope === '*' || userScope === permission) {
+      return true
+    }
+
+    if (userScope === 'read' || userScope === '*.read') {
+      return readRE.test(permission)
+    } else if (userScope === 'write' || userScope === '*.write') {
+      return writeRE.test(permission)
+    }
+    return false
+  }
+
+  return {
+    init: init,
+    login: login,
+    logout: logout,
+    hasPermission: hasPermission
+  }
+})()
 ;/**
- * Copyright 2014, 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -909,27 +1266,31 @@ RED.comms = (function() {
             }
         }
         ws.onmessage = function(event) {
-            var msg = JSON.parse(event.data);
-            if (pendingAuth && msg.auth) {
-                if (msg.auth === "ok") {
-                    pendingAuth = false;
-                    completeConnection();
-                } else if (msg.auth === "fail") {
-                    // anything else is an error...
-                    active = false;
-                    RED.user.login({updateMenu:true},function() {
-                        connectWS();
-                    })
+            var message = JSON.parse(event.data);
+            for (var m = 0; m < message.length; m++) {
+                var msg = message[m];
+                if (pendingAuth && msg.auth) {
+                    if (msg.auth === "ok") {
+                        pendingAuth = false;
+                        completeConnection();
+                    } else if (msg.auth === "fail") {
+                        // anything else is an error...
+                        active = false;
+                        RED.user.login({updateMenu:true},function() {
+                            connectWS();
+                        })
+                    }
                 }
-            } else if (msg.topic) {
-                for (var t in subscriptions) {
-                    if (subscriptions.hasOwnProperty(t)) {
-                        var re = new RegExp("^"+t.replace(/([\[\]\?\(\)\\\\$\^\*\.|])/g,"\\$1").replace(/\+/g,"[^/]+").replace(/\/#$/,"(\/.*)?")+"$");
-                        if (re.test(msg.topic)) {
-                            var subscribers = subscriptions[t];
-                            if (subscribers) {
-                                for (var i=0;i<subscribers.length;i++) {
-                                    subscribers[i](msg.topic,msg.data);
+                else if (msg.topic) {
+                    for (var t in subscriptions) {
+                        if (subscriptions.hasOwnProperty(t)) {
+                            var re = new RegExp("^"+t.replace(/([\[\]\?\(\)\\\\$\^\*\.|])/g,"\\$1").replace(/\+/g,"[^/]+").replace(/\/#$/,"(\/.*)?")+"$");
+                            if (re.test(msg.topic)) {
+                                var subscribers = subscriptions[t];
+                                if (subscribers) {
+                                    for (var i=0;i<subscribers.length;i++) {
+                                        subscribers[i](msg.topic,msg.data);
+                                    }
                                 }
                             }
                         }
@@ -1008,7 +1369,7 @@ RED.comms = (function() {
     }
 })();
 ;/**
- * Copyright 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -1138,7 +1499,7 @@ RED.text.bidi = (function() {
     }
 })();
 ;/**
- * Copyright 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -2468,7 +2829,7 @@ RED.text.format = (function() {
     };
 })();
 ;/**
- * Copyright 2013 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -2491,10 +2852,11 @@ RED.state = {
     EDITING: 5,
     EXPORT: 6,
     IMPORT: 7,
-    IMPORT_DRAGGING: 8
+    IMPORT_DRAGGING: 8,
+    QUICK_JOINING: 9
 }
 ;/**
- * Copyright 2013, 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -2508,1387 +2870,1423 @@ RED.state = {
  * See the License for the specific language governing permissions and
  * limitations under the License.
  **/
-RED.nodes = (function() {
-  var node_defs = {}
-  var nodes = []
-  var configNodes = {}
-  var links = []
-  var defaultWorkspace
-  var workspaces = {}
-  var workspacesOrder = []
-  var subflows = {}
-  var loadedFlowVersion = null
-  var pending = {
-    deleted: {},
-    added: {}
-  }
+RED.nodes = (function () {
 
-  var dirty = false
+    var node_defs = {};
+    var nodes = [];
+    var configNodes = {};
+    var links = [];
+    var defaultWorkspace;
+    var workspaces = {};
+    var workspacesOrder = [];
+    var subflows = {};
+    var loadedFlowVersion = null;
 
-  function setDirty(d) {
-    dirty = d
-    if (!d) {
-      pending = {
-        deleted: {},
-        added: {}
-      }
+    var initialLoad;
+
+    var dirty = false;
+
+    function setDirty (d) {
+        dirty = d;
+        RED.events.emit("nodes:change", { dirty: dirty });
     }
-    RED.events.emit('nodes:change', { dirty: dirty })
-  }
 
-  var registry = (function() {
-    var moduleList = {}
-    var nodeList = []
-    var nodeSets = {}
-    var typeToId = {}
-    var nodeDefinitions = {}
+    var registry = (function () {
+        var moduleList = {};
+        var nodeList = [];
+        var nodeSets = {};
+        var typeToId = {};
+        var nodeDefinitions = {};
+        var iconSets = {};
 
-    var exports = {
-      getModule: function(module) {
-        return moduleList[module]
-      },
-      getNodeSetForType: function(nodeType) {
-        return exports.getNodeSet(typeToId[nodeType])
-      },
-      getModuleList: function() {
-        return moduleList
-      },
-      getNodeList: function() {
-        return nodeList
-      },
-      setNodeList: function(list) {
-        nodeList = []
-        for (var i = 0; i < list.length; i++) {
-          var ns = list[i]
-          exports.addNodeSet(ns)
-        }
-      },
-      addNodeSet: function(ns) {
-        ns.added = false
-        nodeSets[ns.id] = ns
-        for (var j = 0; j < ns.types.length; j++) {
-          typeToId[ns.types[j]] = ns.id
-        }
-        nodeList.push(ns)
-
-        moduleList[ns.module] = moduleList[ns.module] || {
-          name: ns.module,
-          version: ns.version,
-          local: ns.local,
-          sets: {}
-        }
-        moduleList[ns.module].sets[ns.name] = ns
-        RED.events.emit('registry:node-set-added', ns)
-      },
-      removeNodeSet: function(id) {
-        var ns = nodeSets[id]
-        for (var j = 0; j < ns.types.length; j++) {
-          delete typeToId[ns.types[j]]
-        }
-        delete nodeSets[id]
-        for (var i = 0; i < nodeList.length; i++) {
-          if (nodeList[i].id === id) {
-            nodeList.splice(i, 1)
-            break
-          }
-        }
-        delete moduleList[ns.module].sets[ns.name]
-        if (Object.keys(moduleList[ns.module].sets).length === 0) {
-          delete moduleList[ns.module]
-        }
-        RED.events.emit('registry:node-set-removed', ns)
-        return ns
-      },
-      getNodeSet: function(id) {
-        return nodeSets[id]
-      },
-      enableNodeSet: function(id) {
-        var ns = nodeSets[id]
-        ns.enabled = true
-        RED.events.emit('registry:node-set-enabled', ns)
-      },
-      disableNodeSet: function(id) {
-        var ns = nodeSets[id]
-        ns.enabled = false
-        RED.events.emit('registry:node-set-disabled', ns)
-      },
-      registerNodeType: function(nt, def) {
-        nodeDefinitions[nt] = def
-        if (def.category != 'subflows') {
-          def.set = nodeSets[typeToId[nt]]
-          nodeSets[typeToId[nt]].added = true
-          nodeSets[typeToId[nt]].enabled = true
-
-          var ns
-          if (def.set.module === 'node-red') {
-            ns = 'node-red'
-          } else {
-            ns = def.set.id
-          }
-          def['_'] = function() {
-            var args = Array.prototype.slice.call(arguments, 0)
-            if (args[0].indexOf(':') === -1) {
-              args[0] = ns + ':' + args[0]
+        nodeDefinitions['tab'] = {
+            defaults: {
+                label: { value: "" },
+                disabled: { value: false },
+                info: { value: "" }
             }
-            return RED._.apply(null, args)
-          }
+        };
 
-          // TODO: too tightly coupled into palette UI
-        }
-        RED.events.emit('registry:node-type-added', nt)
-      },
-      removeNodeType: function(nt) {
-        if (nt.substring(0, 8) != 'subflow:') {
-          // NON-NLS - internal debug message
-          throw new Error('this api is subflow only. called with:', nt)
-        }
-        delete nodeDefinitions[nt]
-        RED.events.emit('registry:node-type-removed', nt)
-      },
-      getNodeType: function(nt) {
-        return nodeDefinitions[nt]
-      }
-    }
-    return exports
-  })()
 
-  function getID() {
-    return (1 + Math.random() * 4294967295).toString(16)
-  }
-
-  function addNode(n) {
-    if (n.type.indexOf('subflow') !== 0) {
-      n['_'] = n._def._
-    }
-    if (n._def.category == 'config') {
-      configNodes[n.id] = n
-    } else {
-      n.ports = []
-      if (n.outputs) {
-        for (var i = 0; i < n.outputs; i++) {
-          n.ports.push(i)
-        }
-      }
-      n.dirty = true
-      updateConfigNodeUsers(n)
-      if (n._def.category == 'subflows' && typeof n.i === 'undefined') {
-        var nextId = 0
-        RED.nodes.eachNode(function(node) {
-          nextId = Math.max(nextId, node.i || 0)
-        })
-        n.i = nextId + 1
-      }
-      nodes.push(n)
-    }
-    delete pending.deleted[n.id]
-    pending.added[n.id] = true
-    RED.events.emit('nodes:add', n)
-  }
-  function addLink(l) {
-    links.push(l)
-  }
-
-  function getNode(id) {
-    if (id in configNodes) {
-      return configNodes[id]
-    } else {
-      for (var n in nodes) {
-        if (nodes[n].id == id) {
-          return nodes[n]
-        }
-      }
-    }
-    return null
-  }
-
-  function removeNode(id) {
-    var removedLinks = []
-    var removedNodes = []
-    var node
-    if (id in configNodes) {
-      node = configNodes[id]
-      delete configNodes[id]
-      RED.events.emit('nodes:remove', node)
-      RED.workspaces.refresh()
-    } else {
-      node = getNode(id)
-      if (node) {
-        nodes.splice(nodes.indexOf(node), 1)
-        removedLinks = links.filter(function(l) {
-          return l.source === node || l.target === node
-        })
-        removedLinks.forEach(function(l) {
-          links.splice(links.indexOf(l), 1)
-        })
-        var updatedConfigNode = false
-        for (var d in node._def.defaults) {
-          if (node._def.defaults.hasOwnProperty(d)) {
-            var property = node._def.defaults[d]
-            if (property.type) {
-              var type = registry.getNodeType(property.type)
-              if (type && type.category == 'config') {
-                var configNode = configNodes[node[d]]
-                if (configNode) {
-                  updatedConfigNode = true
-                  if (configNode._def.exclusive) {
-                    removeNode(node[d])
-                    removedNodes.push(configNode)
-                  } else {
-                    var users = configNode.users
-                    users.splice(users.indexOf(node), 1)
-                  }
+        var exports = {
+            setModulePendingUpdated: function (module, version) {
+                moduleList[module].pending_version = version;
+                RED.events.emit("registry:module-updated", { module: module, version: version });
+            },
+            getModule: function (module) {
+                return moduleList[module];
+            },
+            getNodeSetForType: function (nodeType) {
+                return exports.getNodeSet(typeToId[nodeType]);
+            },
+            getModuleList: function () {
+                return moduleList;
+            },
+            getNodeList: function () {
+                return nodeList;
+            },
+            getNodeTypes: function () {
+                return Object.keys(nodeDefinitions);
+            },
+            setNodeList: function (list) {
+                nodeList = [];
+                for (var i = 0; i < list.length; i++) {
+                    var ns = list[i];
+                    exports.addNodeSet(ns);
                 }
-              }
+            },
+            addNodeSet: function (ns) {
+                ns.added = false;
+                nodeSets[ns.id] = ns;
+                for (var j = 0; j < ns.types.length; j++) {
+                    typeToId[ns.types[j]] = ns.id;
+                }
+                nodeList.push(ns);
+
+                moduleList[ns.module] = moduleList[ns.module] || {
+                    name: ns.module,
+                    version: ns.version,
+                    local: ns.local,
+                    sets: {}
+                };
+                if (ns.pending_version) {
+                    moduleList[ns.module].pending_version = ns.pending_version;
+                }
+                moduleList[ns.module].sets[ns.name] = ns;
+                RED.events.emit("registry:node-set-added", ns);
+            },
+            removeNodeSet: function (id) {
+                var ns = nodeSets[id];
+                for (var j = 0; j < ns.types.length; j++) {
+                    delete typeToId[ns.types[j]];
+                }
+                delete nodeSets[id];
+                for (var i = 0; i < nodeList.length; i++) {
+                    if (nodeList[i].id === id) {
+                        nodeList.splice(i, 1);
+                        break;
+                    }
+                }
+                delete moduleList[ns.module].sets[ns.name];
+                if (Object.keys(moduleList[ns.module].sets).length === 0) {
+                    delete moduleList[ns.module];
+                }
+                RED.events.emit("registry:node-set-removed", ns);
+                return ns;
+            },
+            getNodeSet: function (id) {
+                return nodeSets[id];
+            },
+            enableNodeSet: function (id) {
+                var ns = nodeSets[id];
+                ns.enabled = true;
+                RED.events.emit("registry:node-set-enabled", ns);
+            },
+            disableNodeSet: function (id) {
+                var ns = nodeSets[id];
+                ns.enabled = false;
+                RED.events.emit("registry:node-set-disabled", ns);
+            },
+            registerNodeType: function (nt, def) {
+                nodeDefinitions[nt] = def;
+                def.type = nt;
+                if (def.category != "subflows") {
+                    def.set = nodeSets[typeToId[nt]];
+                    nodeSets[typeToId[nt]].added = true;
+                    nodeSets[typeToId[nt]].enabled = true;
+
+                    var ns;
+                    if (def.set.module === "node-red") {
+                        ns = "node-red";
+                    } else {
+                        ns = def.set.id;
+                    }
+                    def["_"] = function () {
+                        var args = Array.prototype.slice.call(arguments, 0);
+                        var original = args[0];
+                        if (args[0].indexOf(":") === -1) {
+                            args[0] = ns + ":" + args[0];
+                        }
+                        var result = RED._.apply(null, args);
+                        if (result === args[0]) {
+                            result = original;
+                        }
+                        return result;
+                    }
+
+                    // TODO: too tightly coupled into palette UI
+                }
+                RED.events.emit("registry:node-type-added", nt);
+            },
+            removeNodeType: function (nt) {
+                if (nt.substring(0, 8) != "subflow:") {
+                    // NON-NLS - internal debug message
+                    throw new Error("this api is subflow only. called with:", nt);
+                }
+                delete nodeDefinitions[nt];
+                RED.events.emit("registry:node-type-removed", nt);
+            },
+            getNodeType: function (nt) {
+                return nodeDefinitions[nt];
+            },
+            setIconSets: function (sets) {
+                iconSets = sets;
+            },
+            getIconSets: function () {
+                return iconSets;
             }
-          }
-        }
-        if (updatedConfigNode) {
-          RED.workspaces.refresh()
-        }
-        RED.events.emit('nodes:remove', node)
-      }
-    }
-    if (node && node._def.onremove) {
-      node._def.onremove.call(n)
-    }
-    delete pending.added[id]
-    pending.deleted[id] = true
-    removedNodes.forEach(function(node) {
-      delete pending.added[node.id]
-      pending.deleted[node.id] = true
-    })
-    return { links: removedLinks, nodes: removedNodes }
-  }
+        };
+        return exports;
+    })();
 
-  function removeLink(l) {
-    var index = links.indexOf(l)
-    if (index != -1) {
-      links.splice(index, 1)
-    }
-  }
-
-  function addWorkspace(ws) {
-    workspaces[ws.id] = ws
-    pending.added[ws.id] = true
-    delete pending.deleted[ws.id]
-    ws._def = {
-      defaults: {
-        label: { value: '' }
-      }
+    function getID () {
+        return (1 + Math.random() * 4294967295).toString(16);
     }
 
-    workspacesOrder.push(ws.id)
-  }
-  function getWorkspace(id) {
-    return workspaces[id]
-  }
-  function removeWorkspace(id) {
-    delete workspaces[id]
-    workspacesOrder.splice(workspacesOrder.indexOf(id), 1)
-
-    var removedNodes = []
-    var removedLinks = []
-    var n
-    var node
-    for (n = 0; n < nodes.length; n++) {
-      node = nodes[n]
-      if (node.z == id) {
-        removedNodes.push(node)
-      }
-    }
-    for (n in configNodes) {
-      if (configNodes.hasOwnProperty(n)) {
-        node = configNodes[n]
-        if (node.z == id) {
-          removedNodes.push(node)
-        }
-      }
-    }
-    for (n = 0; n < removedNodes.length; n++) {
-      var result = removeNode(removedNodes[n].id)
-      removedLinks = removedLinks.concat(result.links)
-    }
-    pending.deleted[id] = true
-    delete pending.added[id]
-    return { nodes: removedNodes, links: removedLinks }
-  }
-
-  function addSubflow(sf, createNewIds) {
-    if (createNewIds) {
-      var subflowNames = Object.keys(subflows).map(function(sfid) {
-        return subflows[sfid].name
-      })
-
-      subflowNames.sort()
-      var copyNumber = 1
-      var subflowName = sf.name
-      subflowNames.forEach(function(name) {
-        if (subflowName == name) {
-          copyNumber++
-          subflowName = sf.name + ' (' + copyNumber + ')'
-        }
-      })
-      sf.name = subflowName
-    }
-    sf._def = {
-      defaults: {},
-      icon: 'subflow.png',
-      category: 'subflows',
-      color: '#da9',
-      inputs: sf.in.length,
-      outputs: sf.out.length
-    }
-    subflows[sf.id] = sf
-    delete pending.deleted[sf.id]
-    pending.added[sf.id] = true
-    RED.nodes.registerType('subflow:' + sf.id, {
-      defaults: { name: { value: '' } },
-      info: sf.info,
-      icon: 'subflow.png',
-      category: 'subflows',
-      inputs: sf.in.length,
-      outputs: sf.out.length,
-      color: '#da9',
-      label: function() {
-        return this.name || RED.nodes.subflow(sf.id).name
-      },
-      labelStyle: function() {
-        return this.name ? 'node_label_italic' : ''
-      },
-      paletteLabel: function() {
-        return RED.nodes.subflow(sf.id).name
-      },
-      set: {
-        module: 'node-red'
-      }
-    })
-  }
-  function getSubflow(id) {
-    return subflows[id]
-  }
-  function removeSubflow(sf) {
-    delete subflows[sf.id]
-    delete pending.added[sf.id]
-    pending.deleted[sf.id] = true
-    registry.removeNodeType('subflow:' + sf.id)
-  }
-
-  function subflowContains(sfid, nodeid) {
-    for (var i = 0; i < nodes.length; i++) {
-      var node = nodes[i]
-      if (node.z === sfid) {
-        var m = /^subflow:(.+)$/.exec(node.type)
-        if (m) {
-          if (m[1] === nodeid) {
-            return true
-          } else {
-            var result = subflowContains(m[1], nodeid)
-            if (result) {
-              return true
-            }
-          }
-        }
-      }
-    }
-    return false
-  }
-
-  function getAllFlowNodes(node) {
-    var visited = {}
-    visited[node.id] = true
-    var nns = [node]
-    var stack = [node]
-    while (stack.length !== 0) {
-      var n = stack.shift()
-      var childLinks = links.filter(function(d) {
-        return d.source === n || d.target === n
-      })
-      for (var i = 0; i < childLinks.length; i++) {
-        var child =
-          childLinks[i].source === n
-            ? childLinks[i].target
-            : childLinks[i].source
-        var id = child.id
-        if (!id) {
-          id = child.direction + ':' + child.i
-        }
-        if (!visited[id]) {
-          visited[id] = true
-          nns.push(child)
-          stack.push(child)
-        }
-      }
-    }
-    return nns
-  }
-
-  function convertWorkspace(n) {
-    var node = {}
-    node.id = n.id
-    node.type = n.type
-    for (var d in n._def.defaults) {
-      if (n._def.defaults.hasOwnProperty(d)) {
-        node[d] = n[d]
-      }
-    }
-    return node
-  }
-  /**
-   * Converts a node to an exportable JSON Object
-   **/
-  function convertNode(n, exportCreds) {
-    if (n.type === 'tab') {
-      return convertWorkspace(n)
-    }
-    exportCreds = exportCreds || false
-    var node = {}
-    node.id = n.id
-    node.type = n.type
-    node.z = n.z
-    if (node.type == 'unknown') {
-      for (var p in n._orig) {
-        if (n._orig.hasOwnProperty(p)) {
-          node[p] = n._orig[p]
-        }
-      }
-    } else {
-      for (var d in n._def.defaults) {
-        if (n._def.defaults.hasOwnProperty(d)) {
-          node[d] = n[d]
-        }
-      }
-      if (exportCreds && n.credentials) {
-        var credentialSet = {}
-        node.credentials = {}
-        for (var cred in n._def.credentials) {
-          if (n._def.credentials.hasOwnProperty(cred)) {
-            if (n._def.credentials[cred].type == 'password') {
-              if (
-                !n.credentials._ ||
-                n.credentials['has_' + cred] !=
-                  n.credentials._['has_' + cred] ||
-                (n.credentials['has_' + cred] && n.credentials[cred])
-              ) {
-                credentialSet[cred] = n.credentials[cred]
-              }
-            } else if (
-              n.credentials[cred] != null &&
-              (!n.credentials._ || n.credentials[cred] != n.credentials._[cred])
-            ) {
-              credentialSet[cred] = n.credentials[cred]
-            }
-          }
-        }
-        if (Object.keys(credentialSet).length > 0) {
-          node.credentials = credentialSet
-        }
-      }
-    }
-    if (n._def.category != 'config') {
-      node.x = n.x
-      node.y = n.y
-      node.wires = []
-      for (var i = 0; i < n.outputs; i++) {
-        node.wires.push([])
-      }
-      var wires = links.filter(function(d) {
-        return d.source === n
-      })
-      for (var j = 0; j < wires.length; j++) {
-        var w = wires[j]
-        if (w.target.type != 'subflow') {
-          node.wires[w.sourcePort].push(w.target.id)
-        }
-      }
-    }
-    return node
-  }
-
-  function convertSubflow(n) {
-    var node = {}
-    node.id = n.id
-    node.type = n.type
-    node.name = n.name
-    node.info = n.info
-    node.in = []
-    node.out = []
-
-    n.in.forEach(function(p) {
-      var nIn = { x: p.x, y: p.y, wires: [] }
-      var wires = links.filter(function(d) {
-        return d.source === p
-      })
-      for (var i = 0; i < wires.length; i++) {
-        var w = wires[i]
-        if (w.target.type != 'subflow') {
-          nIn.wires.push({ id: w.target.id })
-        }
-      }
-      node.in.push(nIn)
-    })
-    n.out.forEach(function(p, c) {
-      var nOut = { x: p.x, y: p.y, wires: [] }
-      var wires = links.filter(function(d) {
-        return d.target === p
-      })
-      for (i = 0; i < wires.length; i++) {
-        if (wires[i].source.type != 'subflow') {
-          nOut.wires.push({ id: wires[i].source.id, port: wires[i].sourcePort })
+    function addNode (n) {
+        if (n.type.indexOf("subflow") !== 0) {
+            n["_"] = n._def._;
         } else {
-          nOut.wires.push({ id: n.id, port: 0 })
+            n["_"] = RED._;
         }
-      }
-      node.out.push(nOut)
-    })
-
-    return node
-  }
-  /**
-   * Converts the current node selection to an exportable JSON Object
-   **/
-  function createExportableNodeSet(set) {
-    var nns = []
-    var exportedConfigNodes = {}
-    var exportedSubflows = {}
-    for (var n = 0; n < set.length; n++) {
-      var node = set[n]
-      if (node.type.substring(0, 8) == 'subflow:') {
-        var subflowId = node.type.substring(8)
-        if (!exportedSubflows[subflowId]) {
-          exportedSubflows[subflowId] = true
-          var subflow = getSubflow(subflowId)
-          var subflowSet = [subflow]
-          RED.nodes.eachNode(function(n) {
-            if (n.z == subflowId) {
-              subflowSet.push(n)
-            }
-          })
-          var exportableSubflow = createExportableNodeSet(subflowSet)
-          nns = exportableSubflow.concat(nns)
-        }
-      }
-      if (node.type != 'subflow') {
-        var convertedNode = RED.nodes.convertNode(node)
-        for (var d in node._def.defaults) {
-          if (node._def.defaults[d].type && node[d] in configNodes) {
-            var confNode = configNodes[node[d]]
-            var exportable = registry.getNodeType(node._def.defaults[d].type)
-              .exportable
-            if (exportable == null || exportable) {
-              if (!(node[d] in exportedConfigNodes)) {
-                exportedConfigNodes[node[d]] = true
-                set.push(confNode)
-              }
-            } else {
-              convertedNode[d] = ''
-            }
-          }
-        }
-        nns.push(convertedNode)
-      } else {
-        var convertedSubflow = convertSubflow(node)
-        nns.push(convertedSubflow)
-      }
-    }
-    return nns
-  }
-
-  //TODO: rename this (createCompleteNodeSet)
-  function createCompleteNodeSet(exportCredentials) {
-    if (exportCredentials === undefined) {
-      exportCredentials = true
-    }
-    var nns = []
-    var i
-    for (i = 0; i < workspacesOrder.length; i++) {
-      if (workspaces[workspacesOrder[i]].type == 'tab') {
-        nns.push(convertWorkspace(workspaces[workspacesOrder[i]]))
-      }
-    }
-    for (i in subflows) {
-      if (subflows.hasOwnProperty(i)) {
-        nns.push(convertSubflow(subflows[i]))
-      }
-    }
-    for (i in configNodes) {
-      if (configNodes.hasOwnProperty(i)) {
-        nns.push(convertNode(configNodes[i], exportCredentials))
-      }
-    }
-    for (i = 0; i < nodes.length; i++) {
-      var node = nodes[i]
-      nns.push(convertNode(node, exportCredentials))
-    }
-    return nns
-  }
-
-  function checkForMatchingSubflow(subflow, subflowNodes) {
-    var i
-    var match = null
-    try {
-      RED.nodes.eachSubflow(function(sf) {
-        if (
-          sf.name != subflow.name ||
-          sf.info != subflow.info ||
-          sf.in.length != subflow.in.length ||
-          sf.out.length != subflow.out.length
-        ) {
-          return
-        }
-        var sfNodes = RED.nodes.filterNodes({ z: sf.id })
-        if (sfNodes.length != subflowNodes.length) {
-          return
-        }
-
-        var subflowNodeSet = [subflow].concat(subflowNodes)
-        var sfNodeSet = [sf].concat(sfNodes)
-
-        var exportableSubflowNodes = JSON.stringify(subflowNodeSet)
-        var exportableSFNodes = JSON.stringify(
-          createExportableNodeSet(sfNodeSet)
-        )
-        var nodeMap = {}
-        for (i = 0; i < sfNodes.length; i++) {
-          exportableSubflowNodes = exportableSubflowNodes.replace(
-            new RegExp('"' + subflowNodes[i].id + '"', 'g'),
-            '"' + sfNodes[i].id + '"'
-          )
-        }
-        exportableSubflowNodes = exportableSubflowNodes.replace(
-          new RegExp('"' + subflow.id + '"', 'g'),
-          '"' + sf.id + '"'
-        )
-
-        if (exportableSubflowNodes !== exportableSFNodes) {
-          return
-        }
-
-        match = sf
-        throw new Error()
-      })
-    } catch (err) {
-      console.log(err.stack)
-    }
-    return match
-  }
-  function compareNodes(nodeA, nodeB, idMustMatch) {
-    if (idMustMatch && nodeA.id != nodeB.id) {
-      return false
-    }
-    if (nodeA.type != nodeB.type) {
-      return false
-    }
-    var def = nodeA._def
-    for (var d in def.defaults) {
-      if (def.defaults.hasOwnProperty(d)) {
-        var vA = nodeA[d]
-        var vB = nodeB[d]
-        if (typeof vA !== typeof vB) {
-          return false
-        }
-        if (vA === null || typeof vA === 'string' || typeof vA === 'number') {
-          if (vA !== vB) {
-            return false
-          }
+        if (n._def.category == "config") {
+            configNodes[n.id] = n;
         } else {
-          if (JSON.stringify(vA) !== JSON.stringify(vB)) {
-            return false
-          }
+            n.ports = [];
+            if (n.wires && (n.wires.length > n.outputs)) { n.outputs = n.wires.length; }
+            if (n.outputs) {
+                for (var i = 0; i < n.outputs; i++) {
+                    n.ports.push(i);
+                }
+            }
+            n.dirty = true;
+            updateConfigNodeUsers(n);
+            if (n._def.category == "subflows" && typeof n.i === "undefined") {
+                var nextId = 0;
+                RED.nodes.eachNode(function (node) {
+                    nextId = Math.max(nextId, node.i || 0);
+                });
+                n.i = nextId + 1;
+            }
+            nodes.push(n);
         }
-      }
+        RED.events.emit('nodes:add', n);
     }
-    return true
-  }
-
-  function importNodes(newNodesObj, createNewIds, createMissingWorkspace) {
-    var i
-    var n
-    var newNodes
-    var nodeZmap = {}
-    if (typeof newNodesObj === 'string') {
-      if (newNodesObj === '') {
-        return
-      }
-      try {
-        newNodes = JSON.parse(newNodesObj)
-      } catch (err) {
-        var e = new Error(
-          RED._('clipboard.invalidFlow', { message: err.message })
-        )
-        e.code = 'NODE_RED'
-        throw e
-      }
-    } else {
-      newNodes = newNodesObj
+    function addLink (l) {
+        links.push(l);
     }
 
-    if (!$.isArray(newNodes)) {
-      newNodes = [newNodes]
-    }
-    var unknownTypes = []
-    for (i = 0; i < newNodes.length; i++) {
-      n = newNodes[i]
-      // TODO: remove workspace in next release+1
-      if (
-        n.type != 'workspace' &&
-        n.type != 'tab' &&
-        n.type != 'subflow' &&
-        !registry.getNodeType(n.type) &&
-        n.type.substring(0, 8) != 'subflow:' &&
-        unknownTypes.indexOf(n.type) == -1
-      ) {
-        unknownTypes.push(n.type)
-      }
-      if (n.z) {
-        nodeZmap[n.z] = nodeZmap[n.z] || []
-        nodeZmap[n.z].push(n)
-      }
-    }
-    if (unknownTypes.length > 0) {
-      var typeList = '<ul><li>' + unknownTypes.join('</li><li>') + '</li></ul>'
-      var type = 'type' + (unknownTypes.length > 1 ? 's' : '')
-      var nodeMsg = type.indexOf('s') > -1 ? 'nodes' : 'a node'
-      RED.notify(
-        '<strong>' +
-          RED._('clipboard.importUnrecognised', {
-            count: unknownTypes.length
-          }) +
-          '</strong>' +
-          typeList +
-          '<p>It looks like you are using ' +
-          nodeMsg +
-          ' not supported by enebular. Don&#39;t worry! It can take some time to install ' +
-          nodeMsg +
-          '.</p><p>Please refresh your browser. If refreshing does not work, the node may be incompatible with the existing runtime.</p>',
-        'error',
-        false,
-        15000
-      )
-    }
-
-    var activeWorkspace = RED.workspaces.active()
-    var activeSubflow = getSubflow(activeWorkspace)
-    if (activeSubflow) {
-      for (i = 0; i < newNodes.length; i++) {
-        var m = /^subflow:(.+)$/.exec(newNodes[i].type)
-        if (m) {
-          var subflowId = m[1]
-          var err
-          if (subflowId === activeSubflow.id) {
-            err = new Error(
-              RED._('notification.errors.cannotAddSubflowToItself')
-            )
-          }
-          if (subflowContains(m[1], activeSubflow.id)) {
-            err = new Error(
-              RED._('notification.errors.cannotAddCircularReference')
-            )
-          }
-          if (err) {
-            // TODO: standardise error codes
-            err.code = 'NODE_RED'
-            throw err
-          }
+    function getNode (id) {
+        if (id in configNodes) {
+            return configNodes[id];
+        } else {
+            for (var n in nodes) {
+                if (nodes[n].id == id) {
+                    return nodes[n];
+                }
+            }
         }
-      }
+        return null;
     }
 
-    var new_workspaces = []
-    var workspace_map = {}
-    var new_subflows = []
-    var subflow_map = {}
-    var subflow_blacklist = {}
-    var node_map = {}
-    var new_nodes = []
-    var new_links = []
-    var nid
-    var def
-    var configNode
-    var missingWorkspace = null
-    var d
+    function removeNode (id) {
+        var removedLinks = [];
+        var removedNodes = [];
+        var node;
+        if (id in configNodes) {
+            node = configNodes[id];
+            delete configNodes[id];
+            RED.events.emit('nodes:remove', node);
+            RED.workspaces.refresh();
+        } else {
+            node = getNode(id);
+            if (node) {
+                nodes.splice(nodes.indexOf(node), 1);
+                removedLinks = links.filter(function (l) { return (l.source === node) || (l.target === node); });
+                removedLinks.forEach(function (l) { links.splice(links.indexOf(l), 1); });
+                var updatedConfigNode = false;
+                for (var d in node._def.defaults) {
+                    if (node._def.defaults.hasOwnProperty(d)) {
+                        var property = node._def.defaults[d];
+                        if (property.type) {
+                            var type = registry.getNodeType(property.type);
+                            if (type && type.category == "config") {
+                                var configNode = configNodes[node[d]];
+                                if (configNode) {
+                                    updatedConfigNode = true;
+                                    if (configNode._def.exclusive) {
+                                        removeNode(node[d]);
+                                        removedNodes.push(configNode);
+                                    } else {
+                                        var users = configNode.users;
+                                        users.splice(users.indexOf(node), 1);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if (updatedConfigNode) {
+                    RED.workspaces.refresh();
+                }
+                try {
+                    if (node._def.oneditdelete) {
+                        node._def.oneditdelete.call(node);
+                    }
+                } catch (err) {
+                    console.log("oneditdelete", node.id, node.type, err.toString());
+                }
+                RED.events.emit('nodes:remove', node);
+            }
+        }
+        if (node && node._def.onremove) {
+            // Deprecated: never documented but used by some early nodes
+            console.log("Deprecated API warning: node type ", node.type, " has an onremove function - should be oneditremove - please report");
+            node._def.onremove.call(n);
+        }
+        return { links: removedLinks, nodes: removedNodes };
+    }
 
-    // Find all tabs and subflow templates
-    for (i = 0; i < newNodes.length; i++) {
-      n = newNodes[i]
-      // TODO: remove workspace in next release+1
-      if (n.type === 'workspace' || n.type === 'tab') {
-        if (n.type === 'workspace') {
-          n.type = 'tab'
+    function removeLink (l) {
+        var index = links.indexOf(l);
+        if (index != -1) {
+            links.splice(index, 1);
         }
-        if (defaultWorkspace == null) {
-          defaultWorkspace = n
+    }
+
+    function addWorkspace (ws) {
+        workspaces[ws.id] = ws;
+        ws._def = RED.nodes.getType('tab');
+        workspacesOrder.push(ws.id);
+    }
+    function getWorkspace (id) {
+        return workspaces[id];
+    }
+    function removeWorkspace (id) {
+        delete workspaces[id];
+        workspacesOrder.splice(workspacesOrder.indexOf(id), 1);
+
+        var removedNodes = [];
+        var removedLinks = [];
+        var n;
+        var node;
+        for (n = 0; n < nodes.length; n++) {
+            node = nodes[n];
+            if (node.z == id) {
+                removedNodes.push(node);
+            }
         }
+        for (n in configNodes) {
+            if (configNodes.hasOwnProperty(n)) {
+                node = configNodes[n];
+                if (node.z == id) {
+                    removedNodes.push(node);
+                }
+            }
+        }
+        for (n = 0; n < removedNodes.length; n++) {
+            var result = removeNode(removedNodes[n].id);
+            removedLinks = removedLinks.concat(result.links);
+        }
+        return { nodes: removedNodes, links: removedLinks };
+    }
+
+    function addSubflow (sf, createNewIds) {
         if (createNewIds) {
-          nid = getID()
-          workspace_map[n.id] = nid
-          n.id = nid
+            var subflowNames = Object.keys(subflows).map(function (sfid) {
+                return subflows[sfid].name;
+            });
+
+            subflowNames.sort();
+            var copyNumber = 1;
+            var subflowName = sf.name;
+            subflowNames.forEach(function (name) {
+                if (subflowName == name) {
+                    copyNumber++;
+                    subflowName = sf.name + " (" + copyNumber + ")";
+                }
+            });
+            sf.name = subflowName;
         }
-        addWorkspace(n)
-        RED.workspaces.add(n)
-        new_workspaces.push(n)
-      } else if (n.type === 'subflow') {
-        var matchingSubflow = checkForMatchingSubflow(n, nodeZmap[n.id])
-        if (matchingSubflow) {
-          subflow_blacklist[n.id] = matchingSubflow
+        subflows[sf.id] = sf;
+        RED.nodes.registerType("subflow:" + sf.id, {
+            defaults: { name: { value: "" } },
+            info: sf.info,
+            icon: function () { return sf.icon || "subflow.png" },
+            category: "subflows",
+            inputs: sf.in.length,
+            outputs: sf.out.length,
+            color: "#da9",
+            label: function () { return this.name || RED.nodes.subflow(sf.id).name },
+            labelStyle: function () { return this.name ? "node_label_italic" : ""; },
+            paletteLabel: function () { return RED.nodes.subflow(sf.id).name },
+            inputLabels: function (i) { return sf.inputLabels ? sf.inputLabels[i] : null },
+            outputLabels: function (i) { return sf.outputLabels ? sf.outputLabels[i] : null },
+            set: {
+                module: "node-red"
+            }
+        });
+        sf._def = RED.nodes.getType("subflow:" + sf.id);
+    }
+    function getSubflow (id) {
+        return subflows[id];
+    }
+    function removeSubflow (sf) {
+        delete subflows[sf.id];
+        registry.removeNodeType("subflow:" + sf.id);
+    }
+
+    function subflowContains (sfid, nodeid) {
+        for (var i = 0; i < nodes.length; i++) {
+            var node = nodes[i];
+            if (node.z === sfid) {
+                var m = /^subflow:(.+)$/.exec(node.type);
+                if (m) {
+                    if (m[1] === nodeid) {
+                        return true;
+                    } else {
+                        var result = subflowContains(m[1], nodeid);
+                        if (result) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    function getAllFlowNodes (node) {
+        var visited = {};
+        visited[node.id] = true;
+        var nns = [node];
+        var stack = [node];
+        while (stack.length !== 0) {
+            var n = stack.shift();
+            var childLinks = links.filter(function (d) { return (d.source === n) || (d.target === n); });
+            for (var i = 0; i < childLinks.length; i++) {
+                var child = (childLinks[i].source === n) ? childLinks[i].target : childLinks[i].source;
+                var id = child.id;
+                if (!id) {
+                    id = child.direction + ":" + child.i;
+                }
+                if (!visited[id]) {
+                    visited[id] = true;
+                    nns.push(child);
+                    stack.push(child);
+                }
+            }
+        }
+        return nns;
+    }
+
+    function convertWorkspace (n) {
+        var node = {};
+        node.id = n.id;
+        node.type = n.type;
+        for (var d in n._def.defaults) {
+            if (n._def.defaults.hasOwnProperty(d)) {
+                node[d] = n[d];
+            }
+        }
+        return node;
+    }
+    /**
+     * Converts a node to an exportable JSON Object
+     **/
+    function convertNode (n, exportCreds) {
+        if (n.type === 'tab') {
+            return convertWorkspace(n);
+        }
+        exportCreds = exportCreds || false;
+        var node = {};
+        node.id = n.id;
+        node.type = n.type;
+        node.z = n.z;
+
+        if (node.type == "unknown") {
+            for (var p in n._orig) {
+                if (n._orig.hasOwnProperty(p)) {
+                    node[p] = n._orig[p];
+                }
+            }
         } else {
-          subflow_map[n.id] = n
-          if (createNewIds) {
-            nid = getID()
-            n.id = nid
-          }
-          // TODO: handle createNewIds - map old to new subflow ids
-          n.in.forEach(function(input, i) {
-            input.type = 'subflow'
-            input.direction = 'in'
-            input.z = n.id
-            input.i = i
-            input.id = getID()
-          })
-          n.out.forEach(function(output, i) {
-            output.type = 'subflow'
-            output.direction = 'out'
-            output.z = n.id
-            output.i = i
-            output.id = getID()
-          })
-          new_subflows.push(n)
-          addSubflow(n, createNewIds)
+            for (var d in n._def.defaults) {
+                if (n._def.defaults.hasOwnProperty(d)) {
+                    node[d] = n[d];
+                }
+            }
+            if (exportCreds && n.credentials) {
+                var credentialSet = {};
+                node.credentials = {};
+                for (var cred in n._def.credentials) {
+                    if (n._def.credentials.hasOwnProperty(cred)) {
+                        if (n._def.credentials[cred].type == 'password') {
+                            if (!n.credentials._ ||
+                                n.credentials["has_" + cred] != n.credentials._["has_" + cred] ||
+                                (n.credentials["has_" + cred] && n.credentials[cred])) {
+                                credentialSet[cred] = n.credentials[cred];
+                            }
+                        } else if (n.credentials[cred] != null && (!n.credentials._ || n.credentials[cred] != n.credentials._[cred])) {
+                            credentialSet[cred] = n.credentials[cred];
+                        }
+                    }
+                }
+                if (Object.keys(credentialSet).length > 0) {
+                    node.credentials = credentialSet;
+                }
+            }
         }
-      }
+        if (n._def.category != "config") {
+            node.x = n.x;
+            node.y = n.y;
+            node.wires = [];
+            for (var i = 0; i < n.outputs; i++) {
+                node.wires.push([]);
+            }
+            var wires = links.filter(function (d) { return d.source === n; });
+            for (var j = 0; j < wires.length; j++) {
+                var w = wires[j];
+                if (w.target.type != "subflow") {
+                    if (w.sourcePort < node.wires.length) {
+                        node.wires[w.sourcePort].push(w.target.id);
+                    }
+                }
+            }
+
+            if (n.inputs > 0 && n.inputLabels && !/^\s*$/.test(n.inputLabels.join(""))) {
+                node.inputLabels = n.inputLabels.slice();
+            }
+            if (n.outputs > 0 && n.outputLabels && !/^\s*$/.test(n.outputLabels.join(""))) {
+                node.outputLabels = n.outputLabels.slice();
+            }
+            if ((!n._def.defaults || !n._def.defaults.hasOwnProperty("icon")) && n.icon) {
+                var defIcon = RED.utils.getDefaultNodeIcon(n._def, n);
+                if (n.icon !== defIcon.module + "/" + defIcon.file) {
+                    node.icon = n.icon;
+                }
+            }
+        }
+        return node;
     }
 
-    // Add a tab if there isn't one there already
-    if (defaultWorkspace == null) {
-      defaultWorkspace = {
-        type: 'tab',
-        id: getID(),
-        label: RED._('workspace.defaultName', { number: 1 })
-      }
-      addWorkspace(defaultWorkspace)
-      RED.workspaces.add(defaultWorkspace)
-      new_workspaces.push(defaultWorkspace)
-      activeWorkspace = RED.workspaces.active()
-    }
+    function convertSubflow (n) {
+        var node = {};
+        node.id = n.id;
+        node.type = n.type;
+        node.name = n.name;
+        node.info = n.info;
+        node.in = [];
+        node.out = [];
 
-    // Find all config nodes and add them
-    for (i = 0; i < newNodes.length; i++) {
-      n = newNodes[i]
-      def = registry.getNodeType(n.type)
-      if (def && def.category == 'config') {
-        var existingConfigNode = null
-        if (createNewIds) {
-          if (n.z) {
-            if (subflow_blacklist[n.z]) {
-              continue
-            } else if (subflow_map[n.z]) {
-              n.z = subflow_map[n.z].id
-            } else {
-              n.z = workspace_map[n.z]
-              if (!workspaces[n.z]) {
-                if (createMissingWorkspace) {
-                  if (missingWorkspace === null) {
-                    missingWorkspace = RED.workspaces.add(null, true)
-                    new_workspaces.push(missingWorkspace)
-                  }
-                  n.z = missingWorkspace.id
+        n.in.forEach(function (p) {
+            var nIn = { x: p.x, y: p.y, wires: [] };
+            var wires = links.filter(function (d) { return d.source === p });
+            for (var i = 0; i < wires.length; i++) {
+                var w = wires[i];
+                if (w.target.type != "subflow") {
+                    nIn.wires.push({ id: w.target.id })
+                }
+            }
+            node.in.push(nIn);
+        });
+        n.out.forEach(function (p, c) {
+            var nOut = { x: p.x, y: p.y, wires: [] };
+            var wires = links.filter(function (d) { return d.target === p });
+            for (i = 0; i < wires.length; i++) {
+                if (wires[i].source.type != "subflow") {
+                    nOut.wires.push({ id: wires[i].source.id, port: wires[i].sourcePort })
                 } else {
-                  n.z = activeWorkspace
+                    nOut.wires.push({ id: n.id, port: 0 })
                 }
-              }
             }
-          }
-          existingConfigNode = RED.nodes.node(n.id)
-          if (existingConfigNode) {
-            if (n.z && existingConfigNode.z !== n.z) {
-              existingConfigNode = null
-              // Check the config nodes on n.z
-              for (var cn in configNodes) {
-                if (configNodes.hasOwnProperty(cn)) {
-                  if (
-                    configNodes[cn].z === n.z &&
-                    compareNodes(configNodes[cn], n, false)
-                  ) {
-                    existingConfigNode = configNodes[cn]
-                    node_map[n.id] = configNodes[cn]
-                    break
-                  }
-                }
-              }
+            node.out.push(nOut);
+        });
+
+        if (node.in.length > 0 && n.inputLabels && !/^\s*$/.test(n.inputLabels.join(""))) {
+            node.inputLabels = n.inputLabels.slice();
+        }
+        if (node.out.length > 0 && n.outputLabels && !/^\s*$/.test(n.outputLabels.join(""))) {
+            node.outputLabels = n.outputLabels.slice();
+        }
+        if (n.icon) {
+            if (n.icon !== "node-red/subflow.png") {
+                node.icon = n.icon;
             }
-          }
         }
 
-        if (!existingConfigNode) {
-          //} || !compareNodes(existingConfigNode,n,true) || existingConfigNode._def.exclusive || existingConfigNode.z !== n.z) {
-          configNode = {
-            id: n.id,
-            z: n.z,
-            type: n.type,
-            users: [],
-            _config: {}
-          }
-          for (d in def.defaults) {
+        return node;
+    }
+    /**
+     * Converts the current node selection to an exportable JSON Object
+     **/
+    function createExportableNodeSet (set, exportedSubflows, exportedConfigNodes) {
+        var nns = [];
+        exportedConfigNodes = exportedConfigNodes || {};
+        exportedSubflows = exportedSubflows || {};
+        for (var n = 0; n < set.length; n++) {
+            var node = set[n];
+            if (node.type.substring(0, 8) == "subflow:") {
+                var subflowId = node.type.substring(8);
+                if (!exportedSubflows[subflowId]) {
+                    exportedSubflows[subflowId] = true;
+                    var subflow = getSubflow(subflowId);
+                    var subflowSet = [subflow];
+                    RED.nodes.eachNode(function (n) {
+                        if (n.z == subflowId) {
+                            subflowSet.push(n);
+                        }
+                    });
+                    var exportableSubflow = createExportableNodeSet(subflowSet, exportedSubflows, exportedConfigNodes);
+                    nns = exportableSubflow.concat(nns);
+                }
+            }
+            if (node.type != "subflow") {
+                var convertedNode = RED.nodes.convertNode(node);
+                for (var d in node._def.defaults) {
+                    if (node._def.defaults[d].type && node[d] in configNodes) {
+                        var confNode = configNodes[node[d]];
+                        var exportable = registry.getNodeType(node._def.defaults[d].type).exportable;
+                        if ((exportable == null || exportable)) {
+                            if (!(node[d] in exportedConfigNodes)) {
+                                exportedConfigNodes[node[d]] = true;
+                                set.push(confNode);
+                            }
+                        } else {
+                            convertedNode[d] = "";
+                        }
+                    }
+                }
+                nns.push(convertedNode);
+            } else {
+                var convertedSubflow = convertSubflow(node);
+                nns.push(convertedSubflow);
+            }
+        }
+        return nns;
+    }
+
+    //TODO: rename this (createCompleteNodeSet)
+    function createCompleteNodeSet (exportCredentials) {
+        if (exportCredentials === undefined) {
+            exportCredentials = true;
+        }
+        var nns = [];
+        var i;
+        for (i = 0; i < workspacesOrder.length; i++) {
+            if (workspaces[workspacesOrder[i]].type == "tab") {
+                nns.push(convertWorkspace(workspaces[workspacesOrder[i]]));
+            }
+        }
+        for (i in subflows) {
+            if (subflows.hasOwnProperty(i)) {
+                nns.push(convertSubflow(subflows[i]));
+            }
+        }
+        for (i in configNodes) {
+            if (configNodes.hasOwnProperty(i)) {
+                nns.push(convertNode(configNodes[i], exportCredentials));
+            }
+        }
+        for (i = 0; i < nodes.length; i++) {
+            var node = nodes[i];
+            nns.push(convertNode(node, exportCredentials));
+        }
+        return nns;
+    }
+
+    function checkForMatchingSubflow (subflow, subflowNodes) {
+        var i;
+        var match = null;
+        try {
+            RED.nodes.eachSubflow(function (sf) {
+                if (sf.name != subflow.name ||
+                    sf.info != subflow.info ||
+                    sf.in.length != subflow.in.length ||
+                    sf.out.length != subflow.out.length) {
+                    return;
+                }
+                var sfNodes = RED.nodes.filterNodes({ z: sf.id });
+                if (sfNodes.length != subflowNodes.length) {
+                    return;
+                }
+
+                var subflowNodeSet = [subflow].concat(subflowNodes);
+                var sfNodeSet = [sf].concat(sfNodes);
+
+                var exportableSubflowNodes = JSON.stringify(subflowNodeSet);
+                var exportableSFNodes = JSON.stringify(createExportableNodeSet(sfNodeSet));
+                var nodeMap = {};
+                for (i = 0; i < sfNodes.length; i++) {
+                    exportableSubflowNodes = exportableSubflowNodes.replace(new RegExp("\"" + subflowNodes[i].id + "\"", "g"), '"' + sfNodes[i].id + '"');
+                }
+                exportableSubflowNodes = exportableSubflowNodes.replace(new RegExp("\"" + subflow.id + "\"", "g"), '"' + sf.id + '"');
+
+                if (exportableSubflowNodes !== exportableSFNodes) {
+                    return;
+                }
+
+                match = sf;
+                throw new Error();
+            });
+        } catch (err) {
+            console.log(err.stack);
+        }
+        return match;
+    }
+    function compareNodes (nodeA, nodeB, idMustMatch) {
+        if (idMustMatch && nodeA.id != nodeB.id) {
+            return false;
+        }
+        if (nodeA.type != nodeB.type) {
+            return false;
+        }
+        var def = nodeA._def;
+        for (var d in def.defaults) {
             if (def.defaults.hasOwnProperty(d)) {
-              configNode[d] = n[d]
-              configNode._config[d] = JSON.stringify(n[d])
-            }
-          }
-          if (
-            def.hasOwnProperty('credentials') &&
-            n.hasOwnProperty('credentials')
-          ) {
-            configNode.credentials = {}
-            for (d in def.credentials) {
-              if (
-                def.credentials.hasOwnProperty(d) &&
-                n.credentials.hasOwnProperty(d)
-              ) {
-                configNode.credentials[d] = n.credentials[d]
-              }
-            }
-          }
-          configNode.label = def.label
-          configNode._def = def
-          if (createNewIds) {
-            configNode.id = getID()
-          }
-          node_map[n.id] = configNode
-          new_nodes.push(configNode)
-          RED.nodes.add(configNode)
-        }
-      }
-    }
-
-    // Find regular flow nodes and subflow instances
-    for (i = 0; i < newNodes.length; i++) {
-      n = newNodes[i]
-      // TODO: remove workspace in next release+1
-      if (n.type !== 'workspace' && n.type !== 'tab' && n.type !== 'subflow') {
-        def = registry.getNodeType(n.type)
-        if (!def || def.category != 'config') {
-          var node = {
-            x: n.x,
-            y: n.y,
-            z: n.z,
-            type: 0,
-            wires: n.wires,
-            changed: false,
-            _config: {}
-          }
-          if (createNewIds) {
-            if (subflow_blacklist[n.z]) {
-              continue
-            } else if (subflow_map[node.z]) {
-              node.z = subflow_map[node.z].id
-            } else {
-              node.z = workspace_map[node.z]
-              if (!workspaces[node.z]) {
-                if (createMissingWorkspace) {
-                  if (missingWorkspace === null) {
-                    missingWorkspace = RED.workspaces.add(null, true)
-                    new_workspaces.push(missingWorkspace)
-                  }
-                  node.z = missingWorkspace.id
+                var vA = nodeA[d];
+                var vB = nodeB[d];
+                if (typeof vA !== typeof vB) {
+                    return false;
+                }
+                if (vA === null || typeof vA === "string" || typeof vA === "number") {
+                    if (vA !== vB) {
+                        return false;
+                    }
                 } else {
-                  node.z = activeWorkspace
+                    if (JSON.stringify(vA) !== JSON.stringify(vB)) {
+                        return false;
+                    }
                 }
-              }
             }
-            node.id = getID()
-          } else {
-            node.id = n.id
-            if (
-              node.z == null ||
-              (!workspaces[node.z] && !subflow_map[node.z])
-            ) {
-              if (createMissingWorkspace) {
-                if (missingWorkspace === null) {
-                  missingWorkspace = RED.workspaces.add(null, true)
-                  new_workspaces.push(missingWorkspace)
+        }
+        return true;
+    }
+
+    function importNodes (newNodesObj, createNewIds, createMissingWorkspace) {
+        var i;
+        var n;
+        var newNodes;
+        var nodeZmap = {};
+        if (typeof newNodesObj === "string") {
+            if (newNodesObj === "") {
+                return;
+            }
+            try {
+                newNodes = JSON.parse(newNodesObj);
+            } catch (err) {
+                var e = new Error(RED._("clipboard.invalidFlow", { message: err.message }));
+                e.code = "NODE_RED";
+                throw e;
+            }
+        } else {
+            newNodes = newNodesObj;
+        }
+
+        if (!$.isArray(newNodes)) {
+            newNodes = [newNodes];
+        }
+        var isInitialLoad = false;
+        if (!initialLoad) {
+            isInitialLoad = true;
+            initialLoad = JSON.parse(JSON.stringify(newNodes));
+        }
+        var unknownTypes = [];
+        for (i = 0; i < newNodes.length; i++) {
+            n = newNodes[i];
+            // TODO: remove workspace in next release+1
+            if (n.type != "workspace" &&
+                n.type != "tab" &&
+                n.type != "subflow" &&
+                !registry.getNodeType(n.type) &&
+                n.type.substring(0, 8) != "subflow:" &&
+                unknownTypes.indexOf(n.type) == -1) {
+                unknownTypes.push(n.type);
+            }
+            if (n.z) {
+                nodeZmap[n.z] = nodeZmap[n.z] || [];
+                nodeZmap[n.z].push(n);
+            }
+
+        }
+        if (!isInitialLoad && unknownTypes.length > 0) {
+            var typeList = "<ul><li>" + unknownTypes.join("</li><li>") + "</li></ul>";
+            var type = "type" + (unknownTypes.length > 1 ? "s" : "");
+            RED.notify("<p>" + RED._("clipboard.importUnrecognised", { count: unknownTypes.length }) + "</p>" + typeList, "error", false, 10000);
+        }
+
+        if (unknownTypes.length > 0) {
+            var typeList = '<ul><li>' + unknownTypes.join('</li><li>') + '</li></ul>'
+            var type = 'type' + (unknownTypes.length > 1 ? 's' : '')
+            var nodeMsg = type.indexOf('s') > -1 ? 'nodes' : 'a node'
+            RED.notify(
+                '<strong>' +
+                RED._('clipboard.importUnrecognised', {
+                    count: unknownTypes.length
+                }) +
+                '</strong>' +
+                typeList +
+                '<p>It looks like you are using ' +
+                nodeMsg +
+                ' not supported by enebular. Don&#39;t worry! It can take some time to install ' +
+                nodeMsg +
+                '.</p><p>Please refresh your browser.</p>',
+                'error',
+                false,
+                15000
+            )
+            // setTimeout(function() {
+            //   location.reload()
+            // }, 15000)
+        }
+
+        var activeWorkspace = RED.workspaces.active();
+        //TODO: check the z of the subflow instance and check _that_ if it exists
+        var activeSubflow = getSubflow(activeWorkspace);
+        for (i = 0; i < newNodes.length; i++) {
+            var m = /^subflow:(.+)$/.exec(newNodes[i].type);
+            if (m) {
+                var subflowId = m[1];
+                var parent = getSubflow(newNodes[i].z || activeWorkspace);
+                if (parent) {
+                    var err;
+                    if (subflowId === parent.id) {
+                        err = new Error(RED._("notification.errors.cannotAddSubflowToItself"));
+                    }
+                    if (subflowContains(subflowId, parent.id)) {
+                        err = new Error(RED._("notification.errors.cannotAddCircularReference"));
+                    }
+                    if (err) {
+                        // TODO: standardise error codes
+                        err.code = "NODE_RED";
+                        throw err;
+                    }
                 }
-                node.z = missingWorkspace.id
-              } else {
-                node.z = activeWorkspace
-              }
             }
-          }
-          node.type = n.type
-          node._def = def
-          if (n.type.substring(0, 7) === 'subflow') {
-            var parentId = n.type.split(':')[1]
-            var subflow =
-              subflow_blacklist[parentId] ||
-              subflow_map[parentId] ||
-              getSubflow(parentId)
-            if (createNewIds) {
-              parentId = subflow.id
-              node.type = 'subflow:' + parentId
-              node._def = registry.getNodeType(node.type)
-              delete node.i
-            }
-            node.name = n.name
-            node.outputs = subflow.out.length
-            node.inputs = subflow.in.length
-          } else {
-            if (!node._def) {
-              if (node.x && node.y) {
-                node._def = {
-                  color: '#fee',
-                  defaults: {},
-                  label: 'unknown: ' + n.type,
-                  labelStyle: 'node_label_italic',
-                  outputs: n.outputs || n.wires.length,
-                  set: registry.getNodeSet('node-red/unknown')
+        }
+
+        var new_workspaces = [];
+        var workspace_map = {};
+        var new_subflows = [];
+        var subflow_map = {};
+        var subflow_blacklist = {};
+        var node_map = {};
+        var new_nodes = [];
+        var new_links = [];
+        var nid;
+        var def;
+        var configNode;
+        var missingWorkspace = null;
+        var d;
+
+        // Find all tabs and subflow templates
+        for (i = 0; i < newNodes.length; i++) {
+            n = newNodes[i];
+            // TODO: remove workspace in next release+1
+            if (n.type === "workspace" || n.type === "tab") {
+                if (n.type === "workspace") {
+                    n.type = "tab";
                 }
-              } else {
-                node._def = {
-                  category: 'config',
-                  set: registry.getNodeSet('node-red/unknown')
+                if (defaultWorkspace == null) {
+                    defaultWorkspace = n;
                 }
-                node.users = []
-              }
-              var orig = {}
-              for (var p in n) {
-                if (
-                  n.hasOwnProperty(p) &&
-                  p != 'x' &&
-                  p != 'y' &&
-                  p != 'z' &&
-                  p != 'id' &&
-                  p != 'wires'
-                ) {
-                  orig[p] = n[p]
+                if (createNewIds) {
+                    nid = getID();
+                    workspace_map[n.id] = nid;
+                    n.id = nid;
                 }
-              }
-              node._orig = orig
-              node.name = n.type
-              node.type = 'unknown'
-            }
-            if (node._def.category != 'config') {
-              node.inputs = n.inputs || node._def.inputs
-              node.outputs = n.outputs || node._def.outputs
-              for (d in node._def.defaults) {
-                if (node._def.defaults.hasOwnProperty(d)) {
-                  node[d] = n[d]
-                  node._config[d] = JSON.stringify(n[d])
+                addWorkspace(n);
+                RED.workspaces.add(n);
+                new_workspaces.push(n);
+            } else if (n.type === "subflow") {
+                var matchingSubflow = checkForMatchingSubflow(n, nodeZmap[n.id]);
+                if (matchingSubflow) {
+                    subflow_blacklist[n.id] = matchingSubflow;
+                } else {
+                    subflow_map[n.id] = n;
+                    if (createNewIds) {
+                        nid = getID();
+                        n.id = nid;
+                    }
+                    // TODO: handle createNewIds - map old to new subflow ids
+                    n.in.forEach(function (input, i) {
+                        input.type = "subflow";
+                        input.direction = "in";
+                        input.z = n.id;
+                        input.i = i;
+                        input.id = getID();
+                    });
+                    n.out.forEach(function (output, i) {
+                        output.type = "subflow";
+                        output.direction = "out";
+                        output.z = n.id;
+                        output.i = i;
+                        output.id = getID();
+                    });
+                    new_subflows.push(n);
+                    addSubflow(n, createNewIds);
                 }
-              }
-              node._config.x = node.x
-              node._config.y = node.y
-              if (
-                node._def.hasOwnProperty('credentials') &&
-                n.hasOwnProperty('credentials')
-              ) {
-                node.credentials = {}
-                for (d in node._def.credentials) {
-                  if (
-                    node._def.credentials.hasOwnProperty(d) &&
-                    n.credentials.hasOwnProperty(d)
-                  ) {
-                    node.credentials[d] = n.credentials[d]
-                  }
+            }
+        }
+
+        // Add a tab if there isn't one there already
+        if (defaultWorkspace == null) {
+            defaultWorkspace = { type: "tab", id: getID(), disabled: false, info: "", label: RED._('workspace.defaultName', { number: 1 }) };
+            addWorkspace(defaultWorkspace);
+            RED.workspaces.add(defaultWorkspace);
+            new_workspaces.push(defaultWorkspace);
+            activeWorkspace = RED.workspaces.active();
+        }
+
+        // Find all config nodes and add them
+        for (i = 0; i < newNodes.length; i++) {
+            n = newNodes[i];
+            def = registry.getNodeType(n.type);
+            if (def && def.category == "config") {
+                var existingConfigNode = null;
+                if (createNewIds) {
+                    if (n.z) {
+                        if (subflow_blacklist[n.z]) {
+                            continue;
+                        } else if (subflow_map[n.z]) {
+                            n.z = subflow_map[n.z].id;
+                        } else {
+                            n.z = workspace_map[n.z];
+                            if (!workspaces[n.z]) {
+                                if (createMissingWorkspace) {
+                                    if (missingWorkspace === null) {
+                                        missingWorkspace = RED.workspaces.add(null, true);
+                                        new_workspaces.push(missingWorkspace);
+                                    }
+                                    n.z = missingWorkspace.id;
+                                } else {
+                                    n.z = activeWorkspace;
+                                }
+                            }
+                        }
+                    }
+                    existingConfigNode = RED.nodes.node(n.id);
+                    if (existingConfigNode) {
+                        if (n.z && existingConfigNode.z !== n.z) {
+                            existingConfigNode = null;
+                            // Check the config nodes on n.z
+                            for (var cn in configNodes) {
+                                if (configNodes.hasOwnProperty(cn)) {
+                                    if (configNodes[cn].z === n.z && compareNodes(configNodes[cn], n, false)) {
+                                        existingConfigNode = configNodes[cn];
+                                        node_map[n.id] = configNodes[cn];
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                 }
-              }
+
+                if (!existingConfigNode || existingConfigNode._def.exclusive) { //} || !compareNodes(existingConfigNode,n,true) || existingConfigNode.z !== n.z) {
+                    configNode = { id: n.id, z: n.z, type: n.type, users: [], _config: {} };
+                    for (d in def.defaults) {
+                        if (def.defaults.hasOwnProperty(d)) {
+                            configNode[d] = n[d];
+                            configNode._config[d] = JSON.stringify(n[d]);
+                        }
+                    }
+                    if (def.hasOwnProperty('credentials') && n.hasOwnProperty('credentials')) {
+                        configNode.credentials = {};
+                        for (d in def.credentials) {
+                            if (def.credentials.hasOwnProperty(d) && n.credentials.hasOwnProperty(d)) {
+                                configNode.credentials[d] = n.credentials[d];
+                            }
+                        }
+                    }
+                    configNode.label = def.label;
+                    configNode._def = def;
+                    if (createNewIds) {
+                        configNode.id = getID();
+                    }
+                    node_map[n.id] = configNode;
+                    new_nodes.push(configNode);
+                    RED.nodes.add(configNode);
+                }
             }
-          }
-          addNode(node)
-          RED.editor.validateNode(node)
-          node_map[n.id] = node
-          if (node._def.category != 'config') {
-            new_nodes.push(node)
-          }
         }
-      }
-    }
-    // TODO: make this a part of the node definition so it doesn't have to
-    //       be hardcoded here
-    var nodeTypeArrayReferences = {
-      catch: 'scope',
-      status: 'scope',
-      'link in': 'links',
-      'link out': 'links'
-    }
 
-    // Remap all wires and config node references
-    for (i = 0; i < new_nodes.length; i++) {
-      n = new_nodes[i]
-      if (n.wires) {
-        for (var w1 = 0; w1 < n.wires.length; w1++) {
-          var wires = n.wires[w1] instanceof Array ? n.wires[w1] : [n.wires[w1]]
-          for (var w2 = 0; w2 < wires.length; w2++) {
-            if (wires[w2] in node_map) {
-              var link = {
-                source: n,
-                sourcePort: w1,
-                target: node_map[wires[w2]]
-              }
-              addLink(link)
-              new_links.push(link)
+        // Find regular flow nodes and subflow instances
+        for (i = 0; i < newNodes.length; i++) {
+            n = newNodes[i];
+            // TODO: remove workspace in next release+1
+            if (n.type !== "workspace" && n.type !== "tab" && n.type !== "subflow") {
+                def = registry.getNodeType(n.type);
+                if (!def || def.category != "config") {
+                    var node = {
+                        x: n.x,
+                        y: n.y,
+                        z: n.z,
+                        type: 0,
+                        wires: n.wires,
+                        inputLabels: n.inputLabels,
+                        outputLabels: n.outputLabels,
+                        icon: n.icon,
+                        changed: false,
+                        _config: {}
+                    };
+                    if (createNewIds) {
+                        if (subflow_blacklist[n.z]) {
+                            continue;
+                        } else if (subflow_map[node.z]) {
+                            node.z = subflow_map[node.z].id;
+                        } else {
+                            node.z = workspace_map[node.z];
+                            if (!workspaces[node.z]) {
+                                if (createMissingWorkspace) {
+                                    if (missingWorkspace === null) {
+                                        missingWorkspace = RED.workspaces.add(null, true);
+                                        new_workspaces.push(missingWorkspace);
+                                    }
+                                    node.z = missingWorkspace.id;
+                                } else {
+                                    node.z = activeWorkspace;
+                                }
+                            }
+                        }
+                        node.id = getID();
+                    } else {
+                        node.id = n.id;
+                        if (node.z == null || (!workspaces[node.z] && !subflow_map[node.z])) {
+                            if (createMissingWorkspace) {
+                                if (missingWorkspace === null) {
+                                    missingWorkspace = RED.workspaces.add(null, true);
+                                    new_workspaces.push(missingWorkspace);
+                                }
+                                node.z = missingWorkspace.id;
+                            } else {
+                                node.z = activeWorkspace;
+                            }
+                        }
+                    }
+                    node.type = n.type;
+                    node._def = def;
+                    if (n.type.substring(0, 7) === "subflow") {
+                        var parentId = n.type.split(":")[1];
+                        var subflow = subflow_blacklist[parentId] || subflow_map[parentId] || getSubflow(parentId);
+                        if (createNewIds) {
+                            parentId = subflow.id;
+                            node.type = "subflow:" + parentId;
+                            node._def = registry.getNodeType(node.type);
+                            delete node.i;
+                        }
+                        node.name = n.name;
+                        node.outputs = subflow.out.length;
+                        node.inputs = subflow.in.length;
+                    } else {
+                        if (!node._def) {
+                            if (node.x && node.y) {
+                                node._def = {
+                                    color: "#fee",
+                                    defaults: {},
+                                    label: "unknown: " + n.type,
+                                    labelStyle: "node_label_italic",
+                                    outputs: n.outputs || n.wires.length,
+                                    set: registry.getNodeSet("node-red/unknown")
+                                }
+                            } else {
+                                node._def = {
+                                    category: "config",
+                                    set: registry.getNodeSet("node-red/unknown")
+                                };
+                                node.users = [];
+                                // This is a config node, so delete the default
+                                // non-config node properties
+                                delete node.x;
+                                delete node.y;
+                                delete node.wires;
+                                delete node.inputLabels;
+                                delete node.outputLabels;
+                            }
+                            var orig = {};
+                            for (var p in n) {
+                                if (n.hasOwnProperty(p) && p != "x" && p != "y" && p != "z" && p != "id" && p != "wires") {
+                                    orig[p] = n[p];
+                                }
+                            }
+                            node._orig = orig;
+                            node.name = n.type;
+                            node.type = "unknown";
+                        }
+                        if (node._def.category != "config") {
+                            node.inputs = n.inputs || node._def.inputs;
+                            node.outputs = n.outputs || node._def.outputs;
+                            // If 'wires' is longer than outputs, clip wires
+                            if (node.hasOwnProperty('wires') && node.wires.length > node.outputs) {
+                                console.log("Warning: node.wires longer than node.outputs - trimming wires:", node.id, " wires:", node.wires.length, " outputs:", node.outputs);
+                                node.wires = node.wires.slice(0, node.outputs);
+                            }
+                            for (d in node._def.defaults) {
+                                if (node._def.defaults.hasOwnProperty(d)) {
+                                    node[d] = n[d];
+                                    node._config[d] = JSON.stringify(n[d]);
+                                }
+                            }
+                            node._config.x = node.x;
+                            node._config.y = node.y;
+                            if (node._def.hasOwnProperty('credentials') && n.hasOwnProperty('credentials')) {
+                                node.credentials = {};
+                                for (d in node._def.credentials) {
+                                    if (node._def.credentials.hasOwnProperty(d) && n.credentials.hasOwnProperty(d)) {
+                                        node.credentials[d] = n.credentials[d];
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    addNode(node);
+                    RED.editor.validateNode(node);
+                    node_map[n.id] = node;
+                    // If an 'unknown' config node, it will not have been caught by the
+                    // proper config node handling, so needs adding to new_nodes here
+                    if (node.type === "unknown" || node._def.category !== "config") {
+                        new_nodes.push(node);
+                    }
+                }
             }
-          }
         }
-        delete n.wires
-      }
-      for (var d3 in n._def.defaults) {
-        if (n._def.defaults.hasOwnProperty(d3)) {
-          if (n._def.defaults[d3].type && node_map[n[d3]]) {
-            n[d3] = node_map[n[d3]].id
-            configNode = RED.nodes.node(n[d3])
-            if (configNode && configNode.users.indexOf(n) === -1) {
-              configNode.users.push(n)
+        // TODO: make this a part of the node definition so it doesn't have to
+        //       be hardcoded here
+        var nodeTypeArrayReferences = {
+            "catch": "scope",
+            "status": "scope",
+            "link in": "links",
+            "link out": "links"
+        }
+
+        // Remap all wires and config node references
+        for (i = 0; i < new_nodes.length; i++) {
+            n = new_nodes[i];
+            if (n.wires) {
+                for (var w1 = 0; w1 < n.wires.length; w1++) {
+                    var wires = (n.wires[w1] instanceof Array) ? n.wires[w1] : [n.wires[w1]];
+                    for (var w2 = 0; w2 < wires.length; w2++) {
+                        if (node_map.hasOwnProperty(wires[w2])) {
+                            if (n.z === node_map[wires[w2]].z) {
+                                var link = { source: n, sourcePort: w1, target: node_map[wires[w2]] };
+                                addLink(link);
+                                new_links.push(link);
+                            } else {
+                                console.log("Warning: dropping link that crosses tabs:", n.id, "->", node_map[wires[w2]].id);
+                            }
+                        }
+                    }
+                }
+                delete n.wires;
             }
-          } else if (
-            nodeTypeArrayReferences.hasOwnProperty(n.type) &&
-            nodeTypeArrayReferences[n.type] === d3 &&
-            n[d3] !== undefined &&
-            n[d3] !== null
-          ) {
-            for (var j = 0; j < n[d3].length; j++) {
-              if (node_map[n[d3][j]]) {
-                n[d3][j] = node_map[n[d3][j]].id
-              }
+            for (var d3 in n._def.defaults) {
+                if (n._def.defaults.hasOwnProperty(d3)) {
+                    if (n._def.defaults[d3].type && node_map[n[d3]]) {
+                        n[d3] = node_map[n[d3]].id;
+                        configNode = RED.nodes.node(n[d3]);
+                        if (configNode && configNode.users.indexOf(n) === -1) {
+                            configNode.users.push(n);
+                        }
+                    } else if (nodeTypeArrayReferences.hasOwnProperty(n.type) && nodeTypeArrayReferences[n.type] === d3 && n[d3] !== undefined && n[d3] !== null) {
+                        for (var j = 0; j < n[d3].length; j++) {
+                            if (node_map[n[d3][j]]) {
+                                n[d3][j] = node_map[n[d3][j]].id;
+                            }
+                        }
+
+                    }
+                }
             }
-          }
-        }
-      }
-      // If importing into a subflow, ensure an outbound-link doesn't
-      // get added
-      if (activeSubflow && /^link /.test(n.type) && n.links) {
-        n.links = n.links.filter(function(id) {
-          var otherNode = RED.nodes.node(id)
-          return otherNode && otherNode.z === activeWorkspace
-        })
-      }
-
-      // With all properties now remapped to point at valid nodes,
-      // we can validate the node
-      RED.editor.validateNode(n)
-    }
-    for (i = 0; i < new_subflows.length; i++) {
-      n = new_subflows[i]
-      n.in.forEach(function(input) {
-        input.wires.forEach(function(wire) {
-          var link = { source: input, sourcePort: 0, target: node_map[wire.id] }
-          addLink(link)
-          new_links.push(link)
-        })
-        delete input.wires
-      })
-      n.out.forEach(function(output) {
-        output.wires.forEach(function(wire) {
-          var link
-          if (subflow_map[wire.id] && subflow_map[wire.id].id == n.id) {
-            link = {
-              source: n.in[wire.port],
-              sourcePort: wire.port,
-              target: output
+            // If importing into a subflow, ensure an outbound-link doesn't
+            // get added
+            if (activeSubflow && /^link /.test(n.type) && n.links) {
+                n.links = n.links.filter(function (id) {
+                    var otherNode = RED.nodes.node(id);
+                    return (otherNode && otherNode.z === activeWorkspace)
+                });
             }
-          } else {
-            link = {
-              source: node_map[wire.id] || subflow_map[wire.id],
-              sourcePort: wire.port,
-              target: output
+
+            // With all properties now remapped to point at valid nodes,
+            // we can validate the node
+            RED.editor.validateNode(n);
+        }
+        for (i = 0; i < new_subflows.length; i++) {
+            n = new_subflows[i];
+            n.in.forEach(function (input) {
+                input.wires.forEach(function (wire) {
+                    var link = { source: input, sourcePort: 0, target: node_map[wire.id] };
+                    addLink(link);
+                    new_links.push(link);
+                });
+                delete input.wires;
+            });
+            n.out.forEach(function (output) {
+                output.wires.forEach(function (wire) {
+                    var link;
+                    if (subflow_map[wire.id] && subflow_map[wire.id].id == n.id) {
+                        link = { source: n.in[wire.port], sourcePort: wire.port, target: output };
+                    } else {
+                        link = { source: node_map[wire.id] || subflow_map[wire.id], sourcePort: wire.port, target: output };
+                    }
+                    addLink(link);
+                    new_links.push(link);
+                });
+                delete output.wires;
+            });
+        }
+
+        RED.workspaces.refresh();
+        return [new_nodes, new_links, new_workspaces, new_subflows, missingWorkspace];
+    }
+
+    // TODO: supports filter.z|type
+    function filterNodes (filter) {
+        var result = [];
+
+        for (var n = 0; n < nodes.length; n++) {
+            var node = nodes[n];
+            if (filter.hasOwnProperty("z") && node.z !== filter.z) {
+                continue;
             }
-          }
-          addLink(link)
-          new_links.push(link)
-        })
-        delete output.wires
-      })
-    }
-
-    RED.workspaces.refresh()
-    return [
-      new_nodes,
-      new_links,
-      new_workspaces,
-      new_subflows,
-      missingWorkspace
-    ]
-  }
-
-  // TODO: supports filter.z|type
-  function filterNodes(filter) {
-    var result = []
-
-    for (var n = 0; n < nodes.length; n++) {
-      var node = nodes[n]
-      if (filter.hasOwnProperty('z') && node.z !== filter.z) {
-        continue
-      }
-      if (filter.hasOwnProperty('type') && node.type !== filter.type) {
-        continue
-      }
-      result.push(node)
-    }
-    return result
-  }
-  function filterLinks(filter) {
-    var result = []
-
-    for (var n = 0; n < links.length; n++) {
-      var link = links[n]
-      if (filter.source) {
-        if (
-          filter.source.hasOwnProperty('id') &&
-          link.source.id !== filter.source.id
-        ) {
-          continue
-        }
-        if (
-          filter.source.hasOwnProperty('z') &&
-          link.source.z !== filter.source.z
-        ) {
-          continue
-        }
-      }
-      if (filter.target) {
-        if (
-          filter.target.hasOwnProperty('id') &&
-          link.target.id !== filter.target.id
-        ) {
-          continue
-        }
-        if (
-          filter.target.hasOwnProperty('z') &&
-          link.target.z !== filter.target.z
-        ) {
-          continue
-        }
-      }
-      if (
-        filter.hasOwnProperty('sourcePort') &&
-        link.sourcePort !== filter.sourcePort
-      ) {
-        continue
-      }
-      result.push(link)
-    }
-    return result
-  }
-
-  // Update any config nodes referenced by the provided node to ensure their 'users' list is correct
-  function updateConfigNodeUsers(n) {
-    for (var d in n._def.defaults) {
-      if (n._def.defaults.hasOwnProperty(d)) {
-        var property = n._def.defaults[d]
-        if (property.type) {
-          var type = registry.getNodeType(property.type)
-          if (type && type.category == 'config') {
-            var configNode = configNodes[n[d]]
-            if (configNode) {
-              if (configNode.users.indexOf(n) === -1) {
-                configNode.users.push(n)
-              }
+            if (filter.hasOwnProperty("type") && node.type !== filter.type) {
+                continue;
             }
-          }
+            result.push(node);
         }
-      }
+        return result;
     }
-  }
+    function filterLinks (filter) {
+        var result = [];
 
-  function flowVersion(version) {
-    if (version !== undefined) {
-      loadedFlowVersion = version
-    } else {
-      return loadedFlowVersion
-    }
-  }
-
-  return {
-    registry: registry,
-    setNodeList: registry.setNodeList,
-
-    getNodeSet: registry.getNodeSet,
-    addNodeSet: registry.addNodeSet,
-    removeNodeSet: registry.removeNodeSet,
-    enableNodeSet: registry.enableNodeSet,
-    disableNodeSet: registry.disableNodeSet,
-
-    registerType: registry.registerNodeType,
-    getType: registry.getNodeType,
-    convertNode: convertNode,
-
-    add: addNode,
-    remove: removeNode,
-
-    addLink: addLink,
-    removeLink: removeLink,
-
-    addWorkspace: addWorkspace,
-    removeWorkspace: removeWorkspace,
-    getWorkspaceOrder: function() {
-      return workspacesOrder
-    },
-    setWorkspaceOrder: function(order) {
-      workspacesOrder = order
-    },
-    workspace: getWorkspace,
-
-    addSubflow: addSubflow,
-    removeSubflow: removeSubflow,
-    subflow: getSubflow,
-    subflowContains: subflowContains,
-
-    eachNode: function(cb) {
-      for (var n = 0; n < nodes.length; n++) {
-        cb(nodes[n])
-      }
-    },
-    eachLink: function(cb) {
-      for (var l = 0; l < links.length; l++) {
-        cb(links[l])
-      }
-    },
-    eachConfig: function(cb) {
-      for (var id in configNodes) {
-        if (configNodes.hasOwnProperty(id)) {
-          cb(configNodes[id])
+        for (var n = 0; n < links.length; n++) {
+            var link = links[n];
+            if (filter.source) {
+                if (filter.source.hasOwnProperty("id") && link.source.id !== filter.source.id) {
+                    continue;
+                }
+                if (filter.source.hasOwnProperty("z") && link.source.z !== filter.source.z) {
+                    continue;
+                }
+            }
+            if (filter.target) {
+                if (filter.target.hasOwnProperty("id") && link.target.id !== filter.target.id) {
+                    continue;
+                }
+                if (filter.target.hasOwnProperty("z") && link.target.z !== filter.target.z) {
+                    continue;
+                }
+            }
+            if (filter.hasOwnProperty("sourcePort") && link.sourcePort !== filter.sourcePort) {
+                continue;
+            }
+            result.push(link);
         }
-      }
-    },
-    eachSubflow: function(cb) {
-      for (var id in subflows) {
-        if (subflows.hasOwnProperty(id)) {
-          cb(subflows[id])
-        }
-      }
-    },
-    eachWorkspace: function(cb) {
-      for (var i = 0; i < workspacesOrder.length; i++) {
-        cb(workspaces[workspacesOrder[i]])
-      }
-    },
-
-    node: getNode,
-
-    version: flowVersion,
-
-    filterNodes: filterNodes,
-    filterLinks: filterLinks,
-
-    import: importNodes,
-
-    pending: function() {
-      return pending
-    },
-
-    getAllFlowNodes: getAllFlowNodes,
-    createExportableNodeSet: createExportableNodeSet,
-    createCompleteNodeSet: createCompleteNodeSet,
-    updateConfigNodeUsers: updateConfigNodeUsers,
-    id: getID,
-    dirty: function(d) {
-      if (d == null) {
-        return dirty
-      } else {
-        setDirty(d)
-      }
+        return result;
     }
-  }
-})()
+
+    // Update any config nodes referenced by the provided node to ensure their 'users' list is correct
+    function updateConfigNodeUsers (n) {
+        for (var d in n._def.defaults) {
+            if (n._def.defaults.hasOwnProperty(d)) {
+                var property = n._def.defaults[d];
+                if (property.type) {
+                    var type = registry.getNodeType(property.type);
+                    if (type && type.category == "config") {
+                        var configNode = configNodes[n[d]];
+                        if (configNode) {
+                            if (configNode.users.indexOf(n) === -1) {
+                                configNode.users.push(n);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    function flowVersion (version) {
+        if (version !== undefined) {
+            loadedFlowVersion = version;
+        } else {
+            return loadedFlowVersion;
+        }
+    }
+
+    function clear () {
+        nodes = [];
+        links = [];
+        configNodes = {};
+        workspacesOrder = [];
+        var subflowIds = Object.keys(subflows);
+        subflowIds.forEach(function (id) {
+            RED.subflow.removeSubflow(id)
+        });
+        var workspaceIds = Object.keys(workspaces);
+        workspaceIds.forEach(function (id) {
+            RED.workspaces.remove(workspaces[id]);
+        });
+        defaultWorkspace = null;
+        initialLoad = null;
+        RED.nodes.dirty(false);
+        RED.view.redraw(true);
+        RED.palette.refresh();
+        RED.workspaces.refresh();
+        RED.sidebar.config.refresh();
+        RED.sidebar.info.refresh();
+
+        // var node_defs = {};
+        // var nodes = [];
+        // var configNodes = {};
+        // var links = [];
+        // var defaultWorkspace;
+        // var workspaces = {};
+        // var workspacesOrder =[];
+        // var subflows = {};
+        // var loadedFlowVersion = null;
+    }
+
+    return {
+        init: function () {
+            RED.events.on("registry:node-type-added", function (type) {
+                var def = registry.getNodeType(type);
+                var replaced = false;
+                var replaceNodes = [];
+                RED.nodes.eachNode(function (n) {
+                    if (n.type === "unknown" && n.name === type) {
+                        replaceNodes.push(n);
+                    }
+                });
+                RED.nodes.eachConfig(function (n) {
+                    if (n.type === "unknown" && n.name === type) {
+                        replaceNodes.push(n);
+                    }
+                });
+
+                if (replaceNodes.length > 0) {
+                    var reimportList = [];
+                    replaceNodes.forEach(function (n) {
+                        if (configNodes.hasOwnProperty(n.id)) {
+                            delete configNodes[n.id];
+                        } else {
+                            nodes.splice(nodes.indexOf(n), 1);
+                        }
+                        reimportList.push(convertNode(n));
+                    });
+                    RED.view.redraw(true);
+                    var result = importNodes(reimportList, false);
+                    var newNodeMap = {};
+                    result[0].forEach(function (n) {
+                        newNodeMap[n.id] = n;
+                    });
+                    RED.nodes.eachLink(function (l) {
+                        if (newNodeMap.hasOwnProperty(l.source.id)) {
+                            l.source = newNodeMap[l.source.id];
+                        }
+                        if (newNodeMap.hasOwnProperty(l.target.id)) {
+                            l.target = newNodeMap[l.target.id];
+                        }
+                    });
+                    RED.view.redraw(true);
+                }
+            });
+        },
+        registry: registry,
+        setNodeList: registry.setNodeList,
+
+        getNodeSet: registry.getNodeSet,
+        addNodeSet: registry.addNodeSet,
+        removeNodeSet: registry.removeNodeSet,
+        enableNodeSet: registry.enableNodeSet,
+        disableNodeSet: registry.disableNodeSet,
+
+        setIconSets: registry.setIconSets,
+        getIconSets: registry.getIconSets,
+
+        registerType: registry.registerNodeType,
+        getType: registry.getNodeType,
+        convertNode: convertNode,
+
+        add: addNode,
+        remove: removeNode,
+        clear: clear,
+
+        addLink: addLink,
+        removeLink: removeLink,
+
+        addWorkspace: addWorkspace,
+        removeWorkspace: removeWorkspace,
+        getWorkspaceOrder: function () { return workspacesOrder },
+        setWorkspaceOrder: function (order) { workspacesOrder = order; },
+        workspace: getWorkspace,
+
+        addSubflow: addSubflow,
+        removeSubflow: removeSubflow,
+        subflow: getSubflow,
+        subflowContains: subflowContains,
+
+        eachNode: function (cb) {
+            for (var n = 0; n < nodes.length; n++) {
+                cb(nodes[n]);
+            }
+        },
+        eachLink: function (cb) {
+            for (var l = 0; l < links.length; l++) {
+                cb(links[l]);
+            }
+        },
+        eachConfig: function (cb) {
+            for (var id in configNodes) {
+                if (configNodes.hasOwnProperty(id)) {
+                    cb(configNodes[id]);
+                }
+            }
+        },
+        eachSubflow: function (cb) {
+            for (var id in subflows) {
+                if (subflows.hasOwnProperty(id)) {
+                    cb(subflows[id]);
+                }
+            }
+        },
+        eachWorkspace: function (cb) {
+            for (var i = 0; i < workspacesOrder.length; i++) {
+                cb(workspaces[workspacesOrder[i]]);
+            }
+        },
+
+        node: getNode,
+
+        version: flowVersion,
+        originalFlow: function (flow) {
+            if (flow === undefined) {
+                return initialLoad;
+            } else {
+                initialLoad = flow;
+            }
+        },
+
+        filterNodes: filterNodes,
+        filterLinks: filterLinks,
+
+        import: importNodes,
+
+        getAllFlowNodes: getAllFlowNodes,
+        createExportableNodeSet: createExportableNodeSet,
+        createCompleteNodeSet: createCompleteNodeSet,
+        updateConfigNodeUsers: updateConfigNodeUsers,
+        id: getID,
+        dirty: function (d) {
+            if (d == null) {
+                return dirty;
+            } else {
+                setDirty(d);
+            }
+        }
+    };
+})();
 ;/**
- * Copyright 2013, 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -3904,6 +4302,291 @@ RED.nodes = (function() {
  **/
 RED.history = (function() {
     var undo_history = [];
+
+    function undoEvent(ev) {
+        var i;
+        var len;
+        var node;
+        var subflow;
+        var modifiedTabs = {};
+        if (ev) {
+            if (ev.t == 'multi') {
+                len = ev.events.length;
+                for (i=len-1;i>=0;i--) {
+                    undoEvent(ev.events[i]);
+                }
+            } else if (ev.t == 'replace') {
+                RED.nodes.clear();
+                var imported = RED.nodes.import(ev.config);
+                imported[0].forEach(function(n) {
+                    if (ev.changed[n.id]) {
+                        n.changed = true;
+                    }
+                })
+
+                RED.nodes.version(ev.rev);
+            } else if (ev.t == 'add') {
+                if (ev.nodes) {
+                    for (i=0;i<ev.nodes.length;i++) {
+                        node = RED.nodes.node(ev.nodes[i]);
+                        if (node.z) {
+                            modifiedTabs[node.z] = true;
+                        }
+                        RED.nodes.remove(ev.nodes[i]);
+                    }
+                }
+                if (ev.links) {
+                    for (i=0;i<ev.links.length;i++) {
+                        RED.nodes.removeLink(ev.links[i]);
+                    }
+                }
+                if (ev.workspaces) {
+                    for (i=0;i<ev.workspaces.length;i++) {
+                        RED.nodes.removeWorkspace(ev.workspaces[i].id);
+                        RED.workspaces.remove(ev.workspaces[i]);
+                    }
+                }
+                if (ev.subflows) {
+                    for (i=0;i<ev.subflows.length;i++) {
+                        RED.nodes.removeSubflow(ev.subflows[i]);
+                        RED.workspaces.remove(ev.subflows[i]);
+                    }
+                }
+                if (ev.subflow) {
+                    if (ev.subflow.instances) {
+                        ev.subflow.instances.forEach(function(n) {
+                            var node = RED.nodes.node(n.id);
+                            if (node) {
+                                node.changed = n.changed;
+                                node.dirty = true;
+                            }
+                        });
+                    }
+                    if (ev.subflow.hasOwnProperty('changed')) {
+                        subflow = RED.nodes.subflow(ev.subflow.id);
+                        if (subflow) {
+                            subflow.changed = ev.subflow.changed;
+                        }
+                    }
+                }
+                if (ev.removedLinks) {
+                    for (i=0;i<ev.removedLinks.length;i++) {
+                        RED.nodes.addLink(ev.removedLinks[i]);
+                    }
+                }
+
+            } else if (ev.t == "delete") {
+                if (ev.workspaces) {
+                    for (i=0;i<ev.workspaces.length;i++) {
+                        RED.nodes.addWorkspace(ev.workspaces[i]);
+                        RED.workspaces.add(ev.workspaces[i]);
+                    }
+                }
+                if (ev.subflow && ev.subflow.subflow) {
+                    RED.nodes.addSubflow(ev.subflow.subflow);
+                }
+                if (ev.subflowInputs && ev.subflowInputs.length > 0) {
+                    subflow = RED.nodes.subflow(ev.subflowInputs[0].z);
+                    subflow.in.push(ev.subflowInputs[0]);
+                    subflow.in[0].dirty = true;
+                }
+                if (ev.subflowOutputs && ev.subflowOutputs.length > 0) {
+                    subflow = RED.nodes.subflow(ev.subflowOutputs[0].z);
+                    ev.subflowOutputs.sort(function(a,b) { return a.i-b.i});
+                    for (i=0;i<ev.subflowOutputs.length;i++) {
+                        var output = ev.subflowOutputs[i];
+                        subflow.out.splice(output.i,0,output);
+                        for (var j=output.i+1;j<subflow.out.length;j++) {
+                            subflow.out[j].i++;
+                            subflow.out[j].dirty = true;
+                        }
+                        RED.nodes.eachLink(function(l) {
+                            if (l.source.type == "subflow:"+subflow.id) {
+                                if (l.sourcePort >= output.i) {
+                                    l.sourcePort++;
+                                }
+                            }
+                        });
+                    }
+                }
+                if (ev.subflow && ev.subflow.hasOwnProperty('instances')) {
+                    ev.subflow.instances.forEach(function(n) {
+                        var node = RED.nodes.node(n.id);
+                        if (node) {
+                            node.changed = n.changed;
+                            node.dirty = true;
+                        }
+                    });
+                }
+                if (subflow) {
+                    RED.nodes.filterNodes({type:"subflow:"+subflow.id}).forEach(function(n) {
+                        n.inputs = subflow.in.length;
+                        n.outputs = subflow.out.length;
+                        while (n.outputs > n.ports.length) {
+                            n.ports.push(n.ports.length);
+                        }
+                        n.resize = true;
+                        n.dirty = true;
+                    });
+                }
+                if (ev.nodes) {
+                    for (i=0;i<ev.nodes.length;i++) {
+                        RED.nodes.add(ev.nodes[i]);
+                        modifiedTabs[ev.nodes[i].z] = true;
+                    }
+                }
+                if (ev.links) {
+                    for (i=0;i<ev.links.length;i++) {
+                        RED.nodes.addLink(ev.links[i]);
+                    }
+                }
+                if (ev.changes) {
+                    for (i in ev.changes) {
+                        if (ev.changes.hasOwnProperty(i)) {
+                            node = RED.nodes.node(i);
+                            if (node) {
+                                for (var d in ev.changes[i]) {
+                                    if (ev.changes[i].hasOwnProperty(d)) {
+                                        node[d] = ev.changes[i][d];
+                                    }
+                                }
+                                node.dirty = true;
+                            }
+                        }
+                    }
+
+                }
+            } else if (ev.t == "move") {
+                for (i=0;i<ev.nodes.length;i++) {
+                    var n = ev.nodes[i];
+                    n.n.x = n.ox;
+                    n.n.y = n.oy;
+                    n.n.dirty = true;
+                    n.n.moved = n.moved;
+                }
+                // A move could have caused a link splice
+                if (ev.links) {
+                    for (i=0;i<ev.links.length;i++) {
+                        RED.nodes.removeLink(ev.links[i]);
+                    }
+                }
+                if (ev.removedLinks) {
+                    for (i=0;i<ev.removedLinks.length;i++) {
+                        RED.nodes.addLink(ev.removedLinks[i]);
+                    }
+                }
+            } else if (ev.t == "edit") {
+                for (i in ev.changes) {
+                    if (ev.changes.hasOwnProperty(i)) {
+                        if (ev.node._def.defaults && ev.node._def.defaults[i] && ev.node._def.defaults[i].type) {
+                            // This is a config node property
+                            var currentConfigNode = RED.nodes.node(ev.node[i]);
+                            if (currentConfigNode) {
+                                currentConfigNode.users.splice(currentConfigNode.users.indexOf(ev.node),1);
+                            }
+                            var newConfigNode = RED.nodes.node(ev.changes[i]);
+                            if (newConfigNode) {
+                                newConfigNode.users.push(ev.node);
+                            }
+                        }
+                        ev.node[i] = ev.changes[i];
+                    }
+                }
+                if (ev.subflow) {
+                    if (ev.subflow.hasOwnProperty('inputCount')) {
+                        if (ev.node.in.length > ev.subflow.inputCount) {
+                            ev.node.in.splice(ev.subflow.inputCount);
+                        } else if (ev.subflow.inputs.length > 0) {
+                            ev.node.in = ev.node.in.concat(ev.subflow.inputs);
+                        }
+                    }
+                    if (ev.subflow.hasOwnProperty('outputCount')) {
+                        if (ev.node.out.length > ev.subflow.outputCount) {
+                            ev.node.out.splice(ev.subflow.outputCount);
+                        } else if (ev.subflow.outputs.length > 0) {
+                            ev.node.out = ev.node.out.concat(ev.subflow.outputs);
+                        }
+                    }
+                    if (ev.subflow.hasOwnProperty('instances')) {
+                        ev.subflow.instances.forEach(function(n) {
+                            var node = RED.nodes.node(n.id);
+                            if (node) {
+                                node.changed = n.changed;
+                                node.dirty = true;
+                            }
+                        });
+                    }
+                    RED.editor.validateNode(ev.node);
+                    RED.nodes.filterNodes({type:"subflow:"+ev.node.id}).forEach(function(n) {
+                        n.inputs = ev.node.in.length;
+                        n.outputs = ev.node.out.length;
+                        RED.editor.updateNodeProperties(n);
+                        RED.editor.validateNode(n);
+                    });
+                } else {
+                    var outputMap;
+                    if (ev.outputMap) {
+                        outputMap = {};
+                        for (var port in ev.outputMap) {
+                            if (ev.outputMap.hasOwnProperty(port) && ev.outputMap[port] !== "-1") {
+                                outputMap[ev.outputMap[port]] = port;
+                            }
+                        }
+                    }
+                    RED.editor.updateNodeProperties(ev.node,outputMap);
+                    RED.editor.validateNode(ev.node);
+                }
+                if (ev.links) {
+                    for (i=0;i<ev.links.length;i++) {
+                        RED.nodes.addLink(ev.links[i]);
+                    }
+                }
+                ev.node.dirty = true;
+                ev.node.changed = ev.changed;
+            } else if (ev.t == "createSubflow") {
+                if (ev.nodes) {
+                    RED.nodes.filterNodes({z:ev.subflow.subflow.id}).forEach(function(n) {
+                        n.z = ev.activeWorkspace;
+                        n.dirty = true;
+                    });
+                    for (i=0;i<ev.nodes.length;i++) {
+                        RED.nodes.remove(ev.nodes[i]);
+                    }
+                }
+                if (ev.links) {
+                    for (i=0;i<ev.links.length;i++) {
+                        RED.nodes.removeLink(ev.links[i]);
+                    }
+                }
+
+                RED.nodes.removeSubflow(ev.subflow.subflow);
+                RED.workspaces.remove(ev.subflow.subflow);
+
+                if (ev.removedLinks) {
+                    for (i=0;i<ev.removedLinks.length;i++) {
+                        RED.nodes.addLink(ev.removedLinks[i]);
+                    }
+                }
+            } else if (ev.t == "reorder") {
+                if (ev.order) {
+                    RED.workspaces.order(ev.order);
+                }
+            }
+            Object.keys(modifiedTabs).forEach(function(id) {
+                var subflow = RED.nodes.subflow(id);
+                if (subflow) {
+                    RED.editor.validateNode(subflow);
+                }
+            });
+
+            RED.nodes.dirty(ev.dirty);
+            RED.view.redraw(true);
+            RED.palette.refresh();
+            RED.workspaces.refresh();
+            RED.sidebar.config.refresh();
+        }
+
+    }
 
     return {
         //TODO: this function is a placeholder until there is a 'save' event that can be listened to
@@ -3923,269 +4606,19 @@ RED.history = (function() {
         },
         pop: function() {
             var ev = undo_history.pop();
-            var i;
-            var node;
-            var subflow;
-            var modifiedTabs = {};
-            if (ev) {
-                if (ev.t == 'add') {
-                    if (ev.nodes) {
-                        for (i=0;i<ev.nodes.length;i++) {
-                            node = RED.nodes.node(ev.nodes[i]);
-                            if (node.z) {
-                                modifiedTabs[node.z] = true;
-                            }
-                            RED.nodes.remove(ev.nodes[i]);
-                        }
-                    }
-                    if (ev.links) {
-                        for (i=0;i<ev.links.length;i++) {
-                            RED.nodes.removeLink(ev.links[i]);
-                        }
-                    }
-                    if (ev.workspaces) {
-                        for (i=0;i<ev.workspaces.length;i++) {
-                            RED.nodes.removeWorkspace(ev.workspaces[i].id);
-                            RED.workspaces.remove(ev.workspaces[i]);
-                        }
-                    }
-                    if (ev.subflows) {
-                        for (i=0;i<ev.subflows.length;i++) {
-                            RED.nodes.removeSubflow(ev.subflows[i]);
-                            RED.workspaces.remove(ev.subflows[i]);
-                        }
-                    }
-                    if (ev.subflow) {
-                        if (ev.subflow.instances) {
-                            ev.subflow.instances.forEach(function(n) {
-                                var node = RED.nodes.node(n.id);
-                                if (node) {
-                                    node.changed = n.changed;
-                                    node.dirty = true;
-                                }
-                            });
-                        }
-                        if (ev.subflow.hasOwnProperty('changed')) {
-                            subflow = RED.nodes.subflow(ev.subflow.id);
-                            if (subflow) {
-                                subflow.changed = ev.subflow.changed;
-                            }
-                        }
-                    }
-                    if (ev.removedLinks) {
-                        for (i=0;i<ev.removedLinks.length;i++) {
-                            RED.nodes.addLink(ev.removedLinks[i]);
-                        }
-                    }
-
-                } else if (ev.t == "delete") {
-                    if (ev.workspaces) {
-                        for (i=0;i<ev.workspaces.length;i++) {
-                            RED.nodes.addWorkspace(ev.workspaces[i]);
-                            RED.workspaces.add(ev.workspaces[i]);
-                        }
-                    }
-                    if (ev.subflow && ev.subflow.subflow) {
-                        RED.nodes.addSubflow(ev.subflow.subflow);
-                    }
-                    if (ev.subflowInputs && ev.subflowInputs.length > 0) {
-                        subflow = RED.nodes.subflow(ev.subflowInputs[0].z);
-                        subflow.in.push(ev.subflowInputs[0]);
-                        subflow.in[0].dirty = true;
-                    }
-                    if (ev.subflowOutputs && ev.subflowOutputs.length > 0) {
-                        subflow = RED.nodes.subflow(ev.subflowOutputs[0].z);
-                        ev.subflowOutputs.sort(function(a,b) { return a.i-b.i});
-                        for (i=0;i<ev.subflowOutputs.length;i++) {
-                            var output = ev.subflowOutputs[i];
-                            subflow.out.splice(output.i,0,output);
-                            for (var j=output.i+1;j<subflow.out.length;j++) {
-                                subflow.out[j].i++;
-                                subflow.out[j].dirty = true;
-                            }
-                            RED.nodes.eachLink(function(l) {
-                                if (l.source.type == "subflow:"+subflow.id) {
-                                    if (l.sourcePort >= output.i) {
-                                        l.sourcePort++;
-                                    }
-                                }
-                            });
-                        }
-                    }
-                    if (ev.subflow && ev.subflow.hasOwnProperty('instances')) {
-                        ev.subflow.instances.forEach(function(n) {
-                            var node = RED.nodes.node(n.id);
-                            if (node) {
-                                node.changed = n.changed;
-                                node.dirty = true;
-                            }
-                        });
-                    }
-                    if (subflow) {
-                        RED.nodes.filterNodes({type:"subflow:"+subflow.id}).forEach(function(n) {
-                            n.inputs = subflow.in.length;
-                            n.outputs = subflow.out.length;
-                            while (n.outputs > n.ports.length) {
-                                n.ports.push(n.ports.length);
-                            }
-                            n.resize = true;
-                            n.dirty = true;
-                        });
-                    }
-                    if (ev.nodes) {
-                        for (i=0;i<ev.nodes.length;i++) {
-                            RED.nodes.add(ev.nodes[i]);
-                            modifiedTabs[ev.nodes[i].z] = true;
-                        }
-                    }
-                    if (ev.links) {
-                        for (i=0;i<ev.links.length;i++) {
-                            RED.nodes.addLink(ev.links[i]);
-                        }
-                    }
-                    if (ev.changes) {
-                        for (i in ev.changes) {
-                            if (ev.changes.hasOwnProperty(i)) {
-                                node = RED.nodes.node(i);
-                                if (node) {
-                                    for (var d in ev.changes[i]) {
-                                        if (ev.changes[i].hasOwnProperty(d)) {
-                                            node[d] = ev.changes[i][d];
-                                        }
-                                    }
-                                    node.dirty = true;
-                                }
-                            }
-                        }
-
-                    }
-                } else if (ev.t == "move") {
-                    for (i=0;i<ev.nodes.length;i++) {
-                        var n = ev.nodes[i];
-                        n.n.x = n.ox;
-                        n.n.y = n.oy;
-                        n.n.dirty = true;
-                        n.n.changed = n.changed;
-                    }
-                    // A move could have caused a link splice
-                    if (ev.links) {
-                        for (i=0;i<ev.links.length;i++) {
-                            RED.nodes.removeLink(ev.links[i]);
-                        }
-                    }
-                    if (ev.removedLinks) {
-                        for (i=0;i<ev.removedLinks.length;i++) {
-                            RED.nodes.addLink(ev.removedLinks[i]);
-                        }
-                    }
-                } else if (ev.t == "edit") {
-                    for (i in ev.changes) {
-                        if (ev.changes.hasOwnProperty(i)) {
-                            if (ev.node._def.defaults[i].type) {
-                                // This is a config node property
-                                var currentConfigNode = RED.nodes.node(ev.node[i]);
-                                if (currentConfigNode) {
-                                    currentConfigNode.users.splice(currentConfigNode.users.indexOf(ev.node),1);
-                                }
-                                var newConfigNode = RED.nodes.node(ev.changes[i]);
-                                if (newConfigNode) {
-                                    newConfigNode.users.push(ev.node);
-                                }
-                            }
-                            ev.node[i] = ev.changes[i];
-                        }
-                    }
-                    if (ev.subflow) {
-                        if (ev.subflow.hasOwnProperty('inputCount')) {
-                            if (ev.node.in.length > ev.subflow.inputCount) {
-                                ev.node.in.splice(ev.subflow.inputCount);
-                            } else if (ev.subflow.inputs.length > 0) {
-                                ev.node.in = ev.node.in.concat(ev.subflow.inputs);
-                            }
-                        }
-                        if (ev.subflow.hasOwnProperty('outputCount')) {
-                            if (ev.node.out.length > ev.subflow.outputCount) {
-                                ev.node.out.splice(ev.subflow.outputCount);
-                            } else if (ev.subflow.outputs.length > 0) {
-                                ev.node.out = ev.node.out.concat(ev.subflow.outputs);
-                            }
-                        }
-                        if (ev.subflow.hasOwnProperty('instances')) {
-                            ev.subflow.instances.forEach(function(n) {
-                                var node = RED.nodes.node(n.id);
-                                if (node) {
-                                    node.changed = n.changed;
-                                    node.dirty = true;
-                                }
-                            });
-                        }
-                        RED.nodes.filterNodes({type:"subflow:"+ev.node.id}).forEach(function(n) {
-                            n.inputs = ev.node.in.length;
-                            n.outputs = ev.node.out.length;
-                            RED.editor.updateNodeProperties(n);
-                        });
-                    } else {
-                        RED.editor.updateNodeProperties(ev.node);
-                        RED.editor.validateNode(ev.node);
-                    }
-                    if (ev.links) {
-                        for (i=0;i<ev.links.length;i++) {
-                            RED.nodes.addLink(ev.links[i]);
-                        }
-                    }
-                    ev.node.dirty = true;
-                    ev.node.changed = ev.changed;
-                } else if (ev.t == "createSubflow") {
-                    if (ev.nodes) {
-                        RED.nodes.filterNodes({z:ev.subflow.subflow.id}).forEach(function(n) {
-                            n.z = ev.activeWorkspace;
-                            n.dirty = true;
-                        });
-                        for (i=0;i<ev.nodes.length;i++) {
-                            RED.nodes.remove(ev.nodes[i]);
-                        }
-                    }
-                    if (ev.links) {
-                        for (i=0;i<ev.links.length;i++) {
-                            RED.nodes.removeLink(ev.links[i]);
-                        }
-                    }
-
-                    RED.nodes.removeSubflow(ev.subflow.subflow);
-                    RED.workspaces.remove(ev.subflow.subflow);
-
-                    if (ev.removedLinks) {
-                        for (i=0;i<ev.removedLinks.length;i++) {
-                            RED.nodes.addLink(ev.removedLinks[i]);
-                        }
-                    }
-                } else if (ev.t == "reorder") {
-                    if (ev.order) {
-                        RED.workspaces.order(ev.order);
-                    }
-                }
-                Object.keys(modifiedTabs).forEach(function(id) {
-                    var subflow = RED.nodes.subflow(id);
-                    if (subflow) {
-                        RED.editor.validateNode(subflow);
-                    }
-                });
-
-                RED.nodes.dirty(ev.dirty);
-                RED.view.redraw(true);
-                RED.palette.refresh();
-                RED.workspaces.refresh();
-                RED.sidebar.config.refresh();
-            }
+            undoEvent(ev);
         },
         peek: function() {
             return undo_history[undo_history.length-1];
+        },
+        clear: function() {
+            undo_history = [];
         }
     }
 
 })();
 ;/**
- * Copyright 2013 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -4200,11 +4633,27 @@ RED.history = (function() {
  * limitations under the License.
  **/
 RED.validators = {
-    number: function(){return function(v) { return v!=='' && !isNaN(v);}},
-    regex: function(re){return function(v) { return re.test(v);}}
+    number: function(blankAllowed){return function(v) { return (blankAllowed&&(v===''||v===undefined)) || (v!=='' && !isNaN(v));}},
+    regex: function(re){return function(v) { return re.test(v);}},
+    typedInput: function(ptypeName,isConfig) { return function(v) {
+        var ptype = $("#node-"+(isConfig?"config-":"")+"input-"+ptypeName).val() || this[ptypeName];
+        if (ptype === 'json') {
+            try {
+                JSON.parse(v);
+                return true;
+            } catch(err) {
+                return false;
+            }
+        } else if (ptype === 'msg' || ptype === 'flow' || ptype === 'global' ) {
+            return RED.utils.validatePropertyExpression(v);
+        } else if (ptype === 'num') {
+            return /^[+-]?[0-9]*\.?[0-9]*([eE][-+]?[0-9]+)?$/.test(v);
+        }
+        return true;
+    }}
 };
 ;/**
- * Copyright 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -4232,6 +4681,9 @@ RED.validators = {
  *   - removable : boolean - whether to display delete button on items
  *   - addItem : function(row,index,itemData) - when an item is added
  *   - removeItem : function(itemData) - called when an item is removed
+ *   - filter : function(itemData) - called for each item to determine if it should be shown
+ *   - sort : function(itemDataA,itemDataB) - called to sort items
+ *   - scrollOnAdd : boolean - whether to scroll to newly added items
  * methods:
  *   - addItem(itemData)
  *   - removeItem(itemData)
@@ -4239,6 +4691,9 @@ RED.validators = {
  *   - height(height)
  *   - items()
  *   - empty()
+ *   - filter(filter)
+ *   - sort(sort)
+ *   - length()
  */
     $.widget( "nodered.editableList", {
         _create: function() {
@@ -4249,9 +4704,19 @@ RED.validators = {
             this.uiContainer = this.element
                 .wrap( "<div>" )
                 .parent();
-            this.topContainer = this.uiContainer.wrap("<div>").parent();
 
+            if (this.options.header) {
+                this.options.header.addClass("red-ui-editableList-header");
+                this.borderContainer = this.uiContainer.wrap("<div>").parent();
+                this.borderContainer.prepend(this.options.header);
+                this.topContainer = this.borderContainer.wrap("<div>").parent();
+            } else {
+                this.topContainer = this.uiContainer.wrap("<div>").parent();
+            }
             this.topContainer.addClass('red-ui-editableList');
+            if (this.options.class) {
+                this.topContainer.addClass(this.options.class);
+            }
 
             if (this.options.addButton !== false) {
                 var addLabel;
@@ -4264,7 +4729,7 @@ RED.validators = {
                         addLabel = 'add';
                     }
                 }
-                $('<a href="#" class="editor-button editor-button-small" style="margin-top: 4px;"><i class="fa fa-plus"></i> '+addLabel+'</a>')
+                $('<a href="#" class="editor-button editor-button-small red-ui-editableList-addButton" style="margin-top: 4px;"><i class="fa fa-plus"></i> '+addLabel+'</a>')
                     .appendTo(this.topContainer)
                     .click(function(evt) {
                         evt.preventDefault();
@@ -4274,7 +4739,7 @@ RED.validators = {
             if (this.element.css("position") === "absolute") {
                 ["top","left","bottom","right"].forEach(function(s) {
                     var v = that.element.css(s);
-                    if (s!=="auto" && s!=="") {
+                    if (v!=="auto" && v!=="") {
                         that.topContainer.css(s,v);
                         that.uiContainer.css(s,"0");
                         that.element.css(s,'auto');
@@ -4284,6 +4749,11 @@ RED.validators = {
                 this.topContainer.css("position","absolute");
                 this.uiContainer.css("position","absolute");
 
+            }
+            if (this.options.header) {
+                this.borderContainer.addClass("red-ui-editableList-border");
+            } else {
+                this.uiContainer.addClass("red-ui-editableList-border");
             }
             this.uiContainer.addClass("red-ui-editableList-container");
 
@@ -4299,6 +4769,11 @@ RED.validators = {
             if (minHeight !== '0px') {
                 this.uiContainer.css("minHeight",minHeight);
                 this.element.css("minHeight",0);
+            }
+            var maxHeight = this.element.css("maxHeight");
+            if (maxHeight !== '0px') {
+                this.uiContainer.css("maxHeight",maxHeight);
+                this.element.css("maxHeight",null);
             }
             if (this.options.height !== 'auto') {
                 this.uiContainer.css("overflow-y","scroll");
@@ -4369,7 +4844,7 @@ RED.validators = {
             var that = this;
             var count = 0;
             if (!this.activeFilter) {
-                this.element.children().show();
+                return this.element.children().show();
             }
             var items = this.items();
             items.each(function (i,el) {
@@ -4439,7 +4914,8 @@ RED.validators = {
                 var deleteButton = $('<a/>',{href:"#",class:"red-ui-editableList-item-remove editor-button editor-button-small"}).appendTo(li);
                 $('<i/>',{class:"fa fa-remove"}).appendTo(deleteButton);
                 li.addClass("red-ui-editableList-item-removable");
-                deleteButton.click(function() {
+                deleteButton.click(function(evt) {
+                    evt.preventDefault();
                     var data = row.data('data');
                     li.addClass("red-ui-editableList-item-deleting")
                     li.fadeOut(300, function() {
@@ -4469,6 +4945,11 @@ RED.validators = {
                         },0);
                     }
                 },0);
+            }
+        },
+        addItems: function(items) {
+            for (var i=0; i<items.length;i++) {
+                this.addItem(items[i]);
             }
         },
         removeItem: function(data) {
@@ -4504,7 +4985,7 @@ RED.validators = {
     });
 })(jQuery);
 ;/**
- * Copyright 2014, 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -4518,9 +4999,6 @@ RED.validators = {
  * See the License for the specific language governing permissions and
  * limitations under the License.
  **/
-
-
-
 RED.menu = (function() {
 
     var menuItems = {};
@@ -4536,20 +5014,30 @@ RED.menu = (function() {
         }
 
         function setInitialState() {
-            var savedStateActive = isSavedStateActive(opt.id);
+            var savedStateActive = RED.settings.get("menu-" + opt.id);
+            if (opt.setting) {
+                // May need to migrate pre-0.17 setting
+
+                if (savedStateActive !== null) {
+                    RED.settings.set(opt.setting,savedStateActive);
+                    RED.settings.remove("menu-" + opt.id);
+                } else {
+                    savedStateActive = RED.settings.get(opt.setting);
+                }
+            }
             if (savedStateActive) {
                 link.addClass("active");
-                opt.onselect.call(opt, true);
+                triggerAction(opt.id,true);
             } else if (savedStateActive === false) {
                 link.removeClass("active");
-                opt.onselect.call(opt, false);
+                triggerAction(opt.id,false);
             } else if (opt.hasOwnProperty("selected")) {
                 if (opt.selected) {
                     link.addClass("active");
                 } else {
                     link.removeClass("active");
                 }
-                opt.onselect.call(opt, opt.selected);
+                triggerAction(opt.id,opt.selected);
             }
         }
 
@@ -4590,7 +5078,8 @@ RED.menu = (function() {
             menuItems[opt.id] = opt;
 
             if (opt.onselect) {
-                link.click(function() {
+                link.click(function(e) {
+                    e.preventDefault();
                     if ($(this).parent().hasClass("disabled")) {
                         return;
                     }
@@ -4612,10 +5101,12 @@ RED.menu = (function() {
                             setSelected(opt.id, !selected);
                         }
                     } else {
-                        opt.onselect.call(opt);
+                        triggerAction(opt.id);
                     }
                 });
-                setInitialState();
+                if (opt.toggle) {
+                    setInitialState();
+                }
             } else if (opt.href) {
                 link.attr("target","_blank").attr("href",opt.href);
             } else if (!opt.options) {
@@ -4646,15 +5137,13 @@ RED.menu = (function() {
     }
     function createMenu(options) {
 
-        var button = $("#"+options.id);
+        var menuParent = $("#"+options.id);
 
-        //button.click(function(event) {
-        //    $("#"+options.id+"-submenu").show();
-        //    event.preventDefault();
-        //});
+        var topMenu = $("<ul/>",{id:options.id+"-submenu", class:"dropdown-menu pull-right"});
 
-
-        var topMenu = $("<ul/>",{id:options.id+"-submenu", class:"dropdown-menu pull-right"}).insertAfter(button);
+        if (menuParent.length === 1) {
+            topMenu.insertAfter(menuParent);
+        }
 
         var lastAddedSeparator = false;
         for (var i=0;i<options.options.length;i++) {
@@ -4667,18 +5156,25 @@ RED.menu = (function() {
                 }
             }
         }
+
+        return topMenu;
     }
 
-    function isSavedStateActive(id) {
-        return RED.settings.get("menu-" + id);
+    function triggerAction(id, args) {
+        var opt = menuItems[id];
+        var callback = opt.onselect;
+        if (typeof opt.onselect === 'string') {
+            callback = RED.actions.get(opt.onselect);
+        }
+        if (callback) {
+            callback.call(opt,args);
+        } else {
+            console.log("No callback for",id,opt.onselect);
+        }
     }
 
     function isSelected(id) {
         return $("#" + id).hasClass("active");
-    }
-
-    function setSavedState(id, state) {
-        RED.settings.set("menu-" + id, state);
     }
 
     function setSelected(id,state) {
@@ -4692,9 +5188,13 @@ RED.menu = (function() {
             $("#"+id).removeClass("active");
         }
         if (opt && opt.onselect) {
-            opt.onselect.call(opt,state);
+            triggerAction(opt.id,state);
         }
-        setSavedState(id, state);
+        RED.settings.set(opt.setting||("menu-"+opt.id), state);
+    }
+
+    function toggleSelected(id) {
+        setSelected(id,!isSelected(id));
     }
 
     function setDisabled(id,state) {
@@ -4736,16 +5236,6 @@ RED.menu = (function() {
         var opt = menuItems[id];
         if (opt) {
             opt.onselect = action;
-            // $("#"+id).click(function() {
-            //     if ($(this).parent().hasClass("disabled")) {
-            //         return;
-            //     }
-            //     if (menuItems[id].toggle) {
-            //         setSelected(id,!isSelected(id));
-            //     } else {
-            //         menuItems[id].onselect.call(menuItems[id]);
-            //     }
-            // });
         }
     }
 
@@ -4753,6 +5243,7 @@ RED.menu = (function() {
         init: createMenu,
         setSelected: setSelected,
         isSelected: isSelected,
+        toggleSelected: toggleSelected,
         setDisabled: setDisabled,
         addItem: addItem,
         removeItem: removeItem,
@@ -4761,7 +5252,7 @@ RED.menu = (function() {
     }
 })();
 ;/**
- * Copyright 2015 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -4777,59 +5268,129 @@ RED.menu = (function() {
  **/
 
 RED.popover = (function() {
-
-
+    var deltaSizes = {
+        "default": {
+            top: 10,
+            leftRight: 17,
+            leftLeft: 25
+        },
+        "small": {
+            top: 5,
+            leftRight: 17,
+            leftLeft: 16
+        }
+    }
     function createPopover(options) {
         var target = options.target;
-
+        var direction = options.direction || "right";
+        var trigger = options.trigger;
         var content = options.content;
         var delay = options.delay;
+        var autoClose = options.autoClose;
+        var width = options.width||"auto";
+        var size = options.size||"default";
+        if (!deltaSizes[size]) {
+            throw new Error("Invalid RED.popover size value:",size);
+        }
+
         var timer = null;
         var active;
         var div;
 
-        var openPopup = function() {
+        var openPopup = function(instant) {
             if (active) {
-                div = $('<div class="red-ui-popover"></div>').html(content).appendTo("body");
+                div = $('<div class="red-ui-popover red-ui-popover-'+direction+'"></div>').appendTo("body");
+                if (size !== "default") {
+                    div.addClass("red-ui-popover-size-"+size);
+                }
+                if (typeof content === 'function') {
+                    content.call(res).appendTo(div);
+                } else {
+                    div.html(content);
+                }
+                if (width !== "auto") {
+                    div.width(width);
+                }
+
+
                 var targetPos = target.offset();
                 var targetWidth = target.width();
                 var targetHeight = target.height();
-
                 var divHeight = div.height();
-                div.css({top: targetPos.top+targetHeight/2-divHeight/2-10,left:targetPos.left+targetWidth+17});
-
-                div.fadeIn("fast");
+                var divWidth = div.width();
+                if (direction === 'right') {
+                    div.css({top: targetPos.top+targetHeight/2-divHeight/2-deltaSizes[size].top,left:targetPos.left+targetWidth+deltaSizes[size].leftRight});
+                } else if (direction === 'left') {
+                    div.css({top: targetPos.top+targetHeight/2-divHeight/2-deltaSizes[size].top,left:targetPos.left-deltaSizes[size].leftLeft-divWidth});
+                }
+                if (instant) {
+                    div.show();
+                } else {
+                    div.fadeIn("fast");
+                }
             }
         }
-        var closePopup = function() {
+        var closePopup = function(instant) {
             if (!active) {
                 if (div) {
-                    div.fadeOut("fast",function() {
+                    if (instant) {
                         $(this).remove();
-                    });
+                    } else {
+                        div.fadeOut("fast",function() {
+                            $(this).remove();
+                        });
+                    }
                     div = null;
                 }
             }
         }
 
-        target.on('mouseenter',function(e) {
-            clearTimeout(timer);
-            active = true;
-            timer = setTimeout(openPopup,delay.show);
-        });
-        target.on('mouseleave', function(e) {
-            if (timer) {
+        if (trigger === 'hover') {
+            target.on('mouseenter',function(e) {
                 clearTimeout(timer);
-            }
-            active = false;
-            setTimeout(closePopup,delay.hide);
-        });
+                active = true;
+                timer = setTimeout(openPopup,delay.show);
+            });
+            target.on('mouseleave', function(e) {
+                if (timer) {
+                    clearTimeout(timer);
+                }
+                active = false;
+                setTimeout(closePopup,delay.hide);
+            });
+        } else if (trigger === 'click') {
+            target.click(function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                active = !active;
+                if (!active) {
+                    closePopup();
+                } else {
+                    openPopup();
+                }
+            });
+        } else if (autoClose) {
+            setTimeout(function() {
+                active = false;
+                closePopup();
+            },autoClose);
+        }
         var res = {
             setContent: function(_content) {
                 content = _content;
+                return res;
+            },
+            open: function (instant) {
+                active = true;
+                openPopup(instant);
+                return res;
+            },
+            close: function (instant) {
+                active = false;
+                closePopup(instant);
+                return res;
             }
         }
-        target.data('popover',res);
         return res;
 
     }
@@ -4840,7 +5401,7 @@ RED.popover = (function() {
 
 })();
 ;/**
- * Copyright 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -4932,11 +5493,14 @@ RED.popover = (function() {
             } else {
                 this.resultCount.text(val).show();
             }
+        },
+        change: function() {
+            this._trigger("change");
         }
     });
 })(jQuery);
 ;/**
- * Copyright 2013, 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -4959,10 +5523,13 @@ RED.tabs = (function() {
         var currentTabWidth;
         var currentActiveTabWidth = 0;
 
-        var ul = $("#"+options.id);
+        var ul = options.element || $("#"+options.id);
         var wrapper = ul.wrap( "<div>" ).parent();
         var scrollContainer = ul.wrap( "<div>" ).parent();
         wrapper.addClass("red-ui-tabs");
+        if (options.vertical) {
+            wrapper.addClass("red-ui-tabs-vertical");
+        }
         if (options.addButton && typeof options.addButton === 'function') {
             wrapper.addClass("red-ui-tabs-add");
             var addButton = $('<div class="red-ui-tab-button"><a href="#"><i class="fa fa-plus"></i></a></div>').appendTo(wrapper);
@@ -5010,6 +5577,9 @@ RED.tabs = (function() {
         ul.children().addClass("red-ui-tab");
 
         function onTabClick() {
+            if (options.onclick) {
+                options.onclick(tabs[$(this).attr('href').slice(1)]);
+            }
             activateTab($(this));
             return false;
         }
@@ -5042,6 +5612,9 @@ RED.tabs = (function() {
             if (typeof link === "string") {
                 link = ul.find("a[href='#"+link+"']");
             }
+            if (link.length === 0) {
+                return;
+            }
             if (!link.parent().hasClass("active")) {
                 ul.children().removeClass("active");
                 ul.children().css({"transition": "width 100ms"});
@@ -5063,8 +5636,23 @@ RED.tabs = (function() {
                 },100);
             }
         }
+        function activatePreviousTab() {
+            var previous = ul.find("li.active").prev();
+            if (previous.length > 0) {
+                activateTab(previous.find("a"));
+            }
+        }
+        function activateNextTab() {
+            var next = ul.find("li.active").next();
+            if (next.length > 0) {
+                activateTab(next.find("a"));
+            }
+        }
 
         function updateTabWidths() {
+            if (options.vertical) {
+                return;
+            }
             var tabs = ul.find("li.red-ui-tab");
             var width = wrapper.width();
             var tabCount = tabs.size();
@@ -5134,6 +5722,7 @@ RED.tabs = (function() {
             addTab: function(tab) {
                 tabs[tab.id] = tab;
                 var li = $("<li/>",{class:"red-ui-tab"}).appendTo(ul);
+                li.attr('id',"red-ui-tab-"+(tab.id.replace(".","-")));
                 li.data("tabId",tab.id);
                 var link = $("<a/>",{href:"#"+tab.id, class:"red-ui-tab-label"}).appendTo(li);
                 if (tab.icon) {
@@ -5149,6 +5738,7 @@ RED.tabs = (function() {
                     closeLink.append('<i class="fa fa-times" />');
 
                     closeLink.on("click",function(event) {
+                        event.preventDefault();
                         removeTab(tab.id);
                     });
                 }
@@ -5240,6 +5830,8 @@ RED.tabs = (function() {
             },
             removeTab: removeTab,
             activateTab: activateTab,
+            nextTab: activateNextTab,
+            previousTab: activatePreviousTab,
             resize: updateTabWidths,
             count: function() {
                 return ul.find("li.red-ui-tab").size();
@@ -5251,7 +5843,7 @@ RED.tabs = (function() {
                 tabs[id].label = label;
                 var tab = ul.find("a[href='#"+id+"']");
                 tab.attr("title",label);
-                tab.find("span").text(label).attr('dir', RED.text.bidi.resolveBaseTextDir(label));
+                tab.find("span.bidiAware").text(label).attr('dir', RED.text.bidi.resolveBaseTextDir(label));
                 updateTabWidths();
             },
             order: function(order) {
@@ -5287,7 +5879,7 @@ RED.tabs = (function() {
     }
 })();
 ;/**
- * Copyright 2015, 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -5302,87 +5894,69 @@ RED.tabs = (function() {
  * limitations under the License.
  **/
 (function($) {
-    function validateExpression(str) {
-        var length = str.length;
-        var start = 0;
-        var inString = false;
-        var inBox = false;
-        var quoteChar;
-        var v;
-        for (var i=0;i<length;i++) {
-            var c = str[i];
-            if (!inString) {
-                if (c === "'" || c === '"') {
-                    if (!inBox) {
-                        return false;
-                    }
-                    inString = true;
-                    quoteChar = c;
-                    start = i+1;
-                } else if (c === '.') {
-                    if (i===0 || i===length-1) {
-                        return false;
-                    }
-                    // Next char is a-z
-                    if (!/[a-z0-9\$\_]/i.test(str[i+1])) {
-                        return false;
-                    }
-                    start = i+1;
-                } else if (c === '[') {
-                    if (i === 0) {
-                        return false;
-                    }
-                    if (i===length-1) {
-                        return false;
-                    }
-                    // Next char is either a quote or a number
-                    if (!/["'\d]/.test(str[i+1])) {
-                        return false;
-                    }
-                    start = i+1;
-                    inBox = true;
-                } else if (c === ']') {
-                    if (!inBox) {
-                        return false;
-                    }
-                    if (start != i) {
-                        v = str.substring(start,i);
-                        if (!/^\d+$/.test(v)) {
-                            return false;
-                        }
-                    }
-                    start = i+1;
-                    inBox = false;
-                } else if (c === ' ') {
-                    return false;
-                }
-            } else {
-                if (c === quoteChar) {
-                    // Next char must be a ]
-                    if (!/\]/.test(str[i+1])) {
-                        return false;
-                    }
-                    start = i+1;
-                    inString = false;
-                }
-            }
-
-        }
-        if (inBox || inString) {
-            return false;
-        }
-        return true;
-    }
     var allOptions = {
-        msg: {value:"msg",label:"msg.",validate:validateExpression},
-        flow: {value:"flow",label:"flow.",validate:validateExpression},
-        global: {value:"global",label:"global.",validate:validateExpression},
+        msg: {value:"msg",label:"msg.",validate:RED.utils.validatePropertyExpression},
+        flow: {value:"flow",label:"flow.",validate:RED.utils.validatePropertyExpression},
+        global: {value:"global",label:"global.",validate:RED.utils.validatePropertyExpression},
         str: {value:"str",label:"string",icon:"red/images/typedInput/az.png"},
         num: {value:"num",label:"number",icon:"red/images/typedInput/09.png",validate:/^[+-]?[0-9]*\.?[0-9]*([eE][-+]?[0-9]+)?$/},
         bool: {value:"bool",label:"boolean",icon:"red/images/typedInput/bool.png",options:["true","false"]},
-        json: {value:"json",label:"JSON",icon:"red/images/typedInput/json.png", validate: function(v) { try{JSON.parse(v);return true;}catch(e){return false;}}},
+        json: {
+            value:"json",
+            label:"JSON",
+            icon:"red/images/typedInput/json.png",
+            validate: function(v) { try{JSON.parse(v);return true;}catch(e){return false;}},
+            expand: function() {
+                var that = this;
+                var value = this.value();
+                try {
+                    value = JSON.stringify(JSON.parse(value),null,4);
+                } catch(err) {
+                }
+                RED.editor.editJSON({
+                    value: value,
+                    complete: function(v) {
+                        var value = v;
+                        try {
+                            value = JSON.stringify(JSON.parse(v));
+                        } catch(err) {
+                        }
+                        that.value(value);
+                    }
+                })
+            }
+        },
         re: {value:"re",label:"regular expression",icon:"red/images/typedInput/re.png"},
-        date: {value:"date",label:"timestamp",hasValue:false}
+        date: {value:"date",label:"timestamp",hasValue:false},
+        jsonata: {
+            value: "jsonata",
+            label: "expression",
+            icon: "red/images/typedInput/expr.png",
+            validate: function(v) { try{jsonata(v);return true;}catch(e){return false;}},
+            expand:function() {
+                var that = this;
+                RED.editor.editExpression({
+                    value: this.value().replace(/\t/g,"\n"),
+                    complete: function(v) {
+                        that.value(v.replace(/\n/g,"\t"));
+                    }
+                })
+            }
+        },
+        bin: {
+            value: "bin",
+            label: "buffer",
+            icon: "red/images/typedInput/bin.png",
+            expand: function() {
+                var that = this;
+                RED.editor.editBuffer({
+                    value: this.value(),
+                    complete: function(v) {
+                        that.value(v);
+                    }
+                })
+            }
+        }
     };
     var nlsd = false;
 
@@ -5405,7 +5979,7 @@ RED.tabs = (function() {
             this.uiSelect = this.elementDiv.wrap( "<div>" ).parent();
             var attrStyle = this.element.attr('style');
             var m;
-            if ((m = /width\s*:\s*(\d+%)/i.exec(attrStyle)) !== null) {
+            if ((m = /width\s*:\s*(calc\s*\(.*\)|\d+(%|px))/i.exec(attrStyle)) !== null) {
                 this.element.css('width','100%');
                 this.uiSelect.width(m[1]);
                 this.uiWidth = null;
@@ -5421,8 +5995,10 @@ RED.tabs = (function() {
 
             this.options.types = this.options.types||Object.keys(allOptions);
 
-            this.selectTrigger = $('<a href="#"></a>').prependTo(this.uiSelect);
-            $('<i class="fa fa-sort-desc"></i>').appendTo(this.selectTrigger);
+            this.selectTrigger = $('<button tabindex="0"></button>').prependTo(this.uiSelect);
+            if (this.options.types.length > 1) {
+                $('<i class="fa fa-sort-desc"></i>').appendTo(this.selectTrigger);
+            }
             this.selectLabel = $('<span></span>').appendTo(this.selectTrigger);
 
             this.types(this.options.types);
@@ -5448,32 +6024,72 @@ RED.tabs = (function() {
             })
             this.selectTrigger.click(function(event) {
                 event.preventDefault();
-                if (that.typeList.length > 1) {
-                    that._showMenu(that.menu,that.selectTrigger);
-                } else {
-                    that.element.focus();
-                }
+                that._showTypeMenu();
             });
+            this.selectTrigger.on('keydown',function(evt) {
+                if (evt.keyCode === 40) {
+                    // Down
+                    that._showTypeMenu();
+                }
+            }).on('focus', function() {
+                that.uiSelect.addClass('red-ui-typedInput-focus');
+            })
 
             // explicitly set optionSelectTrigger display to inline-block otherwise jQ sets it to 'inline'
-            this.optionSelectTrigger = $('<a href="#" class="red-ui-typedInput-option-trigger" style="display:inline-block"><i class="fa fa-sort-desc"></i></a>').appendTo(this.uiSelect);
-            this.optionSelectLabel = $('<span></span>').prependTo(this.optionSelectTrigger);
+            this.optionSelectTrigger = $('<button tabindex="0" class="red-ui-typedInput-option-trigger" style="display:inline-block"><span class="red-ui-typedInput-option-caret"><i class="fa fa-sort-desc"></i></span></button>').appendTo(this.uiSelect);
+            this.optionSelectLabel = $('<span class="red-ui-typedInput-option-label"></span>').prependTo(this.optionSelectTrigger);
             this.optionSelectTrigger.click(function(event) {
                 event.preventDefault();
-                if (that.optionMenu) {
-                    that.optionMenu.css({
-                        minWidth:that.optionSelectLabel.width()
-                    });
-
-                    that._showMenu(that.optionMenu,that.optionSelectLabel)
+                that._showOptionSelectMenu();
+            }).on('keydown', function(evt) {
+                if (evt.keyCode === 40) {
+                    // Down
+                    that._showOptionSelectMenu();
                 }
+            }).on('blur', function() {
+                that.uiSelect.removeClass('red-ui-typedInput-focus');
+            }).on('focus', function() {
+                that.uiSelect.addClass('red-ui-typedInput-focus');
             });
+
+            this.optionExpandButton = $('<button tabindex="0" class="red-ui-typedInput-option-expand" style="display:inline-block"><i class="fa fa-ellipsis-h"></i></button>').appendTo(this.uiSelect);
+
+
             this.type(this.options.default||this.typeList[0].value);
+        },
+        _showTypeMenu: function() {
+            if (this.typeList.length > 1) {
+                this._showMenu(this.menu,this.selectTrigger);
+                this.menu.find("[value='"+this.propertyType+"']").focus();
+            } else {
+                this.element.focus();
+            }
+        },
+        _showOptionSelectMenu: function() {
+            if (this.optionMenu) {
+                this.optionMenu.css({
+                    minWidth:this.optionSelectLabel.width()
+                });
+
+                this._showMenu(this.optionMenu,this.optionSelectLabel);
+                var selectedOption = this.optionMenu.find("[value='"+this.value()+"']");
+                if (selectedOption.length === 0) {
+                    selectedOption = this.optionMenu.children(":first");
+                }
+                selectedOption.focus();
+
+            }
         },
         _hideMenu: function(menu) {
             $(document).off("mousedown.close-property-select");
             menu.hide();
-            this.element.focus();
+            if (this.elementDiv.is(":visible")) {
+                this.element.focus();
+            } else if (this.optionSelectTrigger.is(":visible")){
+                this.optionSelectTrigger.focus();
+            } else {
+                this.selectTrigger.focus();
+            }
         },
         _createMenu: function(opts,callback) {
             var that = this;
@@ -5482,7 +6098,7 @@ RED.tabs = (function() {
                 if (typeof opt === 'string') {
                     opt = {value:opt,label:opt};
                 }
-                var op = $('<a href="#">').attr("value",opt.value).appendTo(menu);
+                var op = $('<a href="#"></a>').attr("value",opt.value).appendTo(menu);
                 if (opt.label) {
                     op.text(opt.label);
                 }
@@ -5502,6 +6118,21 @@ RED.tabs = (function() {
                 display: "none",
             });
             menu.appendTo(document.body);
+
+            menu.on('keydown', function(evt) {
+                if (evt.keyCode === 40) {
+                    // DOWN
+                    $(this).children(":focus").next().focus();
+                } else if (evt.keyCode === 38) {
+                    // UP
+                    $(this).children(":focus").prev().focus();
+                } else if (evt.keyCode === 27) {
+                    that._hideMenu(menu);
+                }
+            })
+
+
+
             return menu;
 
         },
@@ -5555,13 +6186,18 @@ RED.tabs = (function() {
                 this.uiSelect.width(this.uiWidth);
             }
             if (this.typeMap[this.propertyType] && this.typeMap[this.propertyType].hasValue === false) {
-                this.selectTrigger.css('width',"100%");
+                this.selectTrigger.addClass("red-ui-typedInput-full-width");
             } else {
-                this.selectTrigger.width('auto');
+                this.selectTrigger.removeClass("red-ui-typedInput-full-width");
                 var labelWidth = this._getLabelWidth(this.selectTrigger);
                 this.elementDiv.css('left',labelWidth+"px");
+                if (this.optionExpandButton.is(":visible")) {
+                    this.elementDiv.css('right',"22px");
+                } else {
+                    this.elementDiv.css('right','0');
+                }
                 if (this.optionSelectTrigger) {
-                    this.optionSelectTrigger.css('left',(labelWidth+5)+"px");
+                    this.optionSelectTrigger.css({'left':(labelWidth)+"px",'width':'calc( 100% - '+labelWidth+'px )'});
                 }
             }
         },
@@ -5600,10 +6236,27 @@ RED.tabs = (function() {
                 return this.element.val();
             } else {
                 if (this.typeMap[this.propertyType].options) {
-                    if (this.typeMap[this.propertyType].options.indexOf(value) === -1) {
-                        value = "";
+                    var validValue = false;
+                    var label;
+                    for (var i=0;i<this.typeMap[this.propertyType].options.length;i++) {
+                        var op = this.typeMap[this.propertyType].options[i];
+                        if (typeof op === "string") {
+                            if (op === value) {
+                                label = value;
+                                validValue = true;
+                                break;
+                            }
+                        } else if (op.value === value) {
+                            label = op.label||op.value;
+                            validValue = true;
+                            break;
+                        }
                     }
-                    this.optionSelectLabel.text(value);
+                    if (!validValue) {
+                        value = "";
+                        label = "";
+                    }
+                    this.optionSelectLabel.text(label);
                 }
                 this.element.val(value);
                 this.element.trigger('change',this.type(),value);
@@ -5629,6 +6282,9 @@ RED.tabs = (function() {
                         this.selectLabel.text(opt.label);
                     }
                     if (opt.options) {
+                        if (this.optionExpandButton) {
+                            this.optionExpandButton.hide();
+                        }
                         if (this.optionSelectTrigger) {
                             this.optionSelectTrigger.show();
                             this.elementDiv.hide();
@@ -5637,11 +6293,31 @@ RED.tabs = (function() {
                                 that.value(v);
                             });
                             var currentVal = this.element.val();
-                            if (opt.options.indexOf(currentVal) !== -1) {
-                                this.optionSelectLabel.text(currentVal);
-                            } else {
-                                this.value(opt.options[0]);
+                            var validValue = false;
+                            var op;
+                            for (var i=0;i<opt.options.length;i++) {
+                                op = opt.options[i];
+                                if (typeof op === "string") {
+                                    if (op === currentVal) {
+                                        this.optionSelectLabel.text(currentVal);
+                                        validValue = true;
+                                        break;
+                                    }
+                                } else if (op.value === currentVal) {
+                                    this.optionSelectLabel.text(op.label||op.value);
+                                    validValue = true;
+                                    break;
+                                }
                             }
+                            if (!validValue) {
+                                op = opt.options[0];
+                                if (typeof op === "string") {
+                                    this.value(op);
+                                } else {
+                                    this.value(op.value);
+                                }
+                            }
+                            console.log(validValue);
                         }
                     } else {
                         if (this.optionMenu) {
@@ -5661,6 +6337,16 @@ RED.tabs = (function() {
                                 delete this.oldValue;
                             }
                             this.elementDiv.show();
+                        }
+                        if (opt.expand && typeof opt.expand === 'function') {
+                            this.optionExpandButton.show();
+                            this.optionExpandButton.off('click');
+                            this.optionExpandButton.on('click',function(evt) {
+                                evt.preventDefault();
+                                opt.expand.call(that);
+                            })
+                        } else {
+                            this.optionExpandButton.hide();
                         }
                         this.element.trigger('change',this.propertyType,this.value());
                     }
@@ -5704,7 +6390,7 @@ RED.tabs = (function() {
     });
 })(jQuery);
 ;/**
- * Copyright 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -5719,7 +6405,7 @@ RED.tabs = (function() {
  * limitations under the License.
  **/
 
-RED.deploy = (function() {
+RED.deploy = (function () {
   var deploymentTypes = {
     full: { img: 'red/images/deploy-full-o.png' },
     nodes: { img: 'red/images/deploy-nodes-o.png' },
@@ -5734,12 +6420,14 @@ RED.deploy = (function() {
 
   var deploymentType = 'full'
 
-  function changeDeploymentType(type) {
+  var deployInflight = false
+
+  var currentDiff = null
+
+  function changeDeploymentType (type) {
     deploymentType = type
     $('#btn-deploy-icon').attr('src', deploymentTypes[type].img)
   }
-
-  var currentDiff = null
 
   /**
    * options:
@@ -5748,26 +6436,26 @@ RED.deploy = (function() {
    *      label: the text to display - default: "Deploy"
    *      icon : the icon to use. Null removes the icon. default: "red/images/deploy-full-o.png"
    */
-  function init(options) {
+  function init (options) {
     options = options || {}
     var type = options.type || 'default'
 
     if (type == 'default') {
       $(
         '<li><span class="deploy-button-group button-group">' +
-          '<a id="btn-deploy" class="deploy-button disabled" href="#">' +
-          '<span class="deploy-button-content">' +
-          '<img id="btn-deploy-icon" src="red/images/deploy-full-o.png"> ' +
-          '<span>' +
-          RED._('deploy.deploy') +
-          '</span>' +
-          '</span>' +
-          '<span class="deploy-button-spinner hide">' +
-          '<img src="red/images/spin.svg"/>' +
-          '</span>' +
-          '</a>' +
-          '<a id="btn-deploy-options" data-toggle="dropdown" class="deploy-button" href="#"><i class="fa fa-caret-down"></i></a>' +
-          '</span></li>'
+        '<a id="btn-deploy" class="deploy-button disabled" href="#">' +
+        '<span class="deploy-button-content">' +
+        '<img id="btn-deploy-icon" src="red/images/deploy-full-o.png"> ' +
+        '<span>' +
+        RED._('deploy.deploy') +
+        '</span>' +
+        '</span>' +
+        '<span class="deploy-button-spinner hide">' +
+        '<img src="red/images/spin.svg"/>' +
+        '</span>' +
+        '</a>' +
+        '<a id="btn-deploy-options" data-toggle="dropdown" class="deploy-button" href="#"><i class="fa fa-caret-down"></i></a>' +
+        '</span></li>'
       ).prependTo('.header-toolbar')
       RED.menu.init({
         id: 'btn-deploy-options',
@@ -5779,7 +6467,7 @@ RED.deploy = (function() {
             label: RED._('deploy.full'),
             sublabel: RED._('deploy.fullDesc'),
             selected: true,
-            onselect: function(s) {
+            onselect: function (s) {
               if (s) {
                 changeDeploymentType('full')
               }
@@ -5791,7 +6479,7 @@ RED.deploy = (function() {
             icon: 'red/images/deploy-flows.png',
             label: RED._('deploy.modifiedFlows'),
             sublabel: RED._('deploy.modifiedFlowsDesc'),
-            onselect: function(s) {
+            onselect: function (s) {
               if (s) {
                 changeDeploymentType('flows')
               }
@@ -5803,7 +6491,7 @@ RED.deploy = (function() {
             icon: 'red/images/deploy-nodes.png',
             label: RED._('deploy.modifiedNodes'),
             sublabel: RED._('deploy.modifiedNodesDesc'),
-            onselect: function(s) {
+            onselect: function (s) {
               if (s) {
                 changeDeploymentType('nodes')
               }
@@ -5820,97 +6508,31 @@ RED.deploy = (function() {
 
       $(
         '<li><span class="deploy-button-group button-group">' +
-          '<a id="btn-deploy" class="deploy-button disabled" href="#">' +
-          '<span class="deploy-button-content">' +
-          (icon ? '<img id="btn-deploy-icon" src="' + icon + '"> ' : '') +
-          '<span>' +
-          label +
-          '</span>' +
-          '</span>' +
-          '<span class="deploy-button-spinner hide">' +
-          '<img src="red/images/spin.svg"/>' +
-          '</span>' +
-          '</a>' +
-          '</span></li>'
+        '<a id="btn-deploy" class="deploy-button disabled" href="#">' +
+        '<span class="deploy-button-content">' +
+        (icon ? '<img id="btn-deploy-icon" src="' + icon + '"> ' : '') +
+        '<span>' +
+        label +
+        '</span>' +
+        '</span>' +
+        '<span class="deploy-button-spinner hide">' +
+        '<img src="red/images/spin.svg"/>' +
+        '</span>' +
+        '</a>' +
+        '</span></li>'
       ).prependTo('.header-toolbar')
     }
 
-    $('#btn-deploy').click(function() {
+    $('#btn-deploy').click(function (event) {
+      event.preventDefault()
       save()
     })
 
-    $('#node-dialog-confirm-deploy').dialog({
-      title: RED._('deploy.confirm.button.confirm'),
-      modal: true,
-      autoOpen: false,
-      width: 550,
-      height: 'auto',
-      buttons: [
-        {
-          text: RED._('deploy.confirm.button.cancel'),
-          click: function() {
-            $(this).dialog('close')
-          }
-        },
-        // {
-        //     id: "node-dialog-confirm-deploy-review",
-        //     text: RED._("deploy.confirm.button.review"),
-        //     class: "primary",
-        //     click: function() {
-        //         showDiff();
-        //         $( this ).dialog( "close" );
-        //     }
-        // },
-        {
-          text: RED._('deploy.confirm.button.confirm'),
-          class: 'primary',
-          click: function() {
-            var ignoreChecked = $('#node-dialog-confirm-deploy-hide').prop(
-              'checked'
-            )
-            if (ignoreChecked) {
-              ignoreDeployWarnings[
-                $('#node-dialog-confirm-deploy-type').val()
-              ] = true
-            }
-            save(
-              true,
-              $('#node-dialog-confirm-deploy-type').val() === 'conflict'
-            )
-            $(this).dialog('close')
-          }
-        }
-      ],
-      create: function() {
-        $('#node-dialog-confirm-deploy')
-          .parent()
-          .find('div.ui-dialog-buttonpane')
-          .prepend(
-            '<div style="height:0; vertical-align: middle; display:inline-block; margin-top: 13px; float:left;">' +
-              '<input style="vertical-align:top;" type="checkbox" id="node-dialog-confirm-deploy-hide">' +
-              '<label style="display:inline;" for="node-dialog-confirm-deploy-hide"> do not warn about this again</label>' +
-              '<input type="hidden" id="node-dialog-confirm-deploy-type">' +
-              '</div>'
-          )
-      },
-      open: function() {
-        if ($('#node-dialog-confirm-deploy-type').val() === 'conflict') {
-          // $("#node-dialog-confirm-deploy-review").show();
-          $('#node-dialog-confirm-deploy-hide')
-            .parent()
-            .hide()
-        } else {
-          // $("#node-dialog-confirm-deploy-review").hide();
-          $('#node-dialog-confirm-deploy-hide')
-            .parent()
-            .show()
-        }
-      }
-    })
+    RED.actions.add('core:deploy-flows', save)
 
-    RED.events.on('nodes:change', function(state) {
+    RED.events.on('nodes:change', function (state) {
       if (state.dirty) {
-        window.onbeforeunload = function() {
+        window.onbeforeunload = function () {
           return RED._('deploy.confirm.undeployedChanges')
         }
         $('#btn-deploy').removeClass('disabled')
@@ -5920,201 +6542,46 @@ RED.deploy = (function() {
       }
     })
 
-    // $("#node-dialog-view-diff").dialog({
-    //     title: RED._('deploy.confirm.button.review'),
-    //     modal: true,
-    //     autoOpen: false,
-    //     buttons: [
-    //         {
-    //             text: RED._("deploy.confirm.button.cancel"),
-    //             click: function() {
-    //                 $( this ).dialog( "close" );
-    //             }
-    //         },
-    //         {
-    //             text: RED._("deploy.confirm.button.merge"),
-    //             class: "primary",
-    //             click: function() {
-    //                 $( this ).dialog( "close" );
-    //             }
-    //         }
-    //     ],
-    //     open: function() {
-    //         $(this).dialog({width:Math.min($(window).width(),900),height:Math.min($(window).height(),600)});
-    //     }
-    // });
-
-    // $("#node-dialog-view-diff-diff").editableList({
-    //     addButton: false,
-    //     scrollOnAdd: false,
-    //     addItem: function(container,i,object) {
-    //         var tab = object.tab.n;
-    //         var tabDiv = $('<div>',{class:"node-diff-tab collapsed"}).appendTo(container);
-    //
-    //         var titleRow = $('<div>',{class:"node-diff-tab-title"}).appendTo(tabDiv);
-    //         titleRow.click(function(evt) {
-    //             evt.preventDefault();
-    //             titleRow.parent().toggleClass('collapsed');
-    //         })
-    //         var chevron = $('<i class="fa fa-angle-down node-diff-chevron ">').appendTo(titleRow);
-    //         var title = $('<span>').html(tab.label||tab.id).appendTo(titleRow);
-    //
-    //         var stats = $('<span>',{class:"node-diff-tab-stats"}).appendTo(titleRow);
-    //
-    //         var addedCount = 0;
-    //         var deletedCount = 0;
-    //         var changedCount = 0;
-    //         var conflictedCount = 0;
-    //
-    //         object.tab.nodes.forEach(function(node) {
-    //             var realNode = RED.nodes.node(node.id);
-    //             var hasChanges = false;
-    //             if (currentDiff.added[node.id]) {
-    //                 addedCount++;
-    //                 hasChanges = true;
-    //             }
-    //             if (currentDiff.deleted[node.id]) {
-    //                 deletedCount++;
-    //                 hasChanges = true;
-    //             }
-    //             if (currentDiff.changed[node.id]) {
-    //                 changedCount++;
-    //                 hasChanges = true;
-    //             }
-    //             if (currentDiff.conflicted[node.id]) {
-    //                 conflictedCount++;
-    //                 hasChanges = true;
-    //             }
-    //
-    //             if (hasChanges) {
-    //                 var def = RED.nodes.getType(node.type)||{};
-    //                 var div = $("<div>",{class:"node-diff-node-entry collapsed"}).appendTo(tabDiv);
-    //                 var nodeTitleDiv = $("<div>",{class:"node-diff-node-entry-title"}).appendTo(div);
-    //                 nodeTitleDiv.click(function(evt) {
-    //                     evt.preventDefault();
-    //                     $(this).parent().toggleClass('collapsed');
-    //                 })
-    //                 var newNode = currentDiff.newConfig.all[node.id];
-    //                 var nodePropertiesDiv = $("<div>",{class:"node-diff-node-entry-properties"}).appendTo(div);
-    //
-    //                 var nodePropertiesTable = $("<table>").appendTo(nodePropertiesDiv);
-    //
-    //                 if (node.hasOwnProperty('x')) {
-    //                     if (newNode.x !== node.x || newNode.y !== node.y) {
-    //                         var currentPosition = node.x+", "+node.y
-    //                         var newPosition = newNode.x+", "+newNode.y;
-    //                         $("<tr><td>position</td><td>"+currentPosition+"</td><td>"+newPosition+"</td></tr>").appendTo(nodePropertiesTable);
-    //                     }
-    //                 }
-    //                 var properties = Object.keys(node).filter(function(p) { return p!='z'&&p!='wires'&&p!=='x'&&p!=='y'&&p!=='id'&&p!=='type'&&(!def.defaults||!def.defaults.hasOwnProperty(p))});
-    //                 if (def.defaults) {
-    //                     properties = properties.concat(Object.keys(def.defaults));
-    //                 }
-    //                 properties.forEach(function(d) {
-    //                     var localValue = JSON.stringify(node[d]);
-    //                     var remoteValue = JSON.stringify(newNode[d]);
-    //                     var originalValue = realNode._config[d];
-    //
-    //                     if (remoteValue !== originalValue) {
-    //                         var formattedProperty = formatNodeProperty(node[d]);
-    //                         var newFormattedProperty = formatNodeProperty(newNode[d]);
-    //                         if (localValue === originalValue) {
-    //                             // no conflict change
-    //                         } else {
-    //                             // conflicting change
-    //                         }
-    //                         $("<tr><td>"+d+'</td><td class="">'+formattedProperty+'</td><td class="node-diff-property-changed">'+newFormattedProperty+"</td></tr>").appendTo(nodePropertiesTable);
-    //                     }
-    //
-    //                 })
-    //                 var nodeChevron = $('<i class="fa fa-angle-down node-diff-chevron">').appendTo(nodeTitleDiv);
-    //
-    //
-    //                 // var leftColumn = $('<div>',{class:"node-diff-column"}).appendTo(div);
-    //                 // var rightColumn = $('<div>',{class:"node-diff-column"}).appendTo(div);
-    //                 // rightColumn.html("&nbsp");
-    //
-    //
-    //
-    //                 var nodeDiv = $("<div>",{class:"node-diff-node-entry-node"}).appendTo(nodeTitleDiv);
-    //                 var colour = def.color;
-    //                 var icon_url = "arrow-in.png";
-    //                 if (node.type === 'tab') {
-    //                     colour = "#C0DEED";
-    //                     icon_url = "subflow.png";
-    //                 } else if (def.category === 'config') {
-    //                     icon_url = "cog.png";
-    //                 } else if (node.type === 'unknown') {
-    //                     icon_url = "alert.png";
-    //                 } else {
-    //                     icon_url = def.icon;
-    //                 }
-    //                 nodeDiv.css('backgroundColor',colour);
-    //
-    //                 var iconContainer = $('<div/>',{class:"palette_icon_container"}).appendTo(nodeDiv);
-    //                 $('<div/>',{class:"palette_icon",style:"background-image: url(icons/"+icon_url+")"}).appendTo(iconContainer);
-    //
-    //
-    //
-    //                 var contentDiv = $('<div>',{class:"node-diff-node-description"}).appendTo(nodeTitleDiv);
-    //
-    //                 $('<span>',{class:"node-diff-node-label"}).html(node.label || node.name || node.id).appendTo(contentDiv);
-    //                 //$('<div>',{class:"red-ui-search-result-node-type"}).html(node.type).appendTo(contentDiv);
-    //                 //$('<div>',{class:"red-ui-search-result-node-id"}).html(node.id).appendTo(contentDiv);
-    //             }
-    //
-    //         });
-    //
-    //         var statsInfo = '<span class="node-diff-count">'+object.tab.nodes.length+" nodes"+
-    //                         (addedCount+deletedCount+changedCount+conflictedCount > 0 ? " : ":"")+
-    //                         "</span> "+
-    //                         ((addedCount > 0)?'<span class="node-diff-added">'+addedCount+' added</span> ':'')+
-    //                         ((deletedCount > 0)?'<span class="node-diff-deleted">'+deletedCount+' deleted</span> ':'')+
-    //                         ((changedCount > 0)?'<span class="node-diff-changed">'+changedCount+' changed</span> ':'')+
-    //                         ((conflictedCount > 0)?'<span class="node-diff-conflicted">'+conflictedCount+' conflicts</span>':'');
-    //         stats.html(statsInfo);
-    //
-    //
-    //
-    //         //
-    //         //
-    //         //
-    //         // var node = object.node;
-    //         // var realNode = RED.nodes.node(node.id);
-    //         // var def = RED.nodes.getType(object.node.type)||{};
-    //         // var l = "";
-    //         // if (def && def.label && realNode) {
-    //         //     l = def.label;
-    //         //     try {
-    //         //         l = (typeof l === "function" ? l.call(realNode) : l);
-    //         //     } catch(err) {
-    //         //         console.log("Definition error: "+node.type+".label",err);
-    //         //     }
-    //         // }
-    //         // l = l||node.label||node.name||node.id||"";
-    //         // console.log(node);
-    //         // var div = $('<div>').appendTo(container);
-    //         // div.html(l);
-    //     }
-    // });
+    var activeNotifyMessage
+    RED.comms.subscribe('notification/runtime-deploy', function (topic, msg) {
+      if (!activeNotifyMessage) {
+        var currentRev = RED.nodes.version()
+        if (
+          currentRev === null ||
+          deployInflight ||
+          currentRev === msg.revision
+        ) {
+          return
+        }
+        var message = $('<p>').text(RED._('deploy.confirm.backgroundUpdate'))
+        activeNotifyMessage = RED.notify(message, {
+          modal: true,
+          fixed: true,
+          buttons: [
+            {
+              text: RED._('deploy.confirm.button.ignore'),
+              click: function () {
+                activeNotifyMessage.close()
+                activeNotifyMessage = null
+              }
+            },
+            {
+              text: RED._('deploy.confirm.button.review'),
+              class: 'primary',
+              click: function () {
+                activeNotifyMessage.close()
+                var nns = RED.nodes.createCompleteNodeSet()
+                resolveConflict(nns, false)
+                activeNotifyMessage = null
+              }
+            }
+          ]
+        })
+      }
+    })
   }
 
-  function formatNodeProperty(prop) {
-    var formattedProperty = prop
-    if (formattedProperty === null) {
-      formattedProperty = 'null'
-    } else if (formattedProperty === undefined) {
-      formattedProperty = 'undefined'
-    } else if (typeof formattedProperty === 'object') {
-      formattedProperty = JSON.stringify(formattedProperty)
-    }
-    if (/\n/.test(formattedProperty)) {
-      formattedProperty = '<pre>' + formattedProperty + '</pre>'
-    }
-    return formattedProperty
-  }
-
-  function getNodeInfo(node) {
+  function getNodeInfo (node) {
     var tabLabel = ''
     if (node.z) {
       var tab = RED.nodes.workspace(node.z)
@@ -6125,21 +6592,10 @@ RED.deploy = (function() {
         tabLabel = tab.label
       }
     }
-    var label = ''
-    if (typeof node._def.label == 'function') {
-      try {
-        label = node._def.label.call(node)
-      } catch (err) {
-        console.log('Definition error: ' + node_def.type + '.label', err)
-        label = node_def.type
-      }
-    } else {
-      label = node._def.label
-    }
-    label = label || node.id
+    var label = RED.utils.getNodeLabel(node, node.id)
     return { tab: tabLabel, type: node.type, label: label }
   }
-  function sortNodeInfo(A, B) {
+  function sortNodeInfo (A, B) {
     if (A.tab < B.tab) {
       return -1
     }
@@ -6161,152 +6617,105 @@ RED.deploy = (function() {
     return 0
   }
 
-  function resolveConflict(currentNodes) {
-    $('#node-dialog-confirm-deploy-config').hide()
-    $('#node-dialog-confirm-deploy-unknown').hide()
-    $('#node-dialog-confirm-deploy-unused').hide()
-    $('#node-dialog-confirm-deploy-conflict').show()
-    $('#node-dialog-confirm-deploy-type').val('conflict')
-    $('#node-dialog-confirm-deploy').dialog('open')
+  function resolveConflict (currentNodes, activeDeploy) {
+    var message = $('<div>')
+    $('<p data-i18n="deploy.confirm.conflict"></p>').appendTo(message)
+    var conflictCheck = $(
+      '<div id="node-dialog-confirm-deploy-conflict-checking" class="node-dialog-confirm-conflict-row">' +
+      '<img src="red/images/spin.svg"/><div data-i18n="deploy.confirm.conflictChecking"></div>' +
+      '</div>'
+    ).appendTo(message)
+    var conflictAutoMerge = $(
+      '<div class="node-dialog-confirm-conflict-row">' +
+      '<i style="color: #3a3;" class="fa fa-check"></i><div data-i18n="deploy.confirm.conflictAutoMerge"></div>' +
+      '</div>'
+    )
+      .hide()
+      .appendTo(message)
+    var conflictManualMerge = $(
+      '<div id="node-dialog-confirm-deploy-conflict-manual-merge" class="node-dialog-confirm-conflict-row">' +
+      '<i style="color: #999;" class="fa fa-exclamation"></i><div data-i18n="deploy.confirm.conflictManualMerge"></div>' +
+      '</div>'
+    )
+      .hide()
+      .appendTo(message)
 
-    // $("#node-dialog-confirm-deploy-review").append($('<img src="red/images/spin.svg" style="background: rgba(255,255,255,0.8); margin-top: -16px; margin-left: -8px; height:16px; position: absolute; "/>'));
-    // $("#node-dialog-confirm-deploy-review .ui-button-text").css("opacity",0.4);
-    // $("#node-dialog-confirm-deploy-review").attr("disabled",true).addClass("disabled");
-    // $.ajax({
-    //     headers: {
-    //         "Accept":"application/json",
-    //     },
-    //     cache: false,
-    //     url: 'flows',
-    //     success: function(nodes) {
-    //         var newNodes = nodes.flows;
-    //         var newRevision = nodes.rev;
-    //         generateDiff(currentNodes,newNodes);
-    //         $("#node-dialog-confirm-deploy-review").attr("disabled",false).removeClass("disabled");
-    //         $("#node-dialog-confirm-deploy-review img").remove();
-    //         $("#node-dialog-confirm-deploy-review .ui-button-text").css("opacity",1);
-    //     }
-    // });
+    message.i18n()
+    currentDiff = null
+    var buttons = [
+      {
+        text: RED._('common.label.cancel'),
+        click: function () {
+          conflictNotification.close()
+        }
+      },
+      {
+        id: 'node-dialog-confirm-deploy-review',
+        text: RED._('deploy.confirm.button.review'),
+        class: 'primary disabled',
+        click: function () {
+          if (!$('#node-dialog-confirm-deploy-review').hasClass('disabled')) {
+            RED.diff.showRemoteDiff()
+            conflictNotification.close()
+          }
+        }
+      },
+      {
+        id: 'node-dialog-confirm-deploy-merge',
+        text: RED._('deploy.confirm.button.merge'),
+        class: 'primary disabled',
+        click: function () {
+          if (!$('#node-dialog-confirm-deploy-merge').hasClass('disabled')) {
+            RED.diff.mergeDiff(currentDiff)
+            conflictNotification.close()
+          }
+        }
+      }
+    ]
+    if (activeDeploy) {
+      buttons.push({
+        id: 'node-dialog-confirm-deploy-overwrite',
+        text: RED._('deploy.confirm.button.overwrite'),
+        class: 'primary',
+        click: function () {
+          save(true, activeDeploy)
+          conflictNotification.close()
+        }
+      })
+    }
+    var conflictNotification = RED.notify(message, {
+      modal: true,
+      fixed: true,
+      width: 600,
+      buttons: buttons
+    })
+
+    var now = Date.now()
+    RED.diff.getRemoteDiff(function (diff) {
+      var ellapsed = Math.max(1000 - (Date.now() - now), 0)
+      currentDiff = diff
+      setTimeout(function () {
+        conflictCheck.hide()
+        var d = Object.keys(diff.conflicts)
+        if (d.length === 0) {
+          conflictAutoMerge.show()
+          $('#node-dialog-confirm-deploy-merge').removeClass('disabled')
+        } else {
+          conflictManualMerge.show()
+        }
+        $('#node-dialog-confirm-deploy-review').removeClass('disabled')
+      }, ellapsed)
+    })
   }
-
-  // function parseNodes(nodeList) {
-  //     var tabOrder = [];
-  //     var tabs = {};
-  //     var subflows = {};
-  //     var globals = [];
-  //     var all = {};
-  //
-  //     nodeList.forEach(function(node) {
-  //         all[node.id] = node;
-  //         if (node.type === 'tab') {
-  //             tabOrder.push(node.id);
-  //             tabs[node.id] = {n:node,nodes:[]};
-  //         } else if (node.type === 'subflow') {
-  //             subflows[node.id] = {n:node,nodes:[]};
-  //         }
-  //     });
-  //
-  //     nodeList.forEach(function(node) {
-  //         if (node.type !== 'tab' && node.type !== 'subflow') {
-  //             if (tabs[node.z]) {
-  //                 tabs[node.z].nodes.push(node);
-  //             } else if (subflows[node.z]) {
-  //                 subflows[node.z].nodes.push(node);
-  //             } else {
-  //                 globals.push(node);
-  //             }
-  //         }
-  //     });
-  //
-  //     return {
-  //         all: all,
-  //         tabOrder: tabOrder,
-  //         tabs: tabs,
-  //         subflows: subflows,
-  //         globals: globals
-  //     }
-  // }
-
-  // function generateDiff(currentNodes,newNodes) {
-  //     var currentConfig = parseNodes(currentNodes);
-  //     var newConfig = parseNodes(newNodes);
-  //     var pending = RED.nodes.pending();
-  //     var added = {};
-  //     var deleted = {};
-  //     var changed = {};
-  //     var conflicted = {};
-  //
-  //
-  //     Object.keys(currentConfig.all).forEach(function(id) {
-  //         var node = RED.nodes.workspace(id)||RED.nodes.subflow(id)||RED.nodes.node(id);
-  //         if (!newConfig.all.hasOwnProperty(id)) {
-  //             if (!pending.added.hasOwnProperty(id)) {
-  //                 deleted[id] = true;
-  //                 conflicted[id] = node.changed;
-  //             }
-  //         } else if (JSON.stringify(currentConfig.all[id]) !== JSON.stringify(newConfig.all[id])) {
-  //             changed[id] = true;
-  //             conflicted[id] = node.changed;
-  //         }
-  //     });
-  //     Object.keys(newConfig.all).forEach(function(id) {
-  //         if (!currentConfig.all.hasOwnProperty(id) && !pending.deleted.hasOwnProperty(id)) {
-  //             added[id] = true;
-  //         }
-  //     });
-  //
-  //     // console.log("Added",added);
-  //     // console.log("Deleted",deleted);
-  //     // console.log("Changed",changed);
-  //     // console.log("Conflicted",conflicted);
-  //
-  //     var formatString = function(id) {
-  //         return conflicted[id]?"!":(added[id]?"+":(deleted[id]?"-":(changed[id]?"~":" ")));
-  //     }
-  //     newConfig.tabOrder.forEach(function(tabId) {
-  //         var tab = newConfig.tabs[tabId];
-  //         console.log(formatString(tabId),"Flow:",tab.n.label, "("+tab.n.id+")");
-  //         tab.nodes.forEach(function(node) {
-  //             console.log(" ",formatString(node.id),node.type,node.name || node.id);
-  //         })
-  //         if (currentConfig.tabs[tabId]) {
-  //             currentConfig.tabs[tabId].nodes.forEach(function(node) {
-  //                 if (deleted[node.id]) {
-  //                     console.log(" ",formatString(node.id),node.type,node.name || node.id);
-  //                 }
-  //             })
-  //         }
-  //     });
-  //     currentConfig.tabOrder.forEach(function(tabId) {
-  //         if (deleted[tabId]) {
-  //             console.log(formatString(tabId),"Flow:",tab.n.label, "("+tab.n.id+")");
-  //         }
-  //     });
-  //
-  //     currentDiff = {
-  //         currentConfig: currentConfig,
-  //         newConfig: newConfig,
-  //         added: added,
-  //         deleted: deleted,
-  //         changed: changed,
-  //         conflicted: conflicted
-  //     }
-  // }
-
-  // function showDiff() {
-  //     if (currentDiff) {
-  //         var list = $("#node-dialog-view-diff-diff");
-  //         list.editableList('empty');
-  //         var currentConfig = currentDiff.currentConfig;
-  //         currentConfig.tabOrder.forEach(function(tabId) {
-  //             var tab = currentConfig.tabs[tabId];
-  //             list.editableList('addItem',{tab:tab})
-  //         });
-  //     }
-  //     $("#node-dialog-view-diff").dialog("open");
-  // }
-
-  function save(skipValidation, force) {
+  function cropList (list) {
+    if (list.length > 5) {
+      var remainder = list.length - 5
+      list = list.slice(0, 5)
+      list.push(RED._('deploy.confirm.plusNMore', { count: remainder }))
+    }
+    return list
+  }
+  function save (skipValidation, force) {
     var screenshotExist = document.querySelector('#enebular-screenshot')
     if (screenshotExist) {
       screenshotExist.remove()
@@ -6324,15 +6733,11 @@ RED.deploy = (function() {
       .select('#enebular-screenshot > svg')
       .attr('width', '100%')
       .attr('height', 500 + 'px')
-    // .attr('width', 900 + 'px')
-    // .attr('height', 600 + 'px')
-    d3
-      .select('#enebular-screenshot > svg > g > g > rect')
-      .attr('width', '100%')
-      .attr('height', 'auto')
-      // .attr('width', 1200 + 'px')
-      // .attr('height', 800 + 'px')
-      .attr('fill', '#f7fafb')
+    d3.select('#enebular-screenshot > svg > g > g > rect').style({
+      width: '100%',
+      height: '100%',
+      fill: 'none'
+    })
     d3
       .select('#enebular-screenshot > svg > g > g')
       .attr('transform', 'scale(0.75)')
@@ -6340,6 +6745,10 @@ RED.deploy = (function() {
     var screenshotHTML = document.querySelector('#enebular-screenshot')
       .innerHTML
     if (!$('#btn-deploy').hasClass('disabled')) {
+      if (!RED.user.hasPermission('flows.write')) {
+        RED.notify(RED._('user.errors.deploy'), 'error')
+        return
+      }
       if (!skipValidation) {
         var hasUnknown = false
         var hasInvalid = false
@@ -6348,7 +6757,7 @@ RED.deploy = (function() {
         var unknownNodes = []
         var invalidNodes = []
 
-        RED.nodes.eachNode(function(node) {
+        RED.nodes.eachNode(function (node) {
           hasInvalid = hasInvalid || !node.valid
           if (!node.valid) {
             invalidNodes.push(getNodeInfo(node))
@@ -6362,59 +6771,87 @@ RED.deploy = (function() {
         hasUnknown = unknownNodes.length > 0
 
         var unusedConfigNodes = []
-        RED.nodes.eachConfig(function(node) {
+        RED.nodes.eachConfig(function (node) {
           if (node.users.length === 0 && node._def.hasUsers !== false) {
             unusedConfigNodes.push(getNodeInfo(node))
             hasUnusedConfig = true
           }
         })
 
-        $('#node-dialog-confirm-deploy-config').hide()
-        $('#node-dialog-confirm-deploy-unknown').hide()
-        $('#node-dialog-confirm-deploy-unused').hide()
-        $('#node-dialog-confirm-deploy-conflict').hide()
-
         var showWarning = false
-
+        var notificationMessage
+        var notificationButtons = []
+        var notification
         if (hasUnknown && !ignoreDeployWarnings.unknown) {
           showWarning = true
-          $('#node-dialog-confirm-deploy-type').val('unknown')
-          $('#node-dialog-confirm-deploy-unknown').show()
-          $('#node-dialog-confirm-deploy-unknown-list').html(
-            '<li>' + unknownNodes.join('</li><li>') + '</li>'
-          )
+          notificationMessage =
+            '<p>' +
+            RED._('deploy.confirm.unknown') +
+            '</p>' +
+            '<ul class="node-dialog-configm-deploy-list"><li>' +
+            cropList(unknownNodes).join('</li><li>') +
+            '</li></ul><p>' +
+            RED._('deploy.confirm.confirm') +
+            '</p>'
+
+          notificationButtons = [
+            {
+              id: 'node-dialog-confirm-deploy-deploy',
+              text: RED._('deploy.confirm.button.confirm'),
+              class: 'primary',
+              click: function () {
+                save(true)
+                notification.close()
+              }
+            }
+          ]
         } else if (hasInvalid && !ignoreDeployWarnings.invalid) {
           showWarning = true
-          $('#node-dialog-confirm-deploy-type').val('invalid')
-          $('#node-dialog-confirm-deploy-config').show()
           invalidNodes.sort(sortNodeInfo)
-          $('#node-dialog-confirm-deploy-invalid-list').html(
-            '<li>' +
-              invalidNodes
-                .map(function(A) {
-                  return (
-                    (A.tab ? '[' + A.tab + '] ' : '') +
-                    A.label +
-                    ' (' +
-                    A.type +
-                    ')'
-                  )
-                })
-                .join('</li><li>') +
-              '</li>'
-          )
-        } else if (hasUnusedConfig && !ignoreDeployWarnings.unusedConfig) {
-          // showWarning = true;
-          // $( "#node-dialog-confirm-deploy-type" ).val("unusedConfig");
-          // $( "#node-dialog-confirm-deploy-unused" ).show();
-          //
-          // unusedConfigNodes.sort(sortNodeInfo);
-          // $( "#node-dialog-confirm-deploy-unused-list" )
-          //     .html("<li>"+unusedConfigNodes.map(function(A) { return (A.tab?"["+A.tab+"] ":"")+A.label+" ("+A.type+")"}).join("</li><li>")+"</li>");
+
+          notificationMessage =
+            '<p>' +
+            RED._('deploy.confirm.improperlyConfigured') +
+            '</p>' +
+            '<ul class="node-dialog-configm-deploy-list"><li>' +
+            cropList(
+              invalidNodes.map(function (A) {
+                return (
+                  (A.tab ? '[' + A.tab + '] ' : '') +
+                  A.label +
+                  ' (' +
+                  A.type +
+                  ')'
+                )
+              })
+            ).join('</li><li>') +
+            '</li></ul><p>' +
+            RED._('deploy.confirm.confirm') +
+            '</p>'
+          notificationButtons = [
+            {
+              id: 'node-dialog-confirm-deploy-deploy',
+              text: RED._('deploy.confirm.button.confirm'),
+              class: 'primary',
+              click: function () {
+                save(true)
+                notification.close()
+              }
+            }
+          ]
         }
         if (showWarning) {
-          $('#node-dialog-confirm-deploy-hide').prop('checked', false)
-          $('#node-dialog-confirm-deploy').dialog('open')
+          notificationButtons.unshift({
+            text: RED._('common.label.cancel'),
+            click: function () {
+              notification.close()
+            }
+          })
+          notification = RED.notify(notificationMessage, {
+            modal: true,
+            fixed: true,
+            buttons: notificationButtons
+          })
           return
         }
       }
@@ -6432,6 +6869,11 @@ RED.deploy = (function() {
         data.rev = RED.nodes.version()
       }
 
+      deployInflight = true
+      $('#header-shade').show()
+      $('#editor-shade').show()
+      $('#palette-shade').show()
+      $('#sidebar-shade').show()
       $.ajax({
         url: 'flows',
         type: 'POST',
@@ -6441,42 +6883,53 @@ RED.deploy = (function() {
           'Node-RED-Deployment-Type': deploymentType
         }
       })
-        .done(function(data, textStatus, xhr) {
+        .done(function (data, textStatus, xhr) {
           RED.nodes.dirty(false)
           RED.nodes.version(data.rev)
+          RED.nodes.originalFlow(nns)
           if (hasUnusedConfig) {
             RED.notify(
               '<p>' +
-                RED._('deploy.successfulDeploy') +
-                '</p>' +
-                '<p>' +
-                RED._('deploy.unusedConfigNodes') +
-                ' <a href="#" onclick="RED.sidebar.config.show(true); return false;">' +
-                RED._('deploy.unusedConfigNodesLink') +
-                '</a></p>',
+              RED._('deploy.successfulDeploy') +
+              '</p>' +
+              '<p>' +
+              RED._('deploy.unusedConfigNodes') +
+              ' <a href="#" onclick="RED.sidebar.config.show(true); return false;">' +
+              RED._('deploy.unusedConfigNodesLink') +
+              '</a></p>',
               'success',
               false,
               6000
             )
           } else {
-            RED.notify(RED._('deploy.successfulDeploy'), 'success')
+            RED.notify(
+              '<p>' + RED._('deploy.successfulDeploy') + '</p>',
+              'success'
+            )
           }
-          RED.nodes.eachNode(function(node) {
+          RED.nodes.eachNode(function (node) {
             if (node.changed) {
               node.dirty = true
               node.changed = false
+            }
+            if (node.moved) {
+              node.dirty = true
+              node.moved = false
             }
             if (node.credentials) {
               delete node.credentials
             }
           })
-          RED.nodes.eachConfig(function(confNode) {
+          RED.nodes.eachConfig(function (confNode) {
             confNode.changed = false
             if (confNode.credentials) {
               delete confNode.credentials
             }
           })
-          RED.nodes.eachWorkspace(function(ws) {
+          RED.nodes.eachSubflow(function (subflow) {
+            subflow.changed = false
+          })
+          RED.nodes.eachWorkspace(function (ws) {
             ws.changed = false
           })
           // Once deployed, cannot undo back to a clean state
@@ -6484,7 +6937,7 @@ RED.deploy = (function() {
           RED.view.redraw()
           RED.events.emit('deploy')
         })
-        .fail(function(xhr, textStatus, err) {
+        .fail(function (xhr, textStatus, err) {
           RED.nodes.dirty(true)
           $('#btn-deploy').removeClass('disabled')
           if (xhr.status === 401) {
@@ -6495,7 +6948,7 @@ RED.deploy = (function() {
               'error'
             )
           } else if (xhr.status === 409) {
-            resolveConflict(nns)
+            resolveConflict(nns, true)
           } else if (xhr.responseText) {
             RED.notify(
               RED._('deploy.deployFailed', { message: xhr.responseText }),
@@ -6510,21 +6963,29 @@ RED.deploy = (function() {
             )
           }
         })
-        .always(function() {
+        .always(function () {
+          deployInflight = false
           var delta = Math.max(0, 300 - (Date.now() - startTime))
-          setTimeout(function() {
+          setTimeout(function () {
             $('.deploy-button-content').css('opacity', 1)
             $('.deploy-button-spinner').hide()
+            $('#header-shade').hide()
+            $('#editor-shade').hide()
+            $('#palette-shade').hide()
+            $('#sidebar-shade').hide()
           }, delta)
         })
     }
   }
   return {
-    init: init
+    init: init,
+    setDeployInflight: function (state) {
+      deployInflight = state
+    }
   }
 })()
 ;/**
- * Copyright 2013 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -6540,10 +7001,154 @@ RED.deploy = (function() {
  **/
 RED.keyboard = (function() {
 
+    var isMac = /Mac/i.test(window.navigator.platform);
+
     var handlers = {};
+    var partialState;
+
+    var keyMap = {
+        "left":37,
+        "up":38,
+        "right":39,
+        "down":40,
+        "escape":27,
+        "enter": 13,
+        "backspace": 8,
+        "delete": 46,
+        "space": 32,
+        ";":186,
+        "=":187,
+        ",":188,
+        "-":189,
+        ".":190,
+        "/":191,
+        "\\":220,
+        "'":222,
+        "?":191 // <- QWERTY specific
+    }
+    var metaKeyCodes = {
+        16:true,
+        17:true,
+        18: true,
+        91:true,
+        93: true
+    }
+    var actionToKeyMap = {}
+    var defaultKeyMap = {};
+
+    // FF generates some different keycodes because reasons.
+    var firefoxKeyCodeMap = {
+        59:186,
+        61:187,
+        173:189
+    }
+
+    function migrateOldKeymap() {
+        if ('localStorage' in window && window['localStorage'] !== null) {
+            var oldKeyMap = localStorage.getItem("keymap");
+            if (oldKeyMap !== null) {
+                localStorage.removeItem("keymap");
+                var currentEditorSettings = RED.settings.get('editor') || {};
+                currentEditorSettings.keymap  = JSON.parse(oldKeyMap);
+                RED.settings.set('editor',currentEditorSettings);
+            }
+        }
+    }
+    function init() {
+        // Migrate from pre-0.18
+        migrateOldKeymap();
+
+        var currentEditorSettings = RED.settings.get('editor') || {};
+        var userKeymap = currentEditorSettings.keymap || {};
+
+        $.getJSON("red/keymap.json",function(data) {
+            for (var scope in data) {
+                if (data.hasOwnProperty(scope)) {
+                    var keys = data[scope];
+                    for (var key in keys) {
+                        if (keys.hasOwnProperty(key)) {
+                            if (!userKeymap.hasOwnProperty(keys[key])) {
+                                addHandler(scope,key,keys[key],false);
+                            }
+                            defaultKeyMap[keys[key]] = {
+                                scope:scope,
+                                key:key,
+                                user:false
+                            };
+                        }
+                    }
+                }
+            }
+            for (var action in userKeymap) {
+                if (userKeymap.hasOwnProperty(action)) {
+                    var obj = userKeymap[action];
+                    if (obj.hasOwnProperty('key')) {
+                        addHandler(obj.scope, obj.key, action, true);
+                    }
+                }
+            }
+        });
+
+        RED.userSettings.add({
+            id:'keyboard',
+            title: RED._("keyboard.keyboard"),
+            get: getSettingsPane,
+            focus: function() {
+                setTimeout(function() {
+                    $("#user-settings-tab-keyboard-filter").focus();
+                },200);
+            }
+        })
+    }
+
+    function revertToDefault(action) {
+        var currentAction = actionToKeyMap[action];
+        if (currentAction) {
+            removeHandler(currentAction.key);
+        }
+        if (defaultKeyMap.hasOwnProperty(action)) {
+            var obj = defaultKeyMap[action];
+            addHandler(obj.scope, obj.key, action, false);
+        }
+    }
+    function parseKeySpecifier(key) {
+        var parts = key.toLowerCase().split("-");
+        var modifiers = {};
+        var keycode;
+        var blank = 0;
+        for (var i=0;i<parts.length;i++) {
+            switch(parts[i]) {
+                case "ctrl":
+                case "cmd":
+                    modifiers.ctrl = true;
+                    modifiers.meta = true;
+                    break;
+                case "alt":
+                    modifiers.alt = true;
+                    break;
+                case "shift":
+                    modifiers.shift = true;
+                    break;
+                case "":
+                    blank++;
+                    keycode = keyMap["-"];
+                    break;
+                default:
+                    if (keyMap.hasOwnProperty(parts[i])) {
+                        keycode = keyMap[parts[i]];
+                    } else if (parts[i].length > 1) {
+                        return null;
+                    } else {
+                        keycode = parts[i].toUpperCase().charCodeAt(0);
+                    }
+                    break;
+            }
+        }
+        return [keycode,modifiers];
+    }
 
     function resolveKeyEvent(evt) {
-        var slot = handlers;
+        var slot = partialState||handlers;
         if (evt.ctrlKey || evt.metaKey) {
             slot = slot.ctrl;
         }
@@ -6553,9 +7158,21 @@ RED.keyboard = (function() {
         if (slot && evt.altKey) {
             slot = slot.alt;
         }
-        if (slot && slot[evt.keyCode]) {
-            var handler = slot[evt.keyCode];
-            if (handler.scope && handler.scope !== "*") {
+        var keyCode = firefoxKeyCodeMap[evt.keyCode] || evt.keyCode;
+        if (slot && slot[keyCode]) {
+            var handler = slot[keyCode];
+            if (!handler.scope) {
+                if (partialState) {
+                    partialState = null;
+                    return resolveKeyEvent(evt);
+                } else if (Object.keys(handler).length > 0) {
+                    partialState = handler;
+                    evt.preventDefault();
+                    return null;
+                } else {
+                    return null;
+                }
+            } else if (handler.scope && handler.scope !== "*") {
                 var target = evt.target;
                 while (target.nodeName !== 'BODY' && target.id !== handler.scope) {
                     target = target.parentElement;
@@ -6564,126 +7181,364 @@ RED.keyboard = (function() {
                     handler = null;
                 }
             }
+            partialState = null;
             return handler;
+        } else if (partialState) {
+            partialState = null;
+            return resolveKeyEvent(evt);
         }
     }
     d3.select(window).on("keydown",function() {
+        if (metaKeyCodes[d3.event.keyCode]) {
+            return;
+        }
         var handler = resolveKeyEvent(d3.event);
         if (handler && handler.ondown) {
-            handler.ondown();
-        }
-    });
-    d3.select(window).on("keyup",function() {
-        var handler = resolveKeyEvent(d3.event);
-        if (handler && handler.onup) {
-            handler.onup();
+            if (typeof handler.ondown === "string") {
+                RED.actions.invoke(handler.ondown);
+            } else {
+                handler.ondown();
+            }
+            d3.event.preventDefault();
         }
     });
 
-    function addHandler(scope,key,modifiers,ondown,onup) {
+    function addHandler(scope,key,modifiers,ondown) {
         var mod = modifiers;
         var cbdown = ondown;
-        var cbup = onup;
-        if (typeof modifiers == "function") {
+        if (typeof modifiers == "function" || typeof modifiers === "string") {
             mod = {};
             cbdown = modifiers;
-            cbup = ondown;
+        }
+        var keys = [];
+        var i=0;
+        if (typeof key === 'string') {
+            if (typeof cbdown === 'string') {
+                actionToKeyMap[cbdown] = {scope:scope,key:key};
+                if (typeof ondown === 'boolean') {
+                    actionToKeyMap[cbdown].user = ondown;
+                }
+            }
+            var parts = key.split(" ");
+            for (i=0;i<parts.length;i++) {
+                var parsedKey = parseKeySpecifier(parts[i]);
+                if (parsedKey) {
+                    keys.push(parsedKey);
+                } else {
+                    return;
+                }
+            }
+        } else {
+            keys.push([key,mod])
         }
         var slot = handlers;
-        if (mod.ctrl) {
-            slot.ctrl = slot.ctrl||{};
-            slot = slot.ctrl;
+        for (i=0;i<keys.length;i++) {
+            key = keys[i][0];
+            mod = keys[i][1];
+            if (mod.ctrl) {
+                slot.ctrl = slot.ctrl||{};
+                slot = slot.ctrl;
+            }
+            if (mod.shift) {
+                slot.shift = slot.shift||{};
+                slot = slot.shift;
+            }
+            if (mod.alt) {
+                slot.alt = slot.alt||{};
+                slot = slot.alt;
+            }
+            slot[key] = slot[key] || {};
+            slot = slot[key];
+            //slot[key] = {scope: scope, ondown:cbdown};
         }
-        if (mod.shift) {
-            slot.shift = slot.shift||{};
-            slot = slot.shift;
-        }
-        if (mod.alt) {
-            slot.alt = slot.alt||{};
-            slot = slot.alt;
-        }
-        slot[key] = {scope: scope, ondown:cbdown, onup:cbup};
+        slot.scope = scope;
+        slot.ondown = cbdown;
     }
 
     function removeHandler(key,modifiers) {
         var mod = modifiers || {};
+        var keys = [];
+        var i=0;
+        if (typeof key === 'string') {
+
+            var parts = key.split(" ");
+            for (i=0;i<parts.length;i++) {
+                var parsedKey = parseKeySpecifier(parts[i]);
+                if (parsedKey) {
+                    keys.push(parsedKey);
+                } else {
+                    console.log("Unrecognised key specifier:",key)
+                    return;
+                }
+            }
+        } else {
+            keys.push([key,mod])
+        }
         var slot = handlers;
-        if (mod.ctrl) {
-            slot = slot.ctrl;
+        for (i=0;i<keys.length;i++) {
+            key = keys[i][0];
+            mod = keys[i][1];
+            if (mod.ctrl) {
+                slot = slot.ctrl;
+            }
+            if (slot && mod.shift) {
+                slot = slot.shift;
+            }
+            if (slot && mod.alt) {
+                slot = slot.alt;
+            }
+            if (!slot[key]) {
+                return;
+            }
+            slot = slot[key];
         }
-        if (slot && mod.shift) {
-            slot = slot.shift;
+        if (typeof slot.ondown === "string") {
+            if (typeof modifiers === 'boolean' && modifiers) {
+                actionToKeyMap[slot.ondown] = {user: modifiers}
+            } else {
+                delete actionToKeyMap[slot.ondown];
+            }
         }
-        if (slot && mod.alt) {
-            slot = slot.alt;
+        delete slot.scope;
+        delete slot.ondown;
+    }
+
+    var cmdCtrlKey = '<span class="help-key">'+(isMac?'&#8984;':'Ctrl')+'</span>';
+
+    function formatKey(key) {
+        var formattedKey = isMac?key.replace(/ctrl-?/,"&#8984;"):key;
+        formattedKey = isMac?formattedKey.replace(/alt-?/,"&#8997;"):key;
+        formattedKey = formattedKey.replace(/shift-?/,"&#8679;")
+        formattedKey = formattedKey.replace(/left/,"&#x2190;")
+        formattedKey = formattedKey.replace(/up/,"&#x2191;")
+        formattedKey = formattedKey.replace(/right/,"&#x2192;")
+        formattedKey = formattedKey.replace(/down/,"&#x2193;")
+        return '<span class="help-key-block"><span class="help-key">'+formattedKey.split(" ").join('</span> <span class="help-key">')+'</span></span>';
+    }
+
+    function validateKey(key) {
+        key = key.trim();
+        var parts = key.split(" ");
+        for (i=0;i<parts.length;i++) {
+            var parsedKey = parseKeySpecifier(parts[i]);
+            if (!parsedKey) {
+                return false;
+            }
         }
-        if (slot) {
-            delete slot[key];
+        return true;
+    }
+
+    function editShortcut(e) {
+        e.preventDefault();
+        var container = $(this);
+        var object = container.data('data');
+
+
+        if (!container.hasClass('keyboard-shortcut-entry-expanded')) {
+            endEditShortcut();
+
+            var key = container.find(".keyboard-shortcut-entry-key");
+            var scope = container.find(".keyboard-shortcut-entry-scope");
+            container.addClass('keyboard-shortcut-entry-expanded');
+
+            var keyInput = $('<input type="text">').attr('placeholder',RED._('keyboard.unassigned')).val(object.key||"").appendTo(key);
+            keyInput.on("keyup",function(e) {
+                if (e.keyCode === 13) {
+                    return endEditShortcut();
+                }
+                var currentVal = $(this).val();
+                currentVal = currentVal.trim();
+                var valid = (currentVal === "" || RED.keyboard.validateKey(currentVal));
+                $(this).toggleClass("input-error",!valid);
+            })
+
+            var scopeSelect = $('<select><option value="*" data-i18n="keyboard.global"></option><option value="workspace" data-i18n="keyboard.workspace"></option></select>').appendTo(scope);
+            scopeSelect.i18n();
+            scopeSelect.val(object.scope||'*');
+
+            var div = $('<div class="keyboard-shortcut-edit button-group-vertical"></div>').appendTo(scope);
+            var okButton = $('<button class="editor-button editor-button-small"><i class="fa fa-check"></i></button>').appendTo(div);
+            var revertButton = $('<button class="editor-button editor-button-small"><i class="fa fa-reply"></i></button>').appendTo(div);
+
+            okButton.click(function(e) {
+                e.stopPropagation();
+                endEditShortcut();
+            });
+            revertButton.click(function(e) {
+                e.stopPropagation();
+                RED.keyboard.revertToDefault(object.id);
+                container.empty();
+                container.removeClass('keyboard-shortcut-entry-expanded');
+                var shortcut = RED.keyboard.getShortcut(object.id);
+                var userKeymap = RED.settings.get('keymap') || {};
+
+                var currentEditorSettings = RED.settings.get('editor') || {};
+                var userKeymap = currentEditorSettings.keymap || {};
+                userKeymap[object.id] = null;
+                currentEditorSettings.keymap = userKeymap;
+                RED.settings.set('editor',currentEditorSettings);
+
+                var obj = {
+                    id:object.id,
+                    scope:shortcut?shortcut.scope:undefined,
+                    key:shortcut?shortcut.key:undefined,
+                    user:shortcut?shortcut.user:undefined
+                }
+                buildShortcutRow(container,obj);
+            })
+
+            keyInput.focus();
         }
     }
 
-    var dialog = null;
+    function endEditShortcut(cancel) {
+        var container = $('.keyboard-shortcut-entry-expanded');
+        if (container.length === 1) {
+            var object = container.data('data');
+            var keyInput = container.find(".keyboard-shortcut-entry-key input");
+            var scopeSelect = container.find(".keyboard-shortcut-entry-scope select");
+            if (!cancel) {
+                var key = keyInput.val().trim();
+                var scope = scopeSelect.val();
+                var valid = (key === "" || RED.keyboard.validateKey(key));
+                if (valid) {
+                    var current = RED.keyboard.getShortcut(object.id);
+                    if ((!current && key) || (current && (current.scope !== scope || current.key !== key))) {
+                        var keyDiv = container.find(".keyboard-shortcut-entry-key");
+                        var scopeDiv = container.find(".keyboard-shortcut-entry-scope");
+                        keyDiv.empty();
+                        scopeDiv.empty();
+                        if (object.key) {
+                            RED.keyboard.remove(object.key,true);
+                        }
+                        container.find(".keyboard-shortcut-entry-text i").css("opacity",1);
+                        if (key === "") {
+                            keyDiv.parent().addClass("keyboard-shortcut-entry-unassigned");
+                            keyDiv.append($('<span>').text(RED._('keyboard.unassigned'))  );
+                            delete object.key;
+                            delete object.scope;
+                        } else {
+                            keyDiv.parent().removeClass("keyboard-shortcut-entry-unassigned");
+                            keyDiv.append(RED.keyboard.formatKey(key))
+                            $("<span>").text(scope).appendTo(scopeDiv);
+                            object.key = key;
+                            object.scope = scope;
+                            RED.keyboard.add(object.scope,object.key,object.id,true);
+                        }
 
-    function showKeyboardHelp() {
-        if (!RED.settings.theme("menu.menu-item-keyboard-shortcuts",true)) {
-            return;
+                        var currentEditorSettings = RED.settings.get('editor') || {};
+                        var userKeymap = currentEditorSettings.keymap || {};
+                        userKeymap[object.id] = RED.keyboard.getShortcut(object.id);
+                        currentEditorSettings.keymap = userKeymap;
+                        RED.settings.set('editor',currentEditorSettings);
+                    }
+                }
+            }
+            keyInput.remove();
+            scopeSelect.remove();
+            $('.keyboard-shortcut-edit').remove();
+            container.removeClass('keyboard-shortcut-entry-expanded');
         }
-        if (!dialog) {
-            dialog = $('<div id="keyboard-help-dialog" class="hide">'+
-                '<div style="vertical-align: top;display:inline-block; box-sizing: border-box; width:50%; padding: 10px;">'+
-                    '<table class="keyboard-shortcuts">'+
-                        '<tr><td><span class="help-key">Ctrl/&#8984;</span> + <span class="help-key">a</span></td><td>'+RED._("keyboard.selectAll")+'</td></tr>'+
-                        '<tr><td><span class="help-key">Shift</span> + <span class="help-key">Click</span></td><td>'+RED._("keyboard.selectAllConnected")+'</td></tr>'+
-                        '<tr><td><span class="help-key">Ctrl/&#8984;</span> + <span class="help-key">Click</span></td><td>'+RED._("keyboard.addRemoveNode")+'</td></tr>'+
-                        '<tr><td>&nbsp;</td><td></td></tr>'+
-                        '<tr><td><span class="help-key">Ctrl/&#8984;</span> + <span class="help-key">i</span></td><td>'+RED._("keyboard.importNode")+'</td></tr>'+
-                        '<tr><td><span class="help-key">Ctrl/&#8984;</span> + <span class="help-key">e</span></td><td>'+RED._("keyboard.exportNode")+'</td></tr>'+
-                        '<tr><td>&nbsp;</td><td></td></tr>'+
-                        '<tr><td><span class="help-key"> &#x2190; </span> <span class="help-key"> &#x2191; </span> <span class="help-key"> &#x2192; </span> <span class="help-key"> &#x2193; </span></td><td>'+RED._("keyboard.nudgeNode")+'</td></tr>'+
-                        '<tr><td><span class="help-key">Shift</span> + <span class="help-key"> &#x2190; </span></td><td rowspan="4">'+RED._("keyboard.moveNode")+'</td></tr>'+
-                        '<tr><td><span class="help-key">Shift</span> + <span class="help-key"> &#x2191; </span></td></tr>'+
-                        '<tr><td><span class="help-key">Shift</span> + <span class="help-key"> &#x2192; </span></td></tr>'+
-                        '<tr><td><span class="help-key">Shift</span> + <span class="help-key"> &#x2193; </span></td></tr>'+
-                    '</table>'+
-                '</div>'+
-                '<div style="vertical-align: top;display:inline-block; box-sizing: border-box; width:50%; padding: 10px;">'+
-                    '<table class="keyboard-shortcuts">'+
-                        '<tr><td><span class="help-key">Ctrl/&#8984;</span> + <span class="help-key">Space</span></td><td>'+RED._("keyboard.toggleSidebar")+'</td></tr>'+
-                        '<tr><td><span class="help-key">Ctrl/&#8984;</span> + <span class="help-key">.</span></td><td>'+RED._("keyboard.searchBox")+'</td></tr>'+
-                        '<tr><td><span class="help-key">Ctrl/&#8984;</span> + <span class="help-key">Shift</span> + <span class="help-key">p</span></td><td>'+RED._("keyboard.managePalette")+'</td></tr>'+
-                        '<tr><td></td><td></td></tr>'+
-                        '<tr><td><span class="help-key">Delete</span></td><td rowspan="2">'+RED._("keyboard.deleteSelected")+'</td></tr>'+
-                        '<tr><td><span class="help-key">Backspace</span></td></tr>'+
-                        '<tr><td></td><td></td></tr>'+
-                        '<tr><td><span class="help-key">Ctrl/&#8984;</span> + <span class="help-key">c</span></td><td>'+RED._("keyboard.copyNode")+'</td></tr>'+
-                        '<tr><td><span class="help-key">Ctrl/&#8984;</span> + <span class="help-key">x</span></td><td>'+RED._("keyboard.cutNode")+'</td></tr>'+
-                        '<tr><td><span class="help-key">Ctrl/&#8984;</span> + <span class="help-key">v</span></td><td>'+RED._("keyboard.pasteNode")+'</td></tr>'+
-                        '<tr><td><span class="help-key">Ctrl/&#8984;</span> + <span class="help-key">z</span></td><td>'+RED._("keyboard.undoChange")+'</td></tr>'+
-                    '</table>'+
-                '</div>'+
-                '</div>')
-            .appendTo("body")
-            .dialog({
-                modal: true,
-                autoOpen: false,
-                width: "800",
-                title:"Keyboard shortcuts",
-                resizable: false
-            });
+    }
+
+    function buildShortcutRow(container,object) {
+        var item = $('<div class="keyboard-shortcut-entry">').appendTo(container);
+        container.data('data',object);
+
+        var text = object.id.replace(/(^.+:([a-z]))|(-([a-z]))/g,function() {
+            if (arguments[5] === 0) {
+                return arguments[2].toUpperCase();
+            } else {
+                return " "+arguments[4].toUpperCase();
+            }
+        });
+        var label = $('<div>').addClass("keyboard-shortcut-entry-text").text(text).appendTo(item);
+
+        var user = $('<i class="fa fa-user"></i>').prependTo(label);
+
+        if (!object.user) {
+            user.css("opacity",0);
         }
 
-        dialog.dialog("open");
+        var key = $('<div class="keyboard-shortcut-entry-key">').appendTo(item);
+        if (object.key) {
+            key.append(RED.keyboard.formatKey(object.key));
+        } else {
+            item.addClass("keyboard-shortcut-entry-unassigned");
+            key.append($('<span>').text(RED._('keyboard.unassigned'))  );
+        }
+
+        var scope = $('<div class="keyboard-shortcut-entry-scope">').appendTo(item);
+
+        $("<span>").text(object.scope === '*'?'global':object.scope||"").appendTo(scope);
+        container.click(editShortcut);
+    }
+
+    function getSettingsPane() {
+        var pane = $('<div id="user-settings-tab-keyboard"></div>');
+
+        $('<div class="keyboard-shortcut-entry keyboard-shortcut-list-header">'+
+        '<div class="keyboard-shortcut-entry-key keyboard-shortcut-entry-text"><input id="user-settings-tab-keyboard-filter" type="text" data-i18n="[placeholder]keyboard.filterActions"></div>'+
+        '<div class="keyboard-shortcut-entry-key" data-i18n="keyboard.shortcut"></div>'+
+        '<div class="keyboard-shortcut-entry-scope" data-i18n="keyboard.scope"></div>'+
+        '</div>').appendTo(pane);
+
+        pane.find("input").searchBox({
+            delay: 100,
+            change: function() {
+                var filterValue = $(this).val().trim();
+                if (filterValue === "") {
+                    shortcutList.editableList('filter', null);
+                } else {
+                    filterValue = filterValue.replace(/\s/g,"");
+                    shortcutList.editableList('filter', function(data) {
+                        return data.id.toLowerCase().replace(/^.*:/,"").replace("-","").indexOf(filterValue) > -1;
+                    })
+                }
+            }
+        });
+
+        var shortcutList = $('<ol class="keyboard-shortcut-list"></ol>').css({
+            position: "absolute",
+            top: "32px",
+            bottom: "0",
+            left: "0",
+            right: "0"
+        }).appendTo(pane).editableList({
+            addButton: false,
+            scrollOnAdd: false,
+            addItem: function(container,i,object) {
+                buildShortcutRow(container,object);
+            },
+
+        });
+        var shortcuts = RED.actions.list();
+        shortcuts.sort(function(A,B) {
+            var Aid = A.id.replace(/^.*:/,"").replace(/[ -]/g,"").toLowerCase();
+            var Bid = B.id.replace(/^.*:/,"").replace(/[ -]/g,"").toLowerCase();
+            return Aid.localeCompare(Bid);
+        });
+        shortcuts.forEach(function(s) {
+            shortcutList.editableList('addItem',s);
+        });
+        return pane;
     }
 
     return {
+        init: init,
         add: addHandler,
         remove: removeHandler,
-        showHelp: showKeyboardHelp
+        getShortcut: function(actionName) {
+            return actionToKeyMap[actionName];
+        },
+        revertToDefault: revertToDefault,
+        formatKey: formatKey,
+        validateKey: validateKey
     }
 
 })();
 ;/**
- * Copyright 2015, 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -6712,9 +7567,9 @@ RED.workspaces = (function() {
             var tabId = RED.nodes.id();
             do {
                 workspaceIndex += 1;
-            } while($("#workspace-tabs a[title='"+RED._('workspace.defaultName',{number:workspaceIndex})+"']").size() !== 0);
+            } while ($("#workspace-tabs a[title='"+RED._('workspace.defaultName',{number:workspaceIndex})+"']").size() !== 0);
 
-            ws = {type:"tab",id:tabId,label:RED._('workspace.defaultName',{number:workspaceIndex})};
+            ws = {type:"tab",id:tabId,disabled: false,info:"",label:RED._('workspace.defaultName',{number:workspaceIndex})};
             RED.nodes.addWorkspace(ws);
             workspace_tabs.addTab(ws);
             workspace_tabs.activateTab(tabId);
@@ -6723,10 +7578,11 @@ RED.workspaces = (function() {
                 RED.nodes.dirty(true);
             }
         }
+        RED.view.focus();
         return ws;
     }
     function deleteWorkspace(ws) {
-        if (workspace_tabs.count() == 1) {
+        if (workspaceTabCount === 1) {
             return;
         }
         removeWorkspace(ws);
@@ -6742,12 +7598,13 @@ RED.workspaces = (function() {
     function showRenameWorkspaceDialog(id) {
         var workspace = RED.nodes.workspace(id);
         RED.view.state(RED.state.EDITING);
+        var tabflowEditor;
         var trayOptions = {
             title: RED._("workspace.editFlow",{name:workspace.label}),
             buttons: [
                 {
                     id: "node-dialog-delete",
-                    class: 'leftButton'+((workspace_tabs.count() == 1)?" disabled":""),
+                    class: 'leftButton'+((workspaceTabCount === 1)?" disabled":""),
                     text: RED._("common.label.delete"), //'<i class="fa fa-trash"></i>',
                     click: function() {
                         deleteWorkspace(workspace);
@@ -6767,10 +7624,30 @@ RED.workspaces = (function() {
                     text: RED._("common.label.done"),
                     click: function() {
                         var label = $( "#node-input-name" ).val();
+                        var changed = false;
+                        var changes = {};
                         if (workspace.label != label) {
-                            var changes = {
-                                label:workspace.label
-                            }
+                            changes.label = workspace.label;
+                            changed = true;
+                            workspace.label = label;
+                            workspace_tabs.renameTab(workspace.id,label);
+                        }
+                        var disabled = $("#node-input-disabled").prop("checked");
+                        if (workspace.disabled !== disabled) {
+                            changes.disabled = workspace.disabled;
+                            changed = true;
+                            workspace.disabled = disabled;
+                        }
+                        var info = tabflowEditor.getValue();
+                        if (workspace.info !== info) {
+                            changes.info = workspace.info;
+                            changed = true;
+                            workspace.info = info;
+                        }
+                        $("#red-ui-tab-"+(workspace.id.replace(".","-"))).toggleClass('workspace-disabled',workspace.disabled);
+                        // $("#workspace").toggleClass("workspace-disabled",workspace.disabled);
+
+                        if (changed) {
                             var historyEvent = {
                                 t: "edit",
                                 changes:changes,
@@ -6779,14 +7656,29 @@ RED.workspaces = (function() {
                             }
                             workspace.changed = true;
                             RED.history.push(historyEvent);
-                            workspace_tabs.renameTab(workspace.id,label);
                             RED.nodes.dirty(true);
                             RED.sidebar.config.refresh();
+                            var selection = RED.view.selection();
+                            if (!selection.nodes && !selection.links) {
+                                RED.sidebar.info.refresh(workspace);
+                            }
                         }
                         RED.tray.close();
                     }
                 }
             ],
+            resize: function(dimensions) {
+                var rows = $("#dialog-form>div:not(.node-text-editor-row)");
+                var editorRow = $("#dialog-form>div.node-text-editor-row");
+                var height = $("#dialog-form").height();
+                for (var i=0; i<rows.size(); i++) {
+                    height -= $(rows[i]).outerHeight(true);
+                }
+                height -= (parseInt($("#dialog-form").css("marginTop"))+parseInt($("#dialog-form").css("marginBottom")));
+                height -= 28;
+                $(".node-text-editor").css("height",height+"px");
+                tabflowEditor.resize();
+            },
             open: function(tray) {
                 var trayBody = tray.find('.editor-tray-body');
                 var dialogForm = $('<form id="dialog-form" class="form-horizontal"></form>').appendTo(trayBody);
@@ -6794,16 +7686,66 @@ RED.workspaces = (function() {
                     '<label for="node-input-name" data-i18n="[append]editor:common.label.name"><i class="fa fa-tag"></i> </label>'+
                     '<input type="text" id="node-input-name">'+
                 '</div>').appendTo(dialogForm);
+
+                $('<div class="form-row">'+
+                    '<label for="node-input-disabled-btn" data-i18n="editor:workspace.status"></label>'+
+                    '<button id="node-input-disabled-btn" class="editor-button"><i class="fa fa-toggle-on"></i> <span id="node-input-disabled-label"></span></button> '+
+                    '<input type="checkbox" id="node-input-disabled" style="display: none;"/>'+
+                '</div>').appendTo(dialogForm);
+
+                $('<div class="form-row node-text-editor-row">'+
+                    '<label for="node-input-info" data-i18n="editor:workspace.info" style="width:300px;"></label>'+
+                    '<div style="height:250px;" class="node-text-editor" id="node-input-info"></div>'+
+                '</div>').appendTo(dialogForm);
+                tabflowEditor = RED.editor.createEditor({
+                    id: 'node-input-info',
+                    mode: 'ace/mode/markdown',
+                    value: ""
+                });
+
+                $('<div class="form-tips" data-i18n="editor:workspace.tip"></div>').appendTo(dialogForm);
+
+                dialogForm.find('#node-input-disabled-btn').on("click",function(e) {
+                    var i = $(this).find("i");
+                    if (i.hasClass('fa-toggle-off')) {
+                        i.addClass('fa-toggle-on');
+                        i.removeClass('fa-toggle-off');
+                        $("#node-input-disabled").prop("checked",false);
+                        $("#node-input-disabled-label").text(RED._("editor:workspace.enabled"));
+                    } else {
+                        i.addClass('fa-toggle-off');
+                        i.removeClass('fa-toggle-on');
+                        $("#node-input-disabled").prop("checked",true);
+                        $("#node-input-disabled-label").text(RED._("editor:workspace.disabled"));
+                    }
+                })
+
+                if (workspace.hasOwnProperty("disabled")) {
+                    $("#node-input-disabled").prop("checked",workspace.disabled);
+                    if (workspace.disabled) {
+                        dialogForm.find("#node-input-disabled-btn i").removeClass('fa-toggle-on').addClass('fa-toggle-off');
+                        $("#node-input-disabled-label").text(RED._("editor:workspace.disabled"));
+                    } else {
+                        $("#node-input-disabled-label").text(RED._("editor:workspace.enabled"));
+                    }
+                } else {
+                    workspace.disabled = false;
+                    $("#node-input-disabled-label").text(RED._("editor:workspace.enabled"));
+                }
+
                 $('<input type="text" style="display: none;" />').prependTo(dialogForm);
                 dialogForm.submit(function(e) { e.preventDefault();});
                 $("#node-input-name").val(workspace.label);
-                RED.text.bidi.prepareInput($("#node-input-name"))
+                RED.text.bidi.prepareInput($("#node-input-name"));
+                tabflowEditor.getSession().setValue(workspace.info || "", -1);
                 dialogForm.i18n();
             },
             close: function() {
                 if (RED.view.state() != RED.state.IMPORT_DRAGGING) {
                     RED.view.state(RED.state.DEFAULT);
                 }
+                RED.sidebar.info.refresh(workspace);
+                tabflowEditor.destroy();
             }
         }
         RED.tray.show(trayOptions);
@@ -6811,7 +7753,8 @@ RED.workspaces = (function() {
 
 
     var workspace_tabs;
-    function createWorkspaceTabs(){
+    var workspaceTabCount = 0;
+    function createWorkspaceTabs() {
         workspace_tabs = RED.tabs.create({
             id: "workspace-tabs",
             onchange: function(tab) {
@@ -6820,9 +7763,14 @@ RED.workspaces = (function() {
                 }
                 activeWorkspace = tab.id;
                 event.workspace = activeWorkspace;
+                // $("#workspace").toggleClass("workspace-disabled",tab.disabled);
                 RED.events.emit("workspace:change",event);
                 window.location.hash = 'flow/'+tab.id;
                 RED.sidebar.config.refresh();
+                RED.view.focus();
+            },
+            onclick: function(tab) {
+                RED.view.focus();
             },
             ondblclick: function(tab) {
                 if (tab.type != "subflow") {
@@ -6832,10 +7780,26 @@ RED.workspaces = (function() {
                 }
             },
             onadd: function(tab) {
-                RED.menu.setDisabled("menu-item-workspace-delete",workspace_tabs.count() == 1);
+                if (tab.type === "tab") {
+                    workspaceTabCount++;
+                }
+                $('<span class="workspace-disabled-icon"><i class="fa fa-ban"></i> </span>').prependTo("#red-ui-tab-"+(tab.id.replace(".","-"))+" .red-ui-tab-label");
+                if (tab.disabled) {
+                    $("#red-ui-tab-"+(tab.id.replace(".","-"))).addClass('workspace-disabled');
+                }
+                RED.menu.setDisabled("menu-item-workspace-delete",workspaceTabCount <= 1);
+                if (workspaceTabCount === 1) {
+                    showWorkspace();
+                }
             },
             onremove: function(tab) {
-                RED.menu.setDisabled("menu-item-workspace-delete",workspace_tabs.count() == 1);
+                if (tab.type === "tab") {
+                    workspaceTabCount--;
+                }
+                RED.menu.setDisabled("menu-item-workspace-delete",workspaceTabCount <= 1);
+                if (workspaceTabCount === 0) {
+                    hideWorkspace();
+                }
             },
             onreorder: function(oldOrder, newOrder) {
                 RED.history.push({t:'reorder',order:oldOrder,dirty:RED.nodes.dirty()});
@@ -6848,11 +7812,25 @@ RED.workspaces = (function() {
                 addWorkspace();
             }
         });
+        workspaceTabCount = 0;
+    }
+    function showWorkspace() {
+        $("#workspace .red-ui-tabs").show()
+        $("#chart").show()
+        $("#workspace-footer").children().show()
+    }
+    function hideWorkspace() {
+        $("#workspace .red-ui-tabs").hide()
+        $("#chart").hide()
+        $("#workspace-footer").children().hide()
     }
 
     function init() {
         createWorkspaceTabs();
         RED.events.on("sidebar:resize",workspace_tabs.resize);
+
+        RED.actions.add("core:show-next-tab",workspace_tabs.nextTab);
+        RED.actions.add("core:show-previous-tab",workspace_tabs.previousTab);
 
         RED.menu.setAction('menu-item-workspace-delete',function() {
             deleteWorkspace(RED.nodes.workspace(activeWorkspace));
@@ -6861,6 +7839,16 @@ RED.workspaces = (function() {
         $(window).resize(function() {
             workspace_tabs.resize();
         });
+
+        RED.actions.add("core:add-flow",addWorkspace);
+        RED.actions.add("core:edit-flow",editWorkspace);
+        RED.actions.add("core:remove-flow",removeWorkspace);
+
+        hideWorkspace();
+    }
+
+    function editWorkspace(id) {
+        showRenameWorkspaceDialog(id||activeWorkspace);
     }
 
     function removeWorkspace(ws) {
@@ -6870,6 +7858,9 @@ RED.workspaces = (function() {
             if (workspace_tabs.contains(ws.id)) {
                 workspace_tabs.removeTab(ws.id);
             }
+        }
+        if (ws.id === activeWorkspace) {
+            activeWorkspace = 0;
         }
     }
 
@@ -6885,14 +7876,12 @@ RED.workspaces = (function() {
         add: addWorkspace,
         remove: removeWorkspace,
         order: setWorkspaceOrder,
-        edit: function(id) {
-            showRenameWorkspaceDialog(id||activeWorkspace);
-        },
+        edit: editWorkspace,
         contains: function(id) {
             return workspace_tabs.contains(id);
         },
         count: function() {
-            return workspace_tabs.count();
+            return workspaceTabCount;
         },
         active: function() {
             return activeWorkspace
@@ -6926,7 +7915,7 @@ RED.workspaces = (function() {
     }
 })();
 ;/**
- * Copyright 2013, 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -6997,6 +7986,9 @@ RED.view = (function() {
         "grey":   "#d3d3d3"
     }
 
+    var PORT_TYPE_INPUT = 1;
+    var PORT_TYPE_OUTPUT = 0;
+
     var outer = d3.select("#chart")
         .append("svg:svg")
         .attr("width", space_width)
@@ -7005,12 +7997,16 @@ RED.view = (function() {
         .style("cursor","crosshair")
         .on("mousedown", function() {
             focusView();
+        })
+        .on("contextmenu", function(){
+            d3.event.preventDefault();
         });
 
     var vis = outer
         .append("svg:g")
         .on("dblclick.zoom", null)
         .append("svg:g")
+        .attr('class','innerCanvas')
         .on("mousemove", canvasMouseMove)
         .on("mousedown", canvasMouseDown)
         .on("mouseup", canvasMouseUp)
@@ -7129,38 +8125,45 @@ RED.view = (function() {
         .attr("height", space_height)
         .attr("fill","#fff");
 
-    var gridScale = d3.scale.linear().range([0,space_width]).domain([0,space_width]);
     var grid = vis.append("g");
+    updateGrid();
 
-    grid.selectAll("line.horizontal").data(gridScale.ticks(space_width/gridSize)).enter()
-       .append("line")
-           .attr(
-           {
-               "class":"horizontal",
-               "x1" : 0,
-               "x2" : space_width,
-               "y1" : function(d){ return gridScale(d);},
-               "y2" : function(d){ return gridScale(d);},
-               "fill" : "none",
-               "shape-rendering" : "crispEdges",
-               "stroke" : "#eee",
-               "stroke-width" : "1px"
-           });
-    grid.selectAll("line.vertical").data(gridScale.ticks(space_width/gridSize)).enter()
-       .append("line")
-           .attr(
-           {
-               "class":"vertical",
-               "y1" : 0,
-               "y2" : space_width,
-               "x1" : function(d){ return gridScale(d);},
-               "x2" : function(d){ return gridScale(d);},
-               "fill" : "none",
-               "shape-rendering" : "crispEdges",
-               "stroke" : "#eee",
-               "stroke-width" : "1px"
-           });
-    grid.style("visibility","hidden");
+    function updateGrid() {
+        var gridTicks = [];
+        for (var i=0;i<space_width;i+=+gridSize) {
+            gridTicks.push(i);
+        }
+        grid.selectAll("line.horizontal").remove();
+        grid.selectAll("line.horizontal").data(gridTicks).enter()
+            .append("line")
+            .attr(
+                {
+                    "class":"horizontal",
+                    "x1" : 0,
+                    "x2" : space_width,
+                    "y1" : function(d){ return d;},
+                    "y2" : function(d){ return d;},
+                    "fill" : "none",
+                    "shape-rendering" : "crispEdges",
+                    "stroke" : "#eee",
+                    "stroke-width" : "1px"
+                });
+        grid.selectAll("line.vertical").remove();
+        grid.selectAll("line.vertical").data(gridTicks).enter()
+            .append("line")
+            .attr(
+                {
+                    "class":"vertical",
+                    "y1" : 0,
+                    "y2" : space_width,
+                    "x1" : function(d){ return d;},
+                    "x2" : function(d){ return d;},
+                    "fill" : "none",
+                    "shape-rendering" : "crispEdges",
+                    "stroke" : "#eee",
+                    "stroke-width" : "1px"
+                });
+    }
 
     var dragGroup = vis.append("g");
     var drag_lines = [];
@@ -7171,10 +8174,14 @@ RED.view = (function() {
             node.el = dragGroup.append("svg:path").attr("class", "drag_line");
             drag_lines.push(node);
         }
+
     }
     function hideDragLines() {
         while(drag_lines.length) {
-            (drag_lines.pop()).el.remove();
+            var line = drag_lines.pop();
+            if (line.el) {
+                line.el.remove();
+            }
         }
     }
 
@@ -7190,6 +8197,7 @@ RED.view = (function() {
     }
 
     function init() {
+
         RED.events.on("workspace:change",function(event) {
             var chart = $("#chart");
             if (event.old !== 0) {
@@ -7247,70 +8255,12 @@ RED.view = (function() {
             drop: function( event, ui ) {
                 d3.event = event;
                 var selected_tool = ui.draggable[0].type;
-                var m = /^subflow:(.+)$/.exec(selected_tool);
-
-                if (activeSubflow && m) {
-                    var subflowId = m[1];
-                    if (subflowId === activeSubflow.id) {
-                        RED.notify(RED._("notification.error",{message: RED._("notification.errors.cannotAddSubflowToItself")}),"error");
-                        return;
-                    }
-                    if (RED.nodes.subflowContains(m[1],activeSubflow.id)) {
-                        RED.notify(RED._("notification.error",{message: RED._("notification.errors.cannotAddCircularReference")}),"error");
-                        return;
-                    }
+                var result = addNode(selected_tool);
+                if (!result) {
+                    return;
                 }
-
-                var nn = { id:RED.nodes.id(),z:RED.workspaces.active()};
-
-                nn.type = selected_tool;
-                nn._def = RED.nodes.getType(nn.type);
-
-                if (!m) {
-                    nn.inputs = nn._def.inputs || 0;
-                    nn.outputs = nn._def.outputs;
-
-                    for (var d in nn._def.defaults) {
-                        if (nn._def.defaults.hasOwnProperty(d)) {
-                            if (nn._def.defaults[d].value !== undefined) {
-                                nn[d] = JSON.parse(JSON.stringify(nn._def.defaults[d].value));
-                            }
-                        }
-                    }
-
-                    if (nn._def.onadd) {
-                        try {
-                            nn._def.onadd.call(nn);
-                        } catch(err) {
-                            console.log("onadd:",err);
-                        }
-                    }
-                } else {
-                    var subflow = RED.nodes.subflow(m[1]);
-                    nn.inputs = subflow.in.length;
-                    nn.outputs = subflow.out.length;
-                }
-
-                nn.changed = true;
-
-                nn.w = node_width;
-                nn.h = Math.max(node_height,(nn.outputs||0) * 15);
-
-                var historyEvent = {
-                    t:"add",
-                    nodes:[nn.id],
-                    dirty:RED.nodes.dirty()
-                }
-                if (activeSubflow) {
-                    var subflowRefresh = RED.subflow.refresh(true);
-                    if (subflowRefresh) {
-                        historyEvent.subflow = {
-                            id:activeSubflow.id,
-                            changed: activeSubflow.changed,
-                            instances: subflowRefresh.instances
-                        }
-                    }
-                }
+                var historyEvent = result.historyEvent;
+                var nn = result.node;
 
                 var helperOffset = d3.touches(ui.helper.get(0))[0]||d3.mouse(ui.helper.get(0));
                 var mousePos = d3.touches(this)[0]||d3.mouse(this);
@@ -7364,30 +8314,134 @@ RED.view = (function() {
                 }
             }
         });
+        $("#chart").focus(function() {
+            $("#workspace-tabs").addClass("workspace-focussed");
+        });
+        $("#chart").blur(function() {
+            $("#workspace-tabs").removeClass("workspace-focussed");
+        });
 
-        RED.keyboard.add("workspace",/* backspace */ 8,function(){deleteSelection();d3.event.preventDefault();});
-        RED.keyboard.add("workspace",/* delete */ 46,function(){deleteSelection();d3.event.preventDefault();});
-        RED.keyboard.add("workspace",/* c */ 67,{ctrl:true},function(){copySelection();d3.event.preventDefault();});
-        RED.keyboard.add("workspace",/* x */ 88,{ctrl:true},function(){copySelection();deleteSelection();d3.event.preventDefault();});
+        RED.actions.add("core:copy-selection-to-internal-clipboard",copySelection);
+        RED.actions.add("core:cut-selection-to-internal-clipboard",function(){copySelection();deleteSelection();});
+        RED.actions.add("core:paste-from-internal-clipboard",function(){importNodes(clipboard);});
+        RED.actions.add("core:delete-selection",deleteSelection);
+        RED.actions.add("core:edit-selected-node",editSelection);
+        RED.actions.add("core:undo",RED.history.pop);
+        RED.actions.add("core:select-all-nodes",selectAll);
+        RED.actions.add("core:zoom-in",zoomIn);
+        RED.actions.add("core:zoom-out",zoomOut);
+        RED.actions.add("core:zoom-reset",zoomZero);
 
-        RED.keyboard.add("workspace",/* z */ 90,{ctrl:true},function(){RED.history.pop();});
-        RED.keyboard.add("workspace",/* a */ 65,{ctrl:true},function(){selectAll();d3.event.preventDefault();});
-        RED.keyboard.add("*",/* = */ 187,{ctrl:true},function(){zoomIn();d3.event.preventDefault();});
-        RED.keyboard.add("*",/* - */ 189,{ctrl:true},function(){zoomOut();d3.event.preventDefault();});
-        RED.keyboard.add("*",/* 0 */ 48,{ctrl:true},function(){zoomZero();d3.event.preventDefault();});
-        RED.keyboard.add("workspace",/* v */ 86,{ctrl:true},function(){importNodes(clipboard);d3.event.preventDefault();});
+        RED.actions.add("core:toggle-show-grid",function(state) {
+            if (state === undefined) {
+                RED.userSettings.toggle("view-show-grid");
+            } else {
+                toggleShowGrid(state);
+            }
+        });
+        RED.actions.add("core:toggle-snap-grid",function(state) {
+            if (state === undefined) {
+                RED.userSettings.toggle("view-snap-grid");
+            } else {
+                toggleSnapGrid(state);
+            }
+        });
+        RED.actions.add("core:toggle-status",function(state) {
+            if (state === undefined) {
+                RED.userSettings.toggle("view-node-status");
+            } else {
+                toggleStatus(state);
+            }
+        });
 
-        RED.keyboard.add("workspace",/* up    */ 38, function() { moveSelection(0,-1);d3.event.preventDefault();},endKeyboardMove);
-        RED.keyboard.add("workspace",/* up    */ 38, {shift:true}, function() { moveSelection(0,-20); d3.event.preventDefault();},endKeyboardMove);
-        RED.keyboard.add("workspace",/* down  */ 40, function() { moveSelection(0,1);d3.event.preventDefault();},endKeyboardMove);
-        RED.keyboard.add("workspace",/* down  */ 40, {shift:true}, function() { moveSelection(0,20); d3.event.preventDefault();},endKeyboardMove);
-        RED.keyboard.add("workspace",/* left  */ 37, function() { moveSelection(-1,0);d3.event.preventDefault();},endKeyboardMove);
-        RED.keyboard.add("workspace",/* left  */ 37, {shift:true}, function() { moveSelection(-20,0); d3.event.preventDefault();},endKeyboardMove);
-        RED.keyboard.add("workspace",/* right */ 39, function() { moveSelection(1,0);d3.event.preventDefault();},endKeyboardMove);
-        RED.keyboard.add("workspace",/* right */ 39, {shift:true}, function() { moveSelection(20,0); d3.event.preventDefault();},endKeyboardMove);
+        RED.actions.add("core:move-selection-up", function() { moveSelection(0,-1);});
+        RED.actions.add("core:step-selection-up", function() { moveSelection(0,-20);});
+        RED.actions.add("core:move-selection-right", function() { moveSelection(1,0);});
+        RED.actions.add("core:step-selection-right", function() { moveSelection(20,0);});
+        RED.actions.add("core:move-selection-down", function() { moveSelection(0,1);});
+        RED.actions.add("core:step-selection-down", function() { moveSelection(0,20);});
+        RED.actions.add("core:move-selection-left", function() { moveSelection(-1,0);});
+        RED.actions.add("core:step-selection-left", function() { moveSelection(-20,0);});
+    }
+
+
+    function addNode(type,x,y) {
+        var m = /^subflow:(.+)$/.exec(type);
+
+        if (activeSubflow && m) {
+            var subflowId = m[1];
+            if (subflowId === activeSubflow.id) {
+                RED.notify(RED._("notification.error",{message: RED._("notification.errors.cannotAddSubflowToItself")}),"error");
+                return;
+            }
+            if (RED.nodes.subflowContains(m[1],activeSubflow.id)) {
+                RED.notify(RED._("notification.error",{message: RED._("notification.errors.cannotAddCircularReference")}),"error");
+                return;
+            }
+        }
+
+        var nn = { id:RED.nodes.id(),z:RED.workspaces.active()};
+
+        nn.type = type;
+        nn._def = RED.nodes.getType(nn.type);
+
+        if (!m) {
+            nn.inputs = nn._def.inputs || 0;
+            nn.outputs = nn._def.outputs;
+
+            for (var d in nn._def.defaults) {
+                if (nn._def.defaults.hasOwnProperty(d)) {
+                    if (nn._def.defaults[d].value !== undefined) {
+                        nn[d] = JSON.parse(JSON.stringify(nn._def.defaults[d].value));
+                    }
+                }
+            }
+
+            if (nn._def.onadd) {
+                try {
+                    nn._def.onadd.call(nn);
+                } catch(err) {
+                    console.log("Definition error: "+nn.type+".onadd:",err);
+                }
+            }
+        } else {
+            var subflow = RED.nodes.subflow(m[1]);
+            nn.name = "";
+            nn.inputs = subflow.in.length;
+            nn.outputs = subflow.out.length;
+        }
+
+        nn.changed = true;
+        nn.moved = true;
+
+        nn.w = node_width;
+        nn.h = Math.max(node_height,(nn.outputs||0) * 15);
+
+        var historyEvent = {
+            t:"add",
+            nodes:[nn.id],
+            dirty:RED.nodes.dirty()
+        }
+        if (activeSubflow) {
+            var subflowRefresh = RED.subflow.refresh(true);
+            if (subflowRefresh) {
+                historyEvent.subflow = {
+                    id:activeSubflow.id,
+                    changed: activeSubflow.changed,
+                    instances: subflowRefresh.instances
+                }
+            }
+        }
+        return {
+            node: nn,
+            historyEvent: historyEvent
+        }
+
     }
 
     function canvasMouseDown() {
+        var point;
+
         if (!mousedown_node && !mousedown_link) {
             selected_link = null;
             updateSelection();
@@ -7397,19 +8451,107 @@ RED.view = (function() {
                 lasso.remove();
                 lasso = null;
             }
+        }
+        if (mouse_mode === 0 || mouse_mode === RED.state.QUICK_JOINING) {
+            if (d3.event.metaKey || d3.event.ctrlKey) {
+                point = d3.mouse(this);
+                d3.event.stopPropagation();
+                var mainPos = $("#main-container").position();
 
+                if (mouse_mode !== RED.state.QUICK_JOINING) {
+                    mouse_mode = RED.state.QUICK_JOINING;
+                    $(window).on('keyup',disableQuickJoinEventHandler);
+                }
+
+                RED.typeSearch.show({
+                    x:d3.event.clientX-mainPos.left-node_width/2,
+                    y:d3.event.clientY-mainPos.top-node_height/2,
+                    cancel: function() {
+                        resetMouseVars();
+                    },
+                    add: function(type) {
+                        var result = addNode(type);
+                        if (!result) {
+                            return;
+                        }
+                        var nn = result.node;
+                        var historyEvent = result.historyEvent;
+                        nn.x = point[0];
+                        nn.y = point[1];
+                        if (mouse_mode === RED.state.QUICK_JOINING) {
+                            if (drag_lines.length > 0) {
+                                var drag_line = drag_lines[0];
+                                var src = null,dst,src_port;
+
+                                if (drag_line.portType === PORT_TYPE_OUTPUT && nn.inputs > 0) {
+                                    src = drag_line.node;
+                                    src_port = drag_line.port;
+                                    dst = nn;
+                                } else if (drag_line.portType === PORT_TYPE_INPUT && nn.outputs > 0) {
+                                    src = nn;
+                                    dst = drag_line.node;
+                                    src_port = 0;
+                                }
+                                if (src !== null) {
+                                    var link = {source: src, sourcePort:src_port, target: dst};
+                                    RED.nodes.addLink(link);
+                                    historyEvent.links = [link];
+                                    hideDragLines();
+                                    if (drag_line.portType === PORT_TYPE_OUTPUT && nn.outputs > 0) {
+                                        showDragLines([{node:nn,port:0,portType:PORT_TYPE_OUTPUT}]);
+                                    } else if (drag_line.portType === PORT_TYPE_INPUT && nn.inputs > 0) {
+                                        showDragLines([{node:nn,port:0,portType:PORT_TYPE_INPUT}]);
+                                    } else {
+                                        resetMouseVars();
+                                    }
+                                } else {
+                                    hideDragLines();
+                                    resetMouseVars();
+                                }
+                            } else {
+                                if (nn.outputs > 0) {
+                                    showDragLines([{node:nn,port:0,portType:PORT_TYPE_OUTPUT}]);
+                                } else if (nn.inputs > 0) {
+                                    showDragLines([{node:nn,port:0,portType:PORT_TYPE_INPUT}]);
+                                } else {
+                                    resetMouseVars();
+                                }
+                            }
+                        }
+
+
+                        RED.history.push(historyEvent);
+                        RED.nodes.add(nn);
+                        RED.editor.validateNode(nn);
+                        RED.nodes.dirty(true);
+                        // auto select dropped node - so info shows (if visible)
+                        clearSelection();
+                        nn.selected = true;
+                        moving_set.push({n:nn});
+                        updateActiveNodes();
+                        updateSelection();
+                        redraw();
+                    }
+                });
+
+                updateActiveNodes();
+                updateSelection();
+                redraw();
+            }
+        }
+        if (mouse_mode === 0 && !(d3.event.metaKey || d3.event.ctrlKey)) {
             if (!touchStartTime) {
-                var point = d3.mouse(this);
+                point = d3.mouse(this);
                 lasso = vis.append("rect")
-                    .attr("ox",point[0])
-                    .attr("oy",point[1])
-                    .attr("rx",1)
-                    .attr("ry",1)
-                    .attr("x",point[0])
-                    .attr("y",point[1])
-                    .attr("width",0)
-                    .attr("height",0)
-                    .attr("class","lasso");
+                .attr("ox",point[0])
+                .attr("oy",point[1])
+                .attr("rx",1)
+                .attr("ry",1)
+                .attr("x",point[0])
+                .attr("y",point[1])
+                .attr("width",0)
+                .attr("height",0)
+                .attr("class","lasso");
                 d3.event.preventDefault();
             }
         }
@@ -7457,31 +8599,31 @@ RED.view = (function() {
             return;
         }
 
-        if (mouse_mode != RED.state.IMPORT_DRAGGING && !mousedown_node && selected_link == null) {
+        if (mouse_mode != RED.state.QUICK_JOINING && mouse_mode != RED.state.IMPORT_DRAGGING && !mousedown_node && selected_link == null) {
             return;
         }
 
         var mousePos;
-        if (mouse_mode == RED.state.JOINING) {
+        if (mouse_mode == RED.state.JOINING || mouse_mode === RED.state.QUICK_JOINING) {
             // update drag line
-            if (drag_lines.length === 0) {
+            if (drag_lines.length === 0 && mousedown_port_type !== null) {
                 if (d3.event.shiftKey) {
                     // Get all the wires we need to detach.
                     var links = [];
                     var existingLinks = [];
                     if (selected_link &&
-                        ((mousedown_port_type === 0 &&
+                        ((mousedown_port_type === PORT_TYPE_OUTPUT &&
                             selected_link.source === mousedown_node &&
                             selected_link.sourcePort === mousedown_port_index
                         ) ||
-                        (mousedown_port_type === 1 &&
+                        (mousedown_port_type === PORT_TYPE_INPUT &&
                             selected_link.target === mousedown_node
                         ))
                     ) {
                         existingLinks = [selected_link];
                     } else {
                         var filter;
-                        if (mousedown_port_type === 0) {
+                        if (mousedown_port_type === PORT_TYPE_OUTPUT) {
                             filter = {
                                 source:mousedown_node,
                                 sourcePort: mousedown_port_index
@@ -7498,17 +8640,22 @@ RED.view = (function() {
                         RED.nodes.removeLink(link);
                         links.push({
                             link:link,
-                            node: (mousedown_port_type===0)?link.target:link.source,
-                            port: (mousedown_port_type===0)?0:link.sourcePort,
-                            portType: (mousedown_port_type===0)?1:0
+                            node: (mousedown_port_type===PORT_TYPE_OUTPUT)?link.target:link.source,
+                            port: (mousedown_port_type===PORT_TYPE_OUTPUT)?0:link.sourcePort,
+                            portType: (mousedown_port_type===PORT_TYPE_OUTPUT)?PORT_TYPE_INPUT:PORT_TYPE_OUTPUT
                         })
                     }
-                    showDragLines(links);
-                    mouse_mode = 0;
-                    updateActiveNodes();
-                    redraw();
-                    mouse_mode = RED.state.JOINING;
-                } else {
+                    if (links.length === 0) {
+                        resetMouseVars();
+                        redraw();
+                    } else {
+                        showDragLines(links);
+                        mouse_mode = 0;
+                        updateActiveNodes();
+                        redraw();
+                        mouse_mode = RED.state.JOINING;
+                    }
+                } else if (mousedown_node) {
                     showDragLines([{node:mousedown_node,port:mousedown_port_index,portType:mousedown_port_type}]);
                 }
                 selected_link = null;
@@ -7516,11 +8663,11 @@ RED.view = (function() {
             mousePos = mouse_position;
             for (i=0;i<drag_lines.length;i++) {
                 var drag_line = drag_lines[i];
-                var numOutputs = (drag_line.portType === 0)?(drag_line.node.outputs || 1):1;
+                var numOutputs = (drag_line.portType === PORT_TYPE_OUTPUT)?(drag_line.node.outputs || 1):1;
                 var sourcePort = drag_line.port;
                 var portY = -((numOutputs-1)/2)*13 +13*sourcePort;
 
-                var sc = (drag_line.portType === 0)?1:-1;
+                var sc = (drag_line.portType === PORT_TYPE_OUTPUT)?1:-1;
 
                 var dy = mousePos[1]-(drag_line.node.y+portY);
                 var dx = mousePos[0]-(drag_line.node.x+sc*drag_line.node.w/2);
@@ -7675,6 +8822,9 @@ RED.view = (function() {
     function canvasMouseUp() {
         var i;
         var historyEvent;
+        if (mouse_mode === RED.state.QUICK_JOINING) {
+            return;
+        }
         if (mousedown_node && mouse_mode == RED.state.JOINING) {
             var removedLinks = [];
             for (i=0;i<drag_lines.length;i++) {
@@ -7734,33 +8884,38 @@ RED.view = (function() {
             if (moving_set.length > 0) {
                 var ns = [];
                 for (var j=0;j<moving_set.length;j++) {
-                    ns.push({n:moving_set[j].n,ox:moving_set[j].ox,oy:moving_set[j].oy,changed:moving_set[j].n.changed});
-                    moving_set[j].n.dirty = true;
-                    moving_set[j].n.changed = true;
+                    var n = moving_set[j];
+                    if (n.ox !== n.n.x || n.oy !== n.n.y) {
+                        ns.push({n:n.n,ox:n.ox,oy:n.oy,moved:n.n.moved});
+                        n.n.dirty = true;
+                        n.n.moved = true;
+                    }
                 }
-                historyEvent = {t:"move",nodes:ns,dirty:RED.nodes.dirty()};
-                if (activeSpliceLink) {
-                    // TODO: DRY - droppable/nodeMouseDown/canvasMouseUp
-                    var spliceLink = d3.select(activeSpliceLink).data()[0];
-                    RED.nodes.removeLink(spliceLink);
-                    var link1 = {
-                        source:spliceLink.source,
-                        sourcePort:spliceLink.sourcePort,
-                        target: moving_set[0].n
-                    };
-                    var link2 = {
-                        source:moving_set[0].n,
-                        sourcePort:0,
-                        target: spliceLink.target
-                    };
-                    RED.nodes.addLink(link1);
-                    RED.nodes.addLink(link2);
-                    historyEvent.links = [link1,link2];
-                    historyEvent.removedLinks = [spliceLink];
-                    updateActiveNodes();
+                if (ns.length > 0) {
+                    historyEvent = {t:"move",nodes:ns,dirty:RED.nodes.dirty()};
+                    if (activeSpliceLink) {
+                        // TODO: DRY - droppable/nodeMouseDown/canvasMouseUp
+                        var spliceLink = d3.select(activeSpliceLink).data()[0];
+                        RED.nodes.removeLink(spliceLink);
+                        var link1 = {
+                            source:spliceLink.source,
+                            sourcePort:spliceLink.sourcePort,
+                            target: moving_set[0].n
+                        };
+                        var link2 = {
+                            source:moving_set[0].n,
+                            sourcePort:0,
+                            target: spliceLink.target
+                        };
+                        RED.nodes.addLink(link1);
+                        RED.nodes.addLink(link2);
+                        historyEvent.links = [link1,link2];
+                        historyEvent.removedLinks = [spliceLink];
+                        updateActiveNodes();
+                    }
+                    RED.nodes.dirty(true);
+                    RED.history.push(historyEvent);
                 }
-                RED.nodes.dirty(true);
-                RED.history.push(historyEvent);
             }
         }
         if (mouse_mode == RED.state.MOVING || mouse_mode == RED.state.MOVING_ACTIVE) {
@@ -7770,7 +8925,7 @@ RED.view = (function() {
             }
         }
         if (mouse_mode == RED.state.IMPORT_DRAGGING) {
-            RED.keyboard.remove(/* ESCAPE */ 27);
+            RED.keyboard.remove("escape");
             updateActiveNodes();
             RED.nodes.dirty(true);
         }
@@ -7837,6 +8992,7 @@ RED.view = (function() {
         selected_link = null;
     }
 
+    var lastSelection = null;
     function updateSelection() {
         var selection = {};
 
@@ -7908,17 +9064,27 @@ RED.view = (function() {
                 }
             }
         }
-
-
-        RED.events.emit("view:selection-changed",selection);
+        var selectionJSON = activeWorkspace+":"+JSON.stringify(selection,function(key,value) {
+            if (key === 'nodes') {
+                return value.map(function(n) { return n.id })
+            } else if (key === 'link') {
+                return value.source.id+":"+value.sourcePort+":"+value.target.id;
+            }
+            return value;
+        });
+        if (selectionJSON !== lastSelection) {
+            lastSelection = selectionJSON;
+            RED.events.emit("view:selection-changed",selection);
+        }
     }
 
     function endKeyboardMove() {
+        endMoveSet = false;
         if (moving_set.length > 0) {
             var ns = [];
             for (var i=0;i<moving_set.length;i++) {
-                ns.push({n:moving_set[i].n,ox:moving_set[i].ox,oy:moving_set[i].oy,changed:moving_set[i].n.changed});
-                moving_set[i].n.changed = true;
+                ns.push({n:moving_set[i].n,ox:moving_set[i].ox,oy:moving_set[i].oy,moved:moving_set[i].n.moved});
+                moving_set[i].n.moved = true;
                 moving_set[i].n.dirty = true;
                 delete moving_set[i].ox;
                 delete moving_set[i].oy;
@@ -7928,14 +9094,21 @@ RED.view = (function() {
             RED.nodes.dirty(true);
         }
     }
+    var endMoveSet = false;
     function moveSelection(dx,dy) {
         if (moving_set.length > 0) {
+            if (!endMoveSet) {
+                $(document).one('keyup',endKeyboardMove);
+                endMoveSet = true;
+            }
             var minX = 0;
             var minY = 0;
             var node;
 
             for (var i=0;i<moving_set.length;i++) {
                 node = moving_set[i];
+                node.n.moved = true;
+                node.n.dirty = true;
                 if (node.ox == null && node.oy == null) {
                     node.ox = node.n.x;
                     node.oy = node.n.y;
@@ -7956,6 +9129,16 @@ RED.view = (function() {
             }
 
             redraw();
+        }
+    }
+    function editSelection() {
+        if (moving_set.length > 0) {
+            var node = moving_set[0].n;
+            if (node.type === "subflow") {
+                RED.editor.editSubflow(activeSubflow);
+            } else {
+                RED.editor.edit(node);
+            }
         }
     }
     function deleteSelection() {
@@ -8066,15 +9249,20 @@ RED.view = (function() {
 
 
     function calculateTextWidth(str, className, offset) {
+        return calculateTextDimensions(str,className,offset,0)[0];
+    }
+
+    function calculateTextDimensions(str,className,offsetW,offsetH) {
         var sp = document.createElement("span");
         sp.className = className;
         sp.style.position = "absolute";
         sp.style.top = "-1000px";
-        sp.innerHTML = (str||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+        sp.textContent = (str||"");
         document.body.appendChild(sp);
         var w = sp.offsetWidth;
+        var h = sp.offsetHeight;
         document.body.removeChild(sp);
-        return offset+w;
+        return [offsetW+w,offsetH+h];
     }
 
     function resetMouseVars() {
@@ -8082,7 +9270,7 @@ RED.view = (function() {
         mouseup_node = null;
         mousedown_link = null;
         mouse_mode = 0;
-        mousedown_port_type = 0;
+        mousedown_port_type = null;
         activeSpliceLink = null;
         spliceActive = false;
         d3.select(".link_splice").classed("link_splice",false);
@@ -8092,22 +9280,45 @@ RED.view = (function() {
         }
     }
 
+    function disableQuickJoinEventHandler(evt) {
+        // Check for ctrl (all browsers), "Meta" (Chrome/FF), keyCode 91 (Safari)
+        if (evt.keyCode === 17 || evt.key === "Meta" || evt.keyCode === 91) {
+            resetMouseVars();
+            hideDragLines();
+            redraw();
+            $(window).off('keyup',disableQuickJoinEventHandler);
+        }
+    }
+
     function portMouseDown(d,portType,portIndex) {
         //console.log(d,portType,portIndex);
         // disable zoom
         //vis.call(d3.behavior.zoom().on("zoom"), null);
         mousedown_node = d;
-        mouse_mode = RED.state.JOINING;
         mousedown_port_type = portType;
         mousedown_port_index = portIndex || 0;
-        document.body.style.cursor = "crosshair";
+        if (mouse_mode !== RED.state.QUICK_JOINING) {
+            mouse_mode = RED.state.JOINING;
+            document.body.style.cursor = "crosshair";
+            if (d3.event.ctrlKey || d3.event.metaKey) {
+                mouse_mode = RED.state.QUICK_JOINING;
+                showDragLines([{node:mousedown_node,port:mousedown_port_index,portType:mousedown_port_type}]);
+                $(window).on('keyup',disableQuickJoinEventHandler);
+            }
+        }
+        d3.event.stopPropagation();
         d3.event.preventDefault();
     }
 
     function portMouseUp(d,portType,portIndex) {
         var i;
+        if (mouse_mode === RED.state.QUICK_JOINING && drag_lines.length > 0) {
+            if (drag_lines[0].node===d) {
+                return
+            }
+        }
         document.body.style.cursor = "";
-        if (mouse_mode == RED.state.JOINING && drag_lines.length > 0) {
+        if (mouse_mode == RED.state.JOINING || mouse_mode == RED.state.QUICK_JOINING) {
             if (typeof TouchEvent != "undefined" && d3.event instanceof TouchEvent) {
                 RED.nodes.eachNode(function(n) {
                     if (n.z == RED.workspaces.active()) {
@@ -8116,7 +9327,7 @@ RED.view = (function() {
                         if (n.x-hw<mouse_position[0] && n.x+hw> mouse_position[0] &&
                             n.y-hh<mouse_position[1] && n.y+hh>mouse_position[1]) {
                                 mouseup_node = n;
-                                portType = mouseup_node.inputs>0?1:0;
+                                portType = mouseup_node.inputs>0?PORT_TYPE_INPUT:PORT_TYPE_OUTPUT;
                                 portIndex = 0;
                         }
                     }
@@ -8136,11 +9347,11 @@ RED.view = (function() {
                 if (portType != drag_lines[i].portType && mouseup_node !== drag_lines[i].node) {
                     var drag_line = drag_lines[i];
                     var src,dst,src_port;
-                    if (drag_line.portType === 0) {
+                    if (drag_line.portType === PORT_TYPE_OUTPUT) {
                         src = drag_line.node;
                         src_port = drag_line.port;
                         dst = mouseup_node;
-                    } else if (drag_line.portType == 1) {
+                    } else if (drag_line.portType === PORT_TYPE_INPUT) {
                         src = mouseup_node;
                         dst = drag_line.node;
                         src_port = portIndex;
@@ -8174,11 +9385,126 @@ RED.view = (function() {
                 updateActiveNodes();
                 RED.nodes.dirty(true);
             }
+            if (mouse_mode === RED.state.QUICK_JOINING) {
+                if (addedLinks.length > 0) {
+                    hideDragLines();
+                    if (portType === PORT_TYPE_INPUT && d.outputs > 0) {
+                        showDragLines([{node:d,port:0,portType:PORT_TYPE_OUTPUT}]);
+                    } else if (portType === PORT_TYPE_OUTPUT && d.inputs > 0) {
+                        showDragLines([{node:d,port:0,portType:PORT_TYPE_INPUT}]);
+                    } else {
+                        resetMouseVars();
+                    }
+                }
+                redraw();
+                return;
+            }
+
             resetMouseVars();
             hideDragLines();
             selected_link = null;
             redraw();
         }
+    }
+
+    var portLabelHoverTimeout = null;
+    var portLabelHover = null;
+
+
+    function getElementPosition(node) {
+        var d3Node = d3.select(node);
+        if (d3Node.attr('class') === 'innerCanvas') {
+            return [0,0];
+        }
+        var result = [];
+        var localPos = [0,0];
+        if (node.nodeName.toLowerCase() === 'g') {
+            var transform = d3Node.attr("transform");
+            if (transform) {
+                localPos = d3.transform(transform).translate;
+            }
+        } else {
+            localPos = [d3Node.attr("x")||0,d3Node.attr("y")||0];
+        }
+        var parentPos = getElementPosition(node.parentNode);
+        return [localPos[0]+parentPos[0],localPos[1]+parentPos[1]]
+
+    }
+
+    function getPortLabel(node,portType,portIndex) {
+        var result;
+        var nodePortLabels = (portType === PORT_TYPE_INPUT)?node.inputLabels:node.outputLabels;
+        if (nodePortLabels && nodePortLabels[portIndex]) {
+            return nodePortLabels[portIndex];
+        }
+        var portLabels = (portType === PORT_TYPE_INPUT)?node._def.inputLabels:node._def.outputLabels;
+        if (typeof portLabels === 'string') {
+            result = portLabels;
+        } else if (typeof portLabels === 'function') {
+            try {
+                result = portLabels.call(node,portIndex);
+            } catch(err) {
+                console.log("Definition error: "+node.type+"."+((portType === PORT_TYPE_INPUT)?"inputLabels":"outputLabels"),err);
+                result = null;
+            }
+        } else if ($.isArray(portLabels)) {
+            result = portLabels[portIndex];
+        }
+        return result;
+    }
+    function portMouseOver(port,d,portType,portIndex) {
+        clearTimeout(portLabelHoverTimeout);
+        var active = (mouse_mode!=RED.state.JOINING || (drag_lines.length > 0 && drag_lines[0].portType !== portType));
+        if (active && ((portType === PORT_TYPE_INPUT && ((d._def && d._def.inputLabels)||d.inputLabels)) || (portType === PORT_TYPE_OUTPUT && ((d._def && d._def.outputLabels)||d.outputLabels)))) {
+            portLabelHoverTimeout = setTimeout(function() {
+                var tooltip = getPortLabel(d,portType,portIndex);
+                if (!tooltip) {
+                    return;
+                }
+                var pos = getElementPosition(port.node());
+                portLabelHoverTimeout = null;
+                portLabelHover = vis.append("g")
+                    .attr("transform","translate("+(pos[0]+(portType===PORT_TYPE_INPUT?-2:12))+","+(pos[1]+5)+")")
+                    .attr("class","port_tooltip");
+                var lines = tooltip.split("\n");
+                var labelWidth = 0;
+                var labelHeight = 4;
+                var labelHeights = [];
+                lines.forEach(function(l) {
+                    var labelDimensions = calculateTextDimensions(l, "port_tooltip_label", 8,0);
+                    labelWidth = Math.max(labelWidth,labelDimensions[0]);
+                    labelHeights.push(0.8*labelDimensions[1]);
+                    labelHeight += 0.8*labelDimensions[1];
+                });
+
+                var labelHeight1 = (labelHeight/2)-5-2;
+                var labelHeight2 = labelHeight - 4;
+                portLabelHover.append("path").attr("d",
+                    portType===PORT_TYPE_INPUT?
+                        "M0 0 l -5 -5 v -"+(labelHeight1)+" q 0 -2 -2 -2 h -"+labelWidth+" q -2 0 -2 2 v "+(labelHeight2)+" q 0 2 2 2 h "+labelWidth+" q 2 0 2 -2 v -"+(labelHeight1)+" l 5 -5"
+                        :
+                        "M0 0 l 5 -5 v -"+(labelHeight1)+" q 0 -2 2 -2 h "+labelWidth+" q 2 0 2 2 v "+(labelHeight2)+" q 0 2 -2 2 h -"+labelWidth+" q -2 0 -2 -2 v -"+(labelHeight1)+" l -5 -5"
+                    );
+                var y = -labelHeight/2-2;
+                lines.forEach(function(l,i) {
+                    y += labelHeights[i];
+                    portLabelHover.append("svg:text").attr("class","port_tooltip_label")
+                        .attr("x", portType===PORT_TYPE_INPUT?-10:10)
+                        .attr("y", y)
+                        .attr("text-anchor",portType===PORT_TYPE_INPUT?"end":"start")
+                        .text(l)
+                });
+            },500);
+        }
+        port.classed("port_hovered",active);
+    }
+    function portMouseOut(port,d,portType,portIndex) {
+        clearTimeout(portLabelHoverTimeout);
+        if (portLabelHover) {
+            portLabelHover.remove();
+            portLabelHover = null;
+        }
+        port.classed("port_hovered",false);
     }
 
     function nodeMouseUp(d) {
@@ -8203,7 +9529,7 @@ RED.view = (function() {
         //var pos = [touch0.pageX,touch0.pageY];
         //RED.touch.radialMenu.show(d3.select(this),pos);
         if (mouse_mode == RED.state.IMPORT_DRAGGING) {
-            RED.keyboard.remove(/* ESCAPE */ 27);
+            RED.keyboard.remove("escape");
 
             if (activeSpliceLink) {
                 // TODO: DRY - droppable/nodeMouseDown/canvasMouseUp
@@ -8231,6 +9557,9 @@ RED.view = (function() {
             RED.nodes.dirty(true);
             redraw();
             resetMouseVars();
+            d3.event.stopPropagation();
+            return;
+        } else if (mouse_mode == RED.state.QUICK_JOINING) {
             d3.event.stopPropagation();
             return;
         }
@@ -8292,8 +9621,20 @@ RED.view = (function() {
         d3.event.stopPropagation();
     }
 
+    function isButtonEnabled(d) {
+        var buttonEnabled = true;
+        if (d._def.button.hasOwnProperty('enabled')) {
+            if (typeof d._def.button.enabled === "function") {
+                buttonEnabled = d._def.button.enabled.call(d);
+            } else {
+                buttonEnabled = d._def.button.enabled;
+            }
+        }
+        return buttonEnabled;
+    }
+
     function nodeButtonClicked(d) {
-        if (!activeSubflow && !d.changed) {
+        if (!activeSubflow) {
             if (d._def.button.toggle) {
                 d[d._def.button.toggle] = !d[d._def.button.toggle];
                 d.dirty = true;
@@ -8308,8 +9649,6 @@ RED.view = (function() {
             if (d.dirty) {
                 redraw();
             }
-        } else if (d.changed) {
-            RED.notify(RED._("notification.warning", {message:RED._("notification.warnings.undeployedChanges")}),"warning");
         } else {
             RED.notify(RED._("notification.warning", {message:RED._("notification.warnings.nodeActionDisabled")}),"warning");
         }
@@ -8372,13 +9711,13 @@ RED.view = (function() {
                             nodeMouseUp.call(this,d);
                     });
 
-                outGroup.append("rect").attr("class","port").attr("rx",3).attr("ry",3).attr("width",10).attr("height",10).attr("x",-5).attr("y",15)
-                    .on("mousedown", function(d,i){portMouseDown(d,1,0);} )
-                    .on("touchstart", function(d,i){portMouseDown(d,1,0);} )
-                    .on("mouseup", function(d,i){portMouseUp(d,1,0);})
-                    .on("touchend",function(d,i){portMouseUp(d,1,0);} )
-                    .on("mouseover",function(d,i) { var port = d3.select(this); port.classed("port_hovered",(mouse_mode!=RED.state.JOINING || (drag_lines.length > 0 && drag_lines[0].portType !== 1)));})
-                    .on("mouseout",function(d,i) { var port = d3.select(this); port.classed("port_hovered",false);});
+                outGroup.append("g").attr('transform','translate(-5,15)').append("rect").attr("class","port").attr("rx",3).attr("ry",3).attr("width",10).attr("height",10)
+                    .on("mousedown", function(d,i){portMouseDown(d,PORT_TYPE_INPUT,0);} )
+                    .on("touchstart", function(d,i){portMouseDown(d,PORT_TYPE_INPUT,0);} )
+                    .on("mouseup", function(d,i){portMouseUp(d,PORT_TYPE_INPUT,0);})
+                    .on("touchend",function(d,i){portMouseUp(d,PORT_TYPE_INPUT,0);} )
+                    .on("mouseover",function(d){portMouseOver(d3.select(this),d,PORT_TYPE_INPUT,0);})
+                    .on("mouseout",function(d){portMouseOut(d3.select(this),d,PORT_TYPE_INPUT,0);});
 
                 outGroup.append("svg:text").attr("class","port_label").attr("x",20).attr("y",8).style("font-size","10px").text("output");
                 outGroup.append("svg:text").attr("class","port_label port_index").attr("x",20).attr("y",24).text(function(d,i){ return i+1});
@@ -8415,13 +9754,15 @@ RED.view = (function() {
                             nodeMouseUp.call(this,d);
                     });
 
-                inGroup.append("rect").attr("class","port").attr("rx",3).attr("ry",3).attr("width",10).attr("height",10).attr("x",35).attr("y",15)
-                    .on("mousedown", function(d,i){portMouseDown(d,0,i);} )
-                    .on("touchstart", function(d,i){portMouseDown(d,0,i);} )
-                    .on("mouseup", function(d,i){portMouseUp(d,0,i);})
-                    .on("touchend",function(d,i){portMouseUp(d,0,i);} )
-                    .on("mouseover",function(d,i) { var port = d3.select(this); port.classed("port_hovered",(mouse_mode!=RED.state.JOINING || (drag_lines.length > 0 && drag_lines[0].portType !== 0) ));})
-                    .on("mouseout",function(d,i) { var port = d3.select(this); port.classed("port_hovered",false);});
+                inGroup.append("g").attr('transform','translate(35,15)').append("rect").attr("class","port").attr("rx",3).attr("ry",3).attr("width",10).attr("height",10)
+                    .on("mousedown", function(d,i){portMouseDown(d,PORT_TYPE_OUTPUT,i);} )
+                    .on("touchstart", function(d,i){portMouseDown(d,PORT_TYPE_OUTPUT,i);} )
+                    .on("mouseup", function(d,i){portMouseUp(d,PORT_TYPE_OUTPUT,i);})
+                    .on("touchend",function(d,i){portMouseUp(d,PORT_TYPE_OUTPUT,i);} )
+                    .on("mouseover",function(d){portMouseOver(d3.select(this),d,PORT_TYPE_OUTPUT,0);})
+                    .on("mouseout",function(d) {portMouseOut(d3.select(this),d,PORT_TYPE_OUTPUT,0);});
+
+
                 inGroup.append("svg:text").attr("class","port_label").attr("x",18).attr("y",20).style("font-size","10px").text("input");
 
 
@@ -8462,18 +9803,11 @@ RED.view = (function() {
                     var node = d3.select(this);
                     var isLink = d.type === "link in" || d.type === "link out";
                     node.attr("id",d.id);
-                    var l = d._def.label;
-                    try {
-                        l = (typeof l === "function" ? l.call(d) : l)||"";
-                    } catch(err) {
-                        console.log("Definition error: "+d.type+".label",err);
-                        l = d.type;
-                    }
-
+                    var l = RED.utils.getNodeLabel(d);
                     if (isLink) {
                         d.w = node_height;
                     } else {
-                        d.w = Math.max(node_width,gridSize*(Math.ceil((calculateTextWidth(l, "node_label", 50)+(d._def.inputs>0?7:0))/gridSize)) );
+                        d.w = Math.max(node_width,20*(Math.ceil((calculateTextWidth(l, "node_label", 50)+(d._def.inputs>0?7:0))/20)) );
                     }
                     d.h = Math.max(node_height,(d.outputs||0) * 15);
 
@@ -8507,10 +9841,10 @@ RED.view = (function() {
                             .attr("height",node_height-12)
                             .attr("fill",function(d) { return d._def.color;})
                             .attr("cursor","pointer")
-                            .on("mousedown",function(d) {if (!lasso && !d.changed) {focusView();d3.select(this).attr("fill-opacity",0.2);d3.event.preventDefault(); d3.event.stopPropagation();}})
-                            .on("mouseup",function(d) {if (!lasso && !d.changed) { d3.select(this).attr("fill-opacity",0.4);d3.event.preventDefault();d3.event.stopPropagation();}})
-                            .on("mouseover",function(d) {if (!lasso && !d.changed) { d3.select(this).attr("fill-opacity",0.4);}})
-                            .on("mouseout",function(d) {if (!lasso  && !d.changed) {
+                            .on("mousedown",function(d) {if (!lasso && isButtonEnabled(d)) {focusView();d3.select(this).attr("fill-opacity",0.2);d3.event.preventDefault(); d3.event.stopPropagation();}})
+                            .on("mouseup",function(d) {if (!lasso && isButtonEnabled(d)) { d3.select(this).attr("fill-opacity",0.4);d3.event.preventDefault();d3.event.stopPropagation();}})
+                            .on("mouseover",function(d) {if (!lasso && isButtonEnabled(d)) { d3.select(this).attr("fill-opacity",0.4);}})
+                            .on("mouseout",function(d) {if (!lasso && isButtonEnabled(d)) {
                                 var op = 1;
                                 if (d._def.button.toggle) {
                                     op = d[d._def.button.toggle]?1:0.2;
@@ -8550,21 +9884,21 @@ RED.view = (function() {
                             nodeMouseUp.call(this,d);
                         })
                         .on("mouseover",function(d) {
-                                if (mouse_mode === 0) {
-                                    var node = d3.select(this);
-                                    node.classed("node_hovered",true);
-                                }
+                            if (mouse_mode === 0) {
+                                var node = d3.select(this);
+                                node.classed("node_hovered",true);
+                            }
                         })
                         .on("mouseout",function(d) {
-                                var node = d3.select(this);
-                                node.classed("node_hovered",false);
+                            var node = d3.select(this);
+                            node.classed("node_hovered",false);
                         });
 
                    //node.append("rect").attr("class", "node-gradient-top").attr("rx", 6).attr("ry", 6).attr("height",30).attr("stroke","none").attr("fill","url(#gradient-top)").style("pointer-events","none");
                    //node.append("rect").attr("class", "node-gradient-bottom").attr("rx", 6).attr("ry", 6).attr("height",30).attr("stroke","none").attr("fill","url(#gradient-bottom)").style("pointer-events","none");
 
                     if (d._def.icon) {
-
+                        var icon_url = RED.utils.getNodeIcon(d._def,d);
                         var icon_group = node.append("g")
                             .attr("class","node_icon_group")
                             .attr("x",0).attr("y",0);
@@ -8579,7 +9913,7 @@ RED.view = (function() {
                             .attr("height",function(d){return Math.min(50,d.h-4);});
 
                         var icon = icon_group.append("image")
-                            .attr("xlink:href","icons/"+d._def.icon)
+                            .attr("xlink:href",icon_url)
                             .attr("class","node_icon")
                             .attr("x",0)
                             .attr("width","30")
@@ -8610,7 +9944,7 @@ RED.view = (function() {
                         //}
 
                         var img = new Image();
-                        img.src = "icons/"+d._def.icon;
+                        img.src = icon_url;
                         img.onload = function() {
                             icon.attr("width",Math.min(img.width,30));
                             icon.attr("height",Math.min(img.height,30));
@@ -8647,8 +9981,10 @@ RED.view = (function() {
                     //node.append("circle").attr({"class":"centerDot","cx":0,"cy":0,"r":5});
 
                     //node.append("path").attr("class","node_error").attr("d","M 3,-3 l 10,0 l -5,-8 z");
-                    node.append("image").attr("class","node_error hidden").attr("xlink:href","icons/node-error.png").attr("x",0).attr("y",-6).attr("width",10).attr("height",9);
-                    node.append("image").attr("class","node_changed hidden").attr("xlink:href","icons/node-changed.png").attr("x",12).attr("y",-6).attr("width",10).attr("height",10);
+
+                    //TODO: these ought to be SVG
+                    node.append("image").attr("class","node_error hidden").attr("xlink:href","icons/node-red/node-error.png").attr("x",0).attr("y",-6).attr("width",10).attr("height",9);
+                    node.append("image").attr("class","node_changed hidden").attr("xlink:href","icons/node-red/node-changed.png").attr("x",12).attr("y",-6).attr("width",10).attr("height",10);
             });
 
             node.each(function(d,i) {
@@ -8657,15 +9993,9 @@ RED.view = (function() {
                         dirtyNodes[d.id] = d;
                         //if (d.x < -50) deleteSelection();  // Delete nodes if dragged back to palette
                         if (!isLink && d.resize) {
-                            var l = d._def.label;
-                            try {
-                                l = (typeof l === "function" ? l.call(d) : l)||"";
-                            } catch(err) {
-                                console.log("Definition error: "+d.type+".label",err);
-                                l = d.type;
-                            }
+                            var l = RED.utils.getNodeLabel(d);
                             var ow = d.w;
-                            d.w = Math.max(node_width,gridSize*(Math.ceil((calculateTextWidth(l, "node_label", 50)+(d._def.inputs>0?7:0))/gridSize)) );
+                            d.w = Math.max(node_width,20*(Math.ceil((calculateTextWidth(l, "node_label", 50)+(d._def.inputs>0?7:0))/20)) );
                             d.h = Math.max(node_height,(d.outputs||0) * 15);
                             d.x += (d.w-ow)/2;
                             d.resize = false;
@@ -8697,12 +10027,12 @@ RED.view = (function() {
                             } else if (d.inputs === 1 && inputPorts.empty()) {
                                 var inputGroup = thisNode.append("g").attr("class","port_input");
                                 inputGroup.append("rect").attr("class","port").attr("rx",3).attr("ry",3).attr("width",10).attr("height",10)
-                                    .on("mousedown",function(d){portMouseDown(d,1,0);})
-                                    .on("touchstart",function(d){portMouseDown(d,1,0);})
-                                    .on("mouseup",function(d){portMouseUp(d,1,0);} )
-                                    .on("touchend",function(d){portMouseUp(d,1,0);} )
-                                    .on("mouseover",function(d) { var port = d3.select(this); port.classed("port_hovered",(mouse_mode!=RED.state.JOINING || (drag_lines.length > 0 && drag_lines[0].portType !== 1) ));})
-                                    .on("mouseout",function(d) { var port = d3.select(this); port.classed("port_hovered",false);})
+                                    .on("mousedown",function(d){portMouseDown(d,PORT_TYPE_INPUT,0);})
+                                    .on("touchstart",function(d){portMouseDown(d,PORT_TYPE_INPUT,0);})
+                                    .on("mouseup",function(d){portMouseUp(d,PORT_TYPE_INPUT,0);} )
+                                    .on("touchend",function(d){portMouseUp(d,PORT_TYPE_INPUT,0);} )
+                                    .on("mouseover",function(d){portMouseOver(d3.select(this),d,PORT_TYPE_INPUT,0);})
+                                    .on("mouseout",function(d) {portMouseOut(d3.select(this),d,PORT_TYPE_INPUT,0);});
                             }
 
                             var numOutputs = d.outputs;
@@ -8712,12 +10042,12 @@ RED.view = (function() {
                             var output_group = d._ports.enter().append("g").attr("class","port_output");
 
                             output_group.append("rect").attr("class","port").attr("rx",3).attr("ry",3).attr("width",10).attr("height",10)
-                                .on("mousedown",(function(){var node = d; return function(d,i){portMouseDown(node,0,i);}})() )
-                                .on("touchstart",(function(){var node = d; return function(d,i){portMouseDown(node,0,i);}})() )
-                                .on("mouseup",(function(){var node = d; return function(d,i){portMouseUp(node,0,i);}})() )
-                                .on("touchend",(function(){var node = d; return function(d,i){portMouseUp(node,0,i);}})() )
-                                .on("mouseover",function(d,i) { var port = d3.select(this); port.classed("port_hovered",(mouse_mode!=RED.state.JOINING || (drag_lines.length > 0 && drag_lines[0].portType !== 0) ));})
-                                .on("mouseout",function(d,i) { var port = d3.select(this); port.classed("port_hovered",false);});
+                                .on("mousedown",(function(){var node = d; return function(d,i){portMouseDown(node,PORT_TYPE_OUTPUT,i);}})() )
+                                .on("touchstart",(function(){var node = d; return function(d,i){portMouseDown(node,PORT_TYPE_OUTPUT,i);}})() )
+                                .on("mouseup",(function(){var node = d; return function(d,i){portMouseUp(node,PORT_TYPE_OUTPUT,i);}})() )
+                                .on("touchend",(function(){var node = d; return function(d,i){portMouseUp(node,PORT_TYPE_OUTPUT,i);}})() )
+                                .on("mouseover",(function(){var node = d; return function(d,i){portMouseOver(d3.select(this),node,PORT_TYPE_OUTPUT,i);}})())
+                                .on("mouseout",(function(){var node = d; return function(d,i) {portMouseOut(d3.select(this),node,PORT_TYPE_OUTPUT,i);}})());
 
                             d._ports.exit().remove();
                             if (d._ports) {
@@ -8764,21 +10094,11 @@ RED.view = (function() {
                             if (d._def.icon) {
                                 icon = thisNode.select(".node_icon");
                                 var current_url = icon.attr("xlink:href");
-                                var icon_url;
-                                if (typeof d._def.icon == "function") {
-                                    try {
-                                        icon_url = d._def.icon.call(d);
-                                    } catch(err) {
-                                        console.log("icon",err);
-                                        icon_url = "arrow-in.png";
-                                    }
-                                } else {
-                                    icon_url = d._def.icon;
-                                }
-                                if ("icons/"+icon_url != current_url) {
-                                    icon.attr("xlink:href","icons/"+icon_url);
+                                var new_url = RED.utils.getNodeIcon(d._def,d);
+                                if (new_url !== current_url) {
+                                    icon.attr("xlink:href",new_url);
                                     var img = new Image();
-                                    img.src = "icons/"+d._def.icon;
+                                    img.src = new_url;
                                     img.onload = function() {
                                         icon.attr("width",Math.min(img.width,30));
                                         icon.attr("height",Math.min(img.height,30));
@@ -8792,10 +10112,10 @@ RED.view = (function() {
 
                             thisNode.selectAll(".node_changed")
                                 .attr("x",function(d){return d.w-10})
-                                .classed("hidden",function(d) { return !d.changed; });
+                                .classed("hidden",function(d) { return !(d.changed||d.moved); });
 
                             thisNode.selectAll(".node_error")
-                                .attr("x",function(d){return d.w-10-(d.changed?13:0)})
+                                .attr("x",function(d){return d.w-10-((d.changed||d.moved)?13:0)})
                                 .classed("hidden",function(d) { return d.valid; });
 
                             thisNode.selectAll(".port_input").each(function(d,i) {
@@ -8808,10 +10128,10 @@ RED.view = (function() {
                             thisNode.selectAll(".node_icon_shade_border").attr("d",function(d){ return "M "+(("right" == d._def.align) ?0:30)+" 1 l 0 "+(d.h-2)});
 
                             thisNode.selectAll(".node_button").attr("opacity",function(d) {
-                                return (activeSubflow||d.changed)?0.4:1
+                                return (activeSubflow||!isButtonEnabled(d))?0.4:1
                             });
                             thisNode.selectAll(".node_button_button").attr("cursor",function(d) {
-                                return (activeSubflow||d.changed)?"":"pointer";
+                                return (activeSubflow||!isButtonEnabled(d))?"":"pointer";
                             });
                             thisNode.selectAll(".node_right_button").attr("transform",function(d){
                                     var x = d.w-6;
@@ -8959,10 +10279,10 @@ RED.view = (function() {
                         d.x2 = d.target.x-d.target.w/2;
                         d.y2 = d.target.y;
 
-                        return "M "+(d.source.x+d.source.w/2)+" "+(d.source.y+y)+
-                            " C "+(d.source.x+d.source.w/2+scale*node_width)+" "+(d.source.y+y+scaleY*node_height)+" "+
-                            (d.target.x-d.target.w/2-scale*node_width)+" "+(d.target.y-scaleY*node_height)+" "+
-                            (d.target.x-d.target.w/2)+" "+d.target.y;
+                        return "M "+d.x1+" "+d.y1+
+                            " C "+(d.x1+scale*node_width)+" "+(d.y1+scaleY*node_height)+" "+
+                            (d.x2-scale*node_width)+" "+(d.y2-scaleY*node_height)+" "+
+                            d.x2+" "+d.y2;
                     });
                 }
             })
@@ -9165,6 +10485,7 @@ RED.view = (function() {
                         node = new_ms[i];
                         node.n.selected = true;
                         node.n.changed = true;
+                        node.n.moved = true;
                         node.n.x -= dx - mouse_position[0];
                         node.n.y -= dy - mouse_position[1];
                         node.dx = node.n.x - mouse_position[0];
@@ -9182,7 +10503,7 @@ RED.view = (function() {
                             try {
                                 node.n._def.onadd.call(node.n);
                             } catch(err) {
-                                console.log("onadd:",err);
+                                console.log("Definition error: "+node.n.type+".onadd:",err);
                             }
                         }
 
@@ -9197,8 +10518,8 @@ RED.view = (function() {
                                            node.n._def.outputs > 0;
                         }
                     }
-                    RED.keyboard.add("*",/* ESCAPE */ 27,function(){
-                            RED.keyboard.remove(/* ESCAPE */ 27);
+                    RED.keyboard.add("*","escape",function(){
+                            RED.keyboard.remove("escape");
                             clearSelection();
                             RED.history.pop();
                             mouse_mode = 0;
@@ -9243,6 +10564,24 @@ RED.view = (function() {
         }
     }
 
+    function toggleShowGrid(state) {
+        if (state) {
+            grid.style("visibility","visible");
+        } else {
+            grid.style("visibility","hidden");
+        }
+    }
+    function toggleSnapGrid(state) {
+        snapGrid = state;
+        redraw();
+    }
+    function toggleStatus(s) {
+        showStatus = s;
+        RED.nodes.eachNode(function(n) { n.dirty = true;});
+        //TODO: subscribe/unsubscribe here
+        redraw();
+    }
+
     return {
         init: init,
         state:function(state) {
@@ -9262,16 +10601,6 @@ RED.view = (function() {
         },
         focus: focusView,
         importNodes: importNodes,
-        status: function(s) {
-            if (s == null) {
-                return showStatus;
-            } else {
-                showStatus = s;
-                RED.nodes.eachNode(function(n) { n.dirty = true;});
-                //TODO: subscribe/unsubscribe here
-                redraw();
-            }
-        },
         calculateTextWidth: calculateTextWidth,
         select: function(selection) {
             if (typeof selection !== "undefined") {
@@ -9298,17 +10627,6 @@ RED.view = (function() {
             }
             return selection;
         },
-        toggleShowGrid: function(state) {
-            if (state) {
-                grid.style("visibility","visible");
-            } else {
-                grid.style("visibility","hidden");
-            }
-        },
-        toggleSnapGrid: function(state) {
-            snapGrid = state;
-            redraw();
-        },
         scale: function() {
             return scaleFactor;
         },
@@ -9332,7 +10650,6 @@ RED.view = (function() {
                     node.highlighted = true;
                     node.dirty = true;
                     RED.workspaces.show(node.z);
-                    RED.view.redraw();
 
                     var screenSize = [$("#chart").width(),$("#chart").height()];
                     var scrollPos = [$("#chart").scrollLeft(),$("#chart").scrollTop()];
@@ -9346,27 +10663,41 @@ RED.view = (function() {
                         },200);
                     }
 
-                    var flash = 22;
-                    var flashFunc = function() {
-                        flash--;
-                        node.highlighted = !node.highlighted;
-                        node.dirty = true;
-                        RED.view.redraw();
-                        if (flash >= 0) {
-                            setTimeout(flashFunc,100);
+                    if (!node._flashing) {
+                        node._flashing = true;
+                        var flash = 22;
+                        var flashFunc = function() {
+                            flash--;
+                            node.dirty = true;
+                            if (flash >= 0) {
+                                node.highlighted = !node.highlighted;
+                                setTimeout(flashFunc,100);
+                            } else {
+                                node.highlighted = false;
+                                delete node._flashing;
+                            }
+                            RED.view.redraw();
                         }
+                        flashFunc();
                     }
-                    flashFunc();
                 } else if (node._def.category === 'config') {
                     RED.sidebar.config.show(id);
                 }
+            }
+        },
+        gridSize: function(v) {
+            if (v === undefined) {
+                return gridSize;
+            } else {
+                gridSize = Math.max(5,v);
+                updateGrid();
             }
         }
 
     };
 })();
 ;/**
- * Copyright 2013, 2015 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -9402,7 +10733,8 @@ RED.sidebar = (function() {
                 tab.onremove.call(tab);
             }
         },
-        minimumActiveTabWidth: 110
+        minimumActiveTabWidth: 70
+        // scrollable: true
     });
 
     var knownTabs = {
@@ -9569,12 +10901,18 @@ RED.sidebar = (function() {
     }
 
     function init () {
-        RED.keyboard.add("*",/* SPACE */ 32,{ctrl:true},function(){RED.menu.setSelected("menu-item-sidebar",!RED.menu.isSelected("menu-item-sidebar"));d3.event.preventDefault();});
+        RED.actions.add("core:toggle-sidebar",function(state){
+            if (state === undefined) {
+                RED.menu.toggleSelected("menu-item-sidebar");
+            } else {
+                toggleSidebar(state);
+            }
+        });
         showSidebar();
         RED.sidebar.info.init();
         RED.sidebar.config.init();
         // hide info bar at start if screen rather narrow...
-        if ($(window).width() < 600) { toggleSidebar(); }
+        if ($(window).width() < 600) { RED.menu.setSelected("menu-item-sidebar",false); }
     }
 
     return {
@@ -9588,7 +10926,7 @@ RED.sidebar = (function() {
 
 })();
 ;/**
- * Copyright 2013, 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -9610,8 +10948,8 @@ RED.palette = (function() {
 
     var categoryContainers = {};
 
-    function createCategoryContainer(category, label){
-        label = label || category.replace("_", " ");
+    function createCategoryContainer(category, label) {
+        label = (label || category).replace(/_/g, " ");
         var catDiv = $('<div id="palette-container-'+category+'" class="palette-category palette-close hide">'+
             '<div id="palette-header-'+category+'" class="palette-header"><i class="expanded fa fa-angle-down"></i><span>'+label+'</span></div>'+
             '<div class="palette-content" id="palette-base-category-'+category+'">'+
@@ -9690,7 +11028,7 @@ RED.palette = (function() {
             if (label != type) {
                 l = "<p><b>"+RED.text.bidi.enforceTextDirectionWithUCC(label)+"</b><br/><i>"+type+"</i></p>";
             }
-            popOverContent = $(l+(info?info:$("script[data-help-name$='"+type+"']").html()||"<p>"+RED._("palette.noInfo")+"</p>").trim())
+            popOverContent = $(l+(info?info:$("script[data-help-name='"+type+"']").html()||"<p>"+RED._("palette.noInfo")+"</p>").trim())
                                 .filter(function(n) {
                                     return (this.nodeType == 1 && this.nodeName == "P") || (this.nodeType == 3 && this.textContent.trim().length > 0)
                                 }).slice(0,2);
@@ -9705,6 +11043,12 @@ RED.palette = (function() {
         el.data('popover').setContent(popOverContent);
     }
 
+    function setIcon(element,sf) {
+        var iconElement = element.find(".palette_icon");
+        var icon_url = RED.utils.getNodeIcon(sf._def,sf);
+        iconElement.attr("style", "background-image: url("+icon_url+")");
+    }
+
     function escapeNodeType(nt) {
         return nt.replace(" ","_").replace(".","_").replace(":","_");
     }
@@ -9716,7 +11060,7 @@ RED.palette = (function() {
         }
         if (exclusion.indexOf(def.category)===-1) {
 
-            var category = def.category.replace(" ","_");
+            var category = def.category.replace(/ /g,"_");
             var rootCategory = category.split("-")[0];
 
             var d = document.createElement("div");
@@ -9738,14 +11082,9 @@ RED.palette = (function() {
 
 
             if (def.icon) {
-                var icon_url = "arrow-in.png";
-                try {
-                    icon_url = (typeof def.icon === "function" ? def.icon.call({}) : def.icon);
-                } catch(err) {
-                    console.log("Definition error: "+nt+".icon",err);
-                }
+                var icon_url = RED.utils.getNodeIcon(def);
                 var iconContainer = $('<div/>',{class:"palette_icon_container"+(def.align=="right"?" palette_icon_container_right":"")}).appendTo(d);
-                $('<div/>',{class:"palette_icon",style:"background-image: url(icons/"+icon_url+")"}).appendTo(iconContainer);
+                $('<div/>',{class:"palette_icon",style:"background-image: url("+icon_url+")"}).appendTo(iconContainer);
             }
 
             d.style.backgroundColor = def.color;
@@ -9779,11 +11118,14 @@ RED.palette = (function() {
             $("#palette-"+category).append(d);
             d.onmousedown = function(e) { e.preventDefault(); };
 
-            RED.popover.create({
+            var popover = RED.popover.create({
                 target:$(d),
+                trigger: "hover",
+                width: "300px",
                 content: "hi",
                 delay: { show: 750, hide: 50 }
             });
+            $(d).data('popover',popover);
 
             // $(d).popover({
             //     title:d.type,
@@ -9797,12 +11139,11 @@ RED.palette = (function() {
                 RED.view.focus();
                 var helpText;
                 if (nt.indexOf("subflow:") === 0) {
-                    helpText = marked(RED.nodes.subflow(nt.substring(8)).info||"");
+                    helpText = marked(RED.nodes.subflow(nt.substring(8)).info||"")||('<span class="node-info-none">'+RED._("sidebar.info.none")+'</span>');
                 } else {
-                    helpText = $("script[data-help-name$='"+d.type+"']").html()||"";
+                    helpText = $("script[data-help-name='"+d.type+"']").html()||('<span class="node-info-none">'+RED._("sidebar.info.none")+'</span>');
                 }
-                var help = '<div class="node-help">'+helpText+"</div>";
-                RED.sidebar.info.set(help);
+                RED.sidebar.info.set(helpText,RED._("sidebar.info.nodeHelp"));
             });
             var chart = $("#chart");
             var chartOffset = chart.offset();
@@ -9811,13 +11152,19 @@ RED.palette = (function() {
             var mouseX;
             var mouseY;
             var spliceTimer;
+            var paletteWidth;
+            var paletteTop;
             $(d).draggable({
                 helper: 'clone',
                 appendTo: 'body',
                 revert: true,
                 revertDuration: 50,
                 containment:'#main-container',
-                start: function() {RED.view.focus();},
+                start: function() {
+                    paletteWidth = $("#palette").width();
+                    paletteTop = $("#palette").parent().position().top + $("#palette-container").position().top;
+                    RED.view.focus();
+                },
                 stop: function() { d3.select('.link_splice').classed('link_splice',false); if (spliceTimer) { clearTimeout(spliceTimer); spliceTimer = null;}},
                 drag: function(e,ui) {
 
@@ -9825,11 +11172,10 @@ RED.palette = (function() {
                     // it here makes me sad
                     //console.log(ui.helper.position());
                     ui.position.left += 17.5;
-                    
-                    if (def.inputs > 0 && def.outputs > 0) {
-                        mouseX = ui.position.left+(ui.helper.width()/2) - chartOffset.left + chart.scrollLeft();
-                        mouseY = ui.position.top+(ui.helper.height()/2) - chartOffset.top + chart.scrollTop();
 
+                    if (def.inputs > 0 && def.outputs > 0) {
+                        mouseX = ui.position.left-paletteWidth+(ui.helper.width()/2) - chartOffset.left + chart.scrollLeft();
+                        mouseY = ui.position.top-paletteTop+(ui.helper.height()/2) - chartOffset.top + chart.scrollTop();
                         if (!spliceTimer) {
                             spliceTimer = setTimeout(function() {
                                 var nodes = [];
@@ -9851,6 +11197,7 @@ RED.palette = (function() {
                                     mouseY /= RED.view.scale();
                                     nodes = RED.view.getLinksAtPoint(mouseX,mouseY);
                                 }
+
                                 for (var i=0;i<nodes.length;i++) {
                                     if (d3.select(nodes[i]).classed('link_background')) {
                                         var length = nodes[i].getTotalLength();
@@ -9917,14 +11264,26 @@ RED.palette = (function() {
             }
         }
     }
+
     function hideNodeType(nt) {
         var nodeTypeId = escapeNodeType(nt);
-        $("#palette_node_"+nodeTypeId).hide();
+        var paletteNode = $("#palette_node_"+nodeTypeId);
+        paletteNode.hide();
+        var categoryNode = paletteNode.closest(".palette-category");
+        var cl = categoryNode.find(".palette_node");
+        var c = 0;
+        for (var i = 0; i < cl.length; i++) {
+            if ($(cl[i]).css('display') === 'none') { c += 1; }
+        }
+        if (c === cl.length) { categoryNode.hide(); }
     }
 
     function showNodeType(nt) {
         var nodeTypeId = escapeNodeType(nt);
-        $("#palette_node_"+nodeTypeId).show();
+        var paletteNode = $("#palette_node_"+nodeTypeId);
+        var categoryNode = paletteNode.closest(".palette-category");
+        categoryNode.show();
+        paletteNode.show();
     }
 
     function refreshNodeTypes() {
@@ -9949,6 +11308,7 @@ RED.palette = (function() {
                 portOutput.remove();
             }
             setLabel(sf.type+":"+sf.id,paletteNode,sf.name,marked(sf.info||""));
+            setIcon(paletteNode,sf);
         });
     }
 
@@ -9988,21 +11348,21 @@ RED.palette = (function() {
         RED.events.on('registry:node-type-removed', function(nodeType) {
             removeNodeType(nodeType);
         });
-
         RED.events.on('registry:node-set-enabled', function(nodeSet) {
             for (var j=0;j<nodeSet.types.length;j++) {
                 showNodeType(nodeSet.types[j]);
                 var def = RED.nodes.getType(nodeSet.types[j]);
-                if (def.onpaletteadd && typeof def.onpaletteadd === "function") {
+                if (def && def.onpaletteadd && typeof def.onpaletteadd === "function") {
                     def.onpaletteadd.call(def);
                 }
             }
         });
         RED.events.on('registry:node-set-disabled', function(nodeSet) {
+            console.log(nodeSet);
             for (var j=0;j<nodeSet.types.length;j++) {
                 hideNodeType(nodeSet.types[j]);
                 var def = RED.nodes.getType(nodeSet.types[j]);
-                if (def.onpaletteremove && typeof def.onpaletteremove === "function") {
+                if (def && def.onpaletteremove && typeof def.onpaletteremove === "function") {
                     def.onpaletteremove.call(def);
                 }
             }
@@ -10012,13 +11372,12 @@ RED.palette = (function() {
                 for (var j=0;j<nodeSet.types.length;j++) {
                     removeNodeType(nodeSet.types[j]);
                     var def = RED.nodes.getType(nodeSet.types[j]);
-                    if (def.onpaletteremove && typeof def.onpaletteremove === "function") {
+                    if (def && def.onpaletteremove && typeof def.onpaletteremove === "function") {
                         def.onpaletteremove.call(def);
                     }
                 }
             }
         });
-
 
         $("#palette > .palette-spinner").show();
 
@@ -10070,7 +11429,7 @@ RED.palette = (function() {
     };
 })();
 ;/**
- * Copyright 2013, 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -10097,15 +11456,59 @@ RED.sidebar.info = (function() {
         smartypants: false
     });
 
-    var content = document.createElement("div");
-    content.style.paddingTop = "4px";
-    content.style.paddingLeft = "4px";
-    content.style.paddingRight = "4px";
-    content.className = "sidebar-node-info"
+    var content;
+    var sections;
+    var nodeSection;
+    var infoSection;
+    var tipBox;
 
-    var propertiesExpanded = false;
+    var expandedSections = {
+        "property": false
+    };
 
     function init() {
+
+        content = document.createElement("div");
+        content.className = "sidebar-node-info"
+
+        RED.actions.add("core:show-info-tab",show);
+
+        var stackContainer = $("<div>",{class:"sidebar-node-info-stack"}).appendTo(content);
+
+        sections = RED.stack.create({
+            container: stackContainer
+        }).hide();
+
+        nodeSection = sections.add({
+            title: RED._("sidebar.info.info"),
+            collapsible: true
+        });
+        nodeSection.expand();
+        infoSection = sections.add({
+            title: RED._("sidebar.info.nodeHelp"),
+            collapsible: true
+        });
+        infoSection.expand();
+        infoSection.content.css("padding","6px");
+        infoSection.container.css("border-bottom","none");
+
+        var tipContainer = $('<div class="node-info-tips"></div>').appendTo(content);
+        tipBox = $('<div class="node-info-tip"></div>').appendTo(tipContainer);
+        var tipButtons = $('<div class="node-info-tips-buttons"></div>').appendTo(tipContainer);
+
+        var tipRefresh = $('<a href="#" class="workspace-footer-button"><i class="fa fa-refresh"></a>').appendTo(tipButtons);
+        tipRefresh.click(function(e) {
+            e.preventDefault();
+            tips.next();
+        })
+
+        var tipClose = $('<a href="#" class="workspace-footer-button"><i class="fa fa-times"></a>').appendTo(tipButtons);
+        tipClose.click(function(e) {
+            e.preventDefault();
+            RED.actions.invoke("core:toggle-show-tips");
+            RED.notify(RED._("sidebar.info.showTips"));
+        });
+
         RED.sidebar.addTab({
             id: "info",
             label: RED._("sidebar.info.label"),
@@ -10113,6 +11516,11 @@ RED.sidebar.info = (function() {
             content: content,
             enableOnEdit: true
         });
+        if (tips.enabled()) {
+            tips.start();
+        } else {
+            tips.stop();
+        }
 
     }
 
@@ -10120,137 +11528,294 @@ RED.sidebar.info = (function() {
         RED.sidebar.show("info");
     }
 
-    function jsonFilter(key,value) {
-        if (key === "") {
-            return value;
-        }
-        var t = typeof value;
-        if ($.isArray(value)) {
-            return "[array:"+value.length+"]";
-        } else if (t === "object") {
-            return "[object]"
-        } else if (t === "string") {
-            if (value.length > 30) {
-                return value.substring(0,30)+" ...";
+    // TODO: DRY - projects.js
+    function addTargetToExternalLinks(el) {
+        $(el).find("a").each(function(el) {
+            var href = $(this).attr('href');
+            if (/^https?:/.test(href)) {
+                $(this).attr('target','_blank');
             }
-        }
-        return value;
+        });
+        return el;
     }
-
     function refresh(node) {
-        var table = '<table class="node-info"><tbody>';
-        table += '<tr class="blank"><td colspan="2">'+RED._("sidebar.info.node")+'</td></tr>';
-        if (node.type != "subflow" && node.name) {
-            table += '<tr><td>'+RED._("common.label.name")+'</td><td>&nbsp;<span class="bidiAware" dir="'+RED.text.bidi.resolveBaseTextDir(node.name)+'">'+node.name+'</span></td></tr>';
+        if (node === undefined) {
+            refreshSelection();
+            return;
         }
-        table += "<tr><td>"+RED._("sidebar.info.type")+"</td><td>&nbsp;"+node.type+"</td></tr>";
-        table += "<tr><td>"+RED._("sidebar.info.id")+"</td><td>&nbsp;"+node.id+"</td></tr>";
+        sections.show();
+        $(nodeSection.content).empty();
+        $(infoSection.content).empty();
 
-        var m = /^subflow(:(.+))?$/.exec(node.type);
+        var propRow;
+
+        var table = $('<table class="node-info"></table>').appendTo(nodeSection.content);
+        var tableBody = $('<tbody>').appendTo(table);
         var subflowNode;
-        if (m) {
-            if (m[2]) {
-                subflowNode = RED.nodes.subflow(m[2]);
-            } else {
-                subflowNode = node;
-            }
+        var subflowUserCount;
 
-            table += '<tr class="blank"><td colspan="2">'+RED._("sidebar.info.subflow")+'</td></tr>';
-
-            var userCount = 0;
-            var subflowType = "subflow:"+subflowNode.id;
-            RED.nodes.eachNode(function(n) {
-                if (n.type === subflowType) {
-                    userCount++;
-                }
-            });
-            table += '<tr><td>'+RED._("common.label.name")+'</td><td><span class="bidiAware" dir=\"'+RED.text.bidi.resolveBaseTextDir(subflowNode.name)+'">'+subflowNode.name+'</span></td></tr>';
-            table += "<tr><td>"+RED._("sidebar.info.instances")+"</td><td>"+userCount+"</td></tr>";
+        var activeProject = RED.projects.getActiveProject();
+        if (activeProject) {
+            propRow = $('<tr class="node-info-node-row"><td>Project</td><td></td></tr>').appendTo(tableBody);
+            $(propRow.children()[1]).text(activeProject.name||"");
+            $('<tr class="node-info-property-expand blank"><td colspan="2"></td></tr>').appendTo(tableBody);
+            $('<button class="editor-button editor-button-small" style="position:absolute;right:2px;"><i class="fa fa-ellipsis-h"></i></button>')
+                .appendTo(propRow.children()[1])
+                .click(function(evt) {
+                    evt.preventDefault();
+                    RED.projects.editProject();
+                });
         }
+        infoSection.container.show();
+        if (node === null) {
+            return;
+        } else if (Array.isArray(node)) {
+            infoSection.container.hide();
+            propRow = $('<tr class="node-info-node-row"><td>'+RED._("sidebar.info.selection")+"</td><td></td></tr>").appendTo(tableBody);
+            $(propRow.children()[1]).text(RED._("sidebar.info.nodes",{count:node.length}))
+        } else {
+            var m = /^subflow(:(.+))?$/.exec(node.type);
+            if (m) {
+                if (m[2]) {
+                    subflowNode = RED.nodes.subflow(m[2]);
+                } else {
+                    subflowNode = node;
+                }
 
-        if (!m && node.type != "subflow" && node.type != "comment") {
-            table += '<tr class="blank"><td colspan="2"><a href="#" class="node-info-property-header"><i style="width: 10px; text-align: center;" class="fa fa-caret-'+(propertiesExpanded?"down":"right")+'"></i> '+RED._("sidebar.info.properties")+'</a></td></tr>';
-            if (node._def) {
-                for (var n in node._def.defaults) {
-                    if (n != "name" && node._def.defaults.hasOwnProperty(n)) {
-                        var val = node[n];
-                        var type = typeof val;
-                        if (val === null || val === undefined) {
-                            val = '<span style="font-style: italic; color: #ccc;">'+RED._("sidebar.info.null")+'</span>';
-                        } else if (type === "string") {
-                            if (val.length === 0) {
-                                val = '<span style="font-style: italic; color: #ccc;">'+RED._("sidebar.info.blank")+'</span>';
-                            } else {
-                                if (val.length > 30) {
-                                    val = val.substring(0,30)+" ...";
+                subflowUserCount = 0;
+                var subflowType = "subflow:"+subflowNode.id;
+                RED.nodes.eachNode(function(n) {
+                    if (n.type === subflowType) {
+                        subflowUserCount++;
+                    }
+                });
+            }
+            if (node.type === "tab" || node.type === "subflow") {
+                propRow = $('<tr class="node-info-node-row"><td>'+RED._("sidebar.info."+(node.type==='tab'?'flow':'subflow'))+'</td><td></td></tr>').appendTo(tableBody);
+                RED.utils.createObjectElement(node.id).appendTo(propRow.children()[1]);
+                propRow = $('<tr class="node-info-node-row"><td>'+RED._("sidebar.info.tabName")+"</td><td></td></tr>").appendTo(tableBody);
+                $(propRow.children()[1]).text(node.label||node.name||"");
+                if (node.type === "tab") {
+                    propRow = $('<tr class="node-info-node-row"><td>'+RED._("sidebar.info.status")+'</td><td></td></tr>').appendTo(tableBody);
+                    $(propRow.children()[1]).text((!!!node.disabled)?RED._("sidebar.info.enabled"):RED._("sidebar.info.disabled"))
+                }
+            } else {
+                propRow = $('<tr class="node-info-node-row"><td>'+RED._("sidebar.info.node")+"</td><td></td></tr>").appendTo(tableBody);
+                RED.utils.createObjectElement(node.id).appendTo(propRow.children()[1]);
+
+
+                if (node.type !== "subflow" && node.name) {
+                    propRow = $('<tr class="node-info-node-row"><td>'+RED._("common.label.name")+'</td><td></td></tr>').appendTo(tableBody);
+                    $('<span class="bidiAware" dir="'+RED.text.bidi.resolveBaseTextDir(node.name)+'"></span>').text(node.name).appendTo(propRow.children()[1]);
+                }
+                if (!m) {
+                    propRow = $('<tr class="node-info-node-row"><td>'+RED._("sidebar.info.type")+"</td><td></td></tr>").appendTo(tableBody);
+                    $(propRow.children()[1]).text(node.type);
+                }
+
+                if (!m && node.type != "subflow" && node.type != "comment") {
+                    if (node._def) {
+                        var count = 0;
+                        var defaults = node._def.defaults;
+                        for (var n in defaults) {
+                            if (n != "name" && defaults.hasOwnProperty(n)) {
+                                var val = node[n];
+                                var type = typeof val;
+                                count++;
+                                propRow = $('<tr class="node-info-property-row'+(expandedSections.property?"":" hide")+'"><td>'+n+"</td><td></td></tr>").appendTo(tableBody);
+                                if (defaults[n].type) {
+                                    var configNode = RED.nodes.node(val);
+                                    if (!configNode) {
+                                        RED.utils.createObjectElement(undefined).appendTo(propRow.children()[1]);
+                                    } else {
+                                        var configLabel = RED.utils.getNodeLabel(configNode,val);
+                                        var container = propRow.children()[1];
+
+                                        var div = $('<span>',{class:""}).appendTo(container);
+                                        var nodeDiv = $('<div>',{class:"palette_node palette_node_small"}).appendTo(div);
+                                        var colour = configNode._def.color;
+                                        var icon_url = RED.utils.getNodeIcon(configNode._def);
+                                        nodeDiv.css({'backgroundColor':colour, "cursor":"pointer"});
+                                        var iconContainer = $('<div/>',{class:"palette_icon_container"}).appendTo(nodeDiv);
+                                        $('<div/>',{class:"palette_icon",style:"background-image: url("+icon_url+")"}).appendTo(iconContainer);
+                                        var nodeContainer = $('<span></span>').css({"verticalAlign":"top","marginLeft":"6px"}).text(configLabel).appendTo(container);
+
+                                        nodeDiv.on('dblclick',function() {
+                                            RED.editor.editConfig("", configNode.type, configNode.id);
+                                        })
+
+                                    }
+                                } else {
+                                    RED.utils.createObjectElement(val).appendTo(propRow.children()[1]);
                                 }
-                                val = val.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
                             }
-                        } else if (type === "number") {
-                            val = val.toString();
-                        } else if ($.isArray(val)) {
-                            val = "[<br/>";
-                            for (var i=0;i<Math.min(node[n].length,10);i++) {
-                                var vv = JSON.stringify(node[n][i],jsonFilter," ").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
-                                val += "&nbsp;"+i+": "+vv+"<br/>";
-                            }
-                            if (node[n].length > 10) {
-                                val += "&nbsp;... "+RED._("sidebar.info.arrayItems",{count:node[n].length})+"<br/>";
-                            }
-                            val += "]";
-                        } else {
-                            val = JSON.stringify(val,jsonFilter," ");
-                            val = val.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
                         }
-
-                        table += '<tr class="node-info-property-row'+(propertiesExpanded?"":" hide")+'"><td>'+n+"</td><td>"+val+"</td></tr>";
+                        if (count > 0) {
+                            $('<tr class="node-info-property-expand blank"><td colspan="2"><a href="#" class=" node-info-property-header'+(expandedSections.property?" expanded":"")+'"><span class="node-info-property-show-more">'+RED._("sidebar.info.showMore")+'</span><span class="node-info-property-show-less">'+RED._("sidebar.info.showLess")+'</span> <i class="fa fa-caret-down"></i></a></td></tr>').appendTo(tableBody);
+                        }
+                    }
+                }
+                if (node.type !== 'tab') {
+                    if (m) {
+                        $('<tr class="blank"><th colspan="2">'+RED._("sidebar.info.subflow")+'</th></tr>').appendTo(tableBody);
+                        $('<tr class="node-info-subflow-row"><td>'+RED._("common.label.name")+'</td><td><span class="bidiAware" dir=\"'+RED.text.bidi.resolveBaseTextDir(subflowNode.name)+'">'+subflowNode.name+'</span></td></tr>').appendTo(tableBody);
                     }
                 }
             }
-        }
-        table += "</tbody></table><hr/>";
-        if (!subflowNode && node.type != "comment") {
-            var helpText = $("script[data-help-name$='"+node.type+"']").html()||"";
-            table  += '<div class="node-help"><span class="bidiAware" dir=\"'+RED.text.bidi.resolveBaseTextDir(helpText)+'">'+helpText+'</span></div>';
-        }
-        if (subflowNode) {
-            table += '<div class="node-help"><span class="bidiAware" dir=\"'+RED.text.bidi.resolveBaseTextDir(subflowNode.info||"")+'">'+marked(subflowNode.info||"")+'</span></div>';
-        } else if (node._def && node._def.info) {
-            var info = node._def.info;
-            var textInfo = (typeof info === "function" ? info.call(node) : info);
-            table += '<div class="node-help"><span class="bidiAware" dir=\"'+RED.text.bidi.resolveBaseTextDir(textInfo)+'">'+marked(textInfo)+'</span></div>';
-            //table += '<div class="node-help">'+(typeof info === "function" ? info.call(node) : info)+'</div>';
-        }
-
-        $(content).html(table);
-
-        $(".node-info-property-header").click(function(e) {
-            var icon = $(this).find("i");
-            if (icon.hasClass("fa-caret-right")) {
-                icon.removeClass("fa-caret-right");
-                icon.addClass("fa-caret-down");
-                $(".node-info-property-row").show();
-                propertiesExpanded = true;
-            } else {
-                icon.addClass("fa-caret-right");
-                icon.removeClass("fa-caret-down");
-                $(".node-info-property-row").hide();
-                propertiesExpanded = false;
+            if (m) {
+                $('<tr class="node-info-subflow-row"><td>'+RED._("sidebar.info.instances")+"</td><td>"+subflowUserCount+'</td></tr>').appendTo(tableBody);
             }
 
-            e.preventDefault();
-        });
+            var infoText = "";
+            if (!subflowNode && node.type !== "comment" && node.type !== "tab") {
+                infoSection.title.text(RED._("sidebar.info.nodeHelp"));
+                var helpText = $("script[data-help-name='"+node.type+"']").html()||('<span class="node-info-none">'+RED._("sidebar.info.none")+'</span>');
+                infoText = helpText;
+            } else if (node.type === "tab") {
+                infoSection.title.text(RED._("sidebar.info.flowDesc"));
+                infoText = marked(node.info||"")||('<span class="node-info-none">'+RED._("sidebar.info.none")+'</span>');
+            }
+
+            if (subflowNode) {
+                infoText = infoText + (marked(subflowNode.info||"")||('<span class="node-info-none">'+RED._("sidebar.info.none")+'</span>'));
+                infoSection.title.text(RED._("sidebar.info.subflowDesc"));
+            } else if (node._def && node._def.info) {
+                infoSection.title.text(RED._("sidebar.info.nodeHelp"));
+                var info = node._def.info;
+                var textInfo = (typeof info === "function" ? info.call(node) : info);
+                // TODO: help
+                infoText = infoText + marked(textInfo);
+            }
+            if (infoText) {
+                setInfoText(infoText);
+            }
+
+
+            $(".node-info-property-header").click(function(e) {
+                e.preventDefault();
+                expandedSections["property"] = !expandedSections["property"];
+                $(this).toggleClass("expanded",expandedSections["property"]);
+                $(".node-info-property-row").toggle(expandedSections["property"]);
+            });
+        }
     }
+    function setInfoText(infoText) {
+        var info = addTargetToExternalLinks($('<div class="node-help"><span class="bidiAware" dir=\"'+RED.text.bidi.resolveBaseTextDir(infoText)+'">'+infoText+'</span></div>')).appendTo(infoSection.content);
+        info.find(".bidiAware").contents().filter(function() { return this.nodeType === 3 && this.textContent.trim() !== "" }).wrap( "<span></span>" );
+        var foldingHeader = "H3";
+        info.find(foldingHeader).wrapInner('<a class="node-info-header expanded" href="#"></a>')
+            .find("a").prepend('<i class="fa fa-angle-right">').click(function(e) {
+                e.preventDefault();
+                var isExpanded = $(this).hasClass('expanded');
+                var el = $(this).parent().next();
+                while(el.length === 1 && el[0].nodeName !== foldingHeader) {
+                    el.toggle(!isExpanded);
+                    el = el.next();
+                }
+                $(this).toggleClass('expanded',!isExpanded);
+            })
+    }
+    var tips = (function() {
+        var enabled = true;
+        var startDelay = 1000;
+        var cycleDelay = 15000;
+        var startTimeout;
+        var refreshTimeout;
+        var tipCount = -1;
+
+        RED.actions.add("core:toggle-show-tips",function(state) {
+            if (state === undefined) {
+                RED.userSettings.toggle("view-show-tips");
+            } else {
+                enabled = state;
+                if (enabled) {
+                    startTips();
+                } else {
+                    stopTips();
+                }
+            }
+        });
+
+        function setTip() {
+            var r = Math.floor(Math.random() * tipCount);
+            var tip = RED._("infotips:info.tip"+r);
+
+            var m;
+            while ((m=/({{(.*?)}})/.exec(tip))) {
+                var shortcut = RED.keyboard.getShortcut(m[2]);
+                if (shortcut) {
+                    tip = tip.replace(m[1],RED.keyboard.formatKey(shortcut.key));
+                } else {
+                    return;
+                }
+            }
+            while ((m=/(\[(.*?)\])/.exec(tip))) {
+                tip = tip.replace(m[1],RED.keyboard.formatKey(m[2]));
+            }
+            tipBox.html(tip).fadeIn(200);
+            if (startTimeout) {
+                startTimeout = null;
+                refreshTimeout = setInterval(cycleTips,cycleDelay);
+            }
+        }
+        function cycleTips() {
+            tipBox.fadeOut(300,function() {
+                setTip();
+            })
+        }
+        function startTips() {
+            $(".sidebar-node-info").addClass('show-tips');
+            if (enabled) {
+                if (!startTimeout && !refreshTimeout) {
+                    if (tipCount === -1) {
+                        do {
+                            tipCount++;
+                        } while(RED._("infotips:info.tip"+tipCount)!=="infotips:info.tip"+tipCount);
+                    }
+                    startTimeout = setTimeout(setTip,startDelay);
+                }
+            }
+        }
+        function stopTips() {
+            $(".sidebar-node-info").removeClass('show-tips');
+            clearInterval(refreshTimeout);
+            clearTimeout(startTimeout);
+            refreshTimeout = null;
+            startTimeout = null;
+        }
+        function nextTip() {
+            clearInterval(refreshTimeout);
+            startTimeout = true;
+            setTip();
+        }
+        return {
+            start: startTips,
+            stop: stopTips,
+            next: nextTip,
+            enabled: function() { return enabled; }
+        }
+    })();
 
     function clear() {
-        $(content).html("");
+        // sections.hide();
+        refresh(null);
     }
 
-    function set(html) {
-        $(content).html(html);
+    function set(html,title) {
+        // tips.stop();
+        // sections.show();
+        // nodeSection.container.hide();
+        infoSection.title.text(title||"");
+        refresh(null);
+        $(infoSection.content).empty();
+        setInfoText(html);
+        $(".sidebar-node-info-stack").scrollTop(0);
     }
 
-    RED.events.on("view:selection-changed",function(selection) {
+    function refreshSelection(selection) {
+        if (selection === undefined) {
+            selection = RED.view.selection();
+        }
         if (selection.nodes) {
             if (selection.nodes.length == 1) {
                 var node = selection.nodes[0];
@@ -10259,27 +11824,40 @@ RED.sidebar.info = (function() {
                 } else {
                     refresh(node);
                 }
+            } else {
+                refresh(selection.nodes);
             }
         } else {
-            var subflow = RED.nodes.subflow(RED.workspaces.active());
-            if (subflow) {
-                refresh(subflow);
+            var activeWS = RED.workspaces.active();
+
+            var flow = RED.nodes.workspace(activeWS) || RED.nodes.subflow(activeWS);
+            if (flow) {
+                refresh(flow);
             } else {
-                clear();
+                var workspace = RED.nodes.workspace(RED.workspaces.active());
+                if (workspace && workspace.info) {
+                    refresh(workspace);
+                } else {
+                    refresh(null)
+                    // clear();
+                }
             }
         }
-    });
+    }
+
+
+    RED.events.on("view:selection-changed",refreshSelection);
 
     return {
         init: init,
         show: show,
-        refresh:refresh,
+        refresh: refresh,
         clear: clear,
         set: set
     }
 })();
 ;/**
- * Copyright 2013, 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -10393,7 +11971,7 @@ RED.sidebar.config = (function() {
         if (showUnusedOnly) {
             var hiddenCount = nodes.length;
             nodes = nodes.filter(function(n) {
-                return n.users.length === 0;
+                return n._def.hasUsers!==false && n.users.length === 0;
             })
             hiddenCount = hiddenCount - nodes.length;
             if (hiddenCount > 0) {
@@ -10411,19 +11989,7 @@ RED.sidebar.config = (function() {
         } else {
             var currentType = "";
             nodes.forEach(function(node) {
-                var label = "";
-                if (typeof node._def.label == "function") {
-                    try {
-                        label = node._def.label.call(node);
-                    } catch(err) {
-                        console.log("Definition error: "+node._def.type+".label",err);
-                        label = node._def.type;
-                    }
-
-                } else {
-                    label = node._def.label;
-                }
-                label = label || node.id;
+                var label = RED.utils.getNodeLabel(node,node.id);
                 if (node.type != currentType) {
                     $('<li class="config_node_type">'+node.type+'</li>').appendTo(list);
                     currentType = node.type;
@@ -10431,10 +11997,11 @@ RED.sidebar.config = (function() {
 
                 var entry = $('<li class="palette_node config_node palette_node_id_'+node.id.replace(/\./g,"-")+'"></li>').appendTo(list);
                 $('<div class="palette_label"></div>').text(label).appendTo(entry);
-
-                var iconContainer = $('<div/>',{class:"palette_icon_container  palette_icon_container_right"}).text(node.users.length).appendTo(entry);
-                if (node.users.length === 0) {
-                    entry.addClass("config_node_unused");
+                if (node._def.hasUsers !== false) {
+                    var iconContainer = $('<div/>',{class:"palette_icon_container  palette_icon_container_right"}).text(node.users.length).appendTo(entry);
+                    if (node.users.length === 0) {
+                        entry.addClass("config_node_unused");
+                    }
                 }
                 entry.on('click',function(e) {
                     RED.sidebar.info.refresh(node);
@@ -10516,10 +12083,7 @@ RED.sidebar.config = (function() {
             visible: false,
             onchange: function() { refreshConfigNodeList(); }
         });
-
-        RED.menu.setAction('menu-item-config-nodes',function() {
-            RED.sidebar.show('config');
-        })
+        RED.actions.add("core:show-config-tab",function() {RED.sidebar.show('config')});
 
         $("#workspace-config-node-collapse-all").on("click", function(e) {
             e.preventDefault();
@@ -10608,7 +12172,7 @@ RED.sidebar.config = (function() {
     }
 })();
 ;/**
- * Copyright 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -10639,6 +12203,17 @@ RED.palette.editor = (function() {
     var nodeEntries = {};
     var eventTimers = {};
     var activeFilter = "";
+
+    function semVerCompare(A,B) {
+        var aParts = A.split(".").map(function(m) { return parseInt(m);});
+        var bParts = B.split(".").map(function(m) { return parseInt(m);});
+        for (var i=0;i<3;i++) {
+            var j = aParts[i]-bParts[i];
+            if (j<0) { return -1 }
+            if (j>0) { return 1 }
+        }
+        return 0;
+    }
 
     function delayCallback(start,callback) {
         var delta = Date.now() - start;
@@ -10673,20 +12248,21 @@ RED.palette.editor = (function() {
             });
         })
     }
-    function installNodeModule(id,shade,callback) {
-        shade.show();
+    function installNodeModule(id,version,callback) {
+        var requestBody = {
+            module: id
+        };
+        if (version) {
+            requestBody.version = version;
+        }
         $.ajax({
             url:"nodes",
             type: "POST",
-            data: JSON.stringify({
-                module: id
-            }),
+            data: JSON.stringify(requestBody),
             contentType: "application/json; charset=utf-8"
         }).done(function(data,textStatus,xhr) {
-            shade.hide();
             callback();
         }).fail(function(xhr,textStatus,err) {
-            shade.hide();
             callback(xhr);
         });
     }
@@ -10798,16 +12374,15 @@ RED.palette.editor = (function() {
                 }
             }
             nodeEntries[module].index = index.join(",").toLowerCase();
-
             nodeList.editableList('addItem', nodeEntries[module]);
-            //console.log(nodeList.editableList('items'));
-
         } else {
             var moduleInfo = nodeEntries[module].info;
             var nodeEntry = nodeEntries[module].elements;
             if (nodeEntry) {
                 var activeTypeCount = 0;
                 var typeCount = 0;
+                var errorCount = 0;
+                nodeEntry.errorList.empty();
                 nodeEntries[module].totalUseCount = 0;
                 nodeEntries[module].setUseCount = {};
 
@@ -10816,7 +12391,10 @@ RED.palette.editor = (function() {
                         var inUseCount = 0;
                         var set = moduleInfo.sets[setName];
                         var setElements = nodeEntry.sets[setName];
-
+                        if (set.err) {
+                            errorCount++;
+                            $("<li>").text(set.err).appendTo(nodeEntry.errorList);
+                        }
                         if (set.enabled) {
                             activeTypeCount += set.types.length;
                         }
@@ -10842,93 +12420,60 @@ RED.palette.editor = (function() {
                         nodeEntries[module].totalUseCount += inUseCount;
 
                         if (inUseCount > 0) {
-                            setElements.enableButton.html(RED._('palette.editor.inuse'));
+                            setElements.enableButton.text(RED._('palette.editor.inuse'));
                             setElements.enableButton.addClass('disabled');
                         } else {
                             setElements.enableButton.removeClass('disabled');
                             if (set.enabled) {
-                                setElements.enableButton.html(RED._('palette.editor.disable'));
+                                setElements.enableButton.text(RED._('palette.editor.disable'));
                             } else {
-                                setElements.enableButton.html(RED._('palette.editor.enable'));
+                                setElements.enableButton.text(RED._('palette.editor.enable'));
                             }
                         }
                         setElements.setRow.toggleClass("palette-module-set-disabled",!set.enabled);
                     }
                 }
+
+                if (errorCount === 0) {
+                    nodeEntry.errorRow.hide()
+                } else {
+                    nodeEntry.errorRow.show();
+                }
+
                 var nodeCount = (activeTypeCount === typeCount)?typeCount:activeTypeCount+" / "+typeCount;
-                nodeEntry.setCount.html(RED._('palette.editor.nodeCount',{count:typeCount,label:nodeCount}));
+                nodeEntry.setCount.text(RED._('palette.editor.nodeCount',{count:typeCount,label:nodeCount}));
 
                 if (nodeEntries[module].totalUseCount > 0) {
-                    nodeEntry.enableButton.html(RED._('palette.editor.inuse'));
+                    nodeEntry.enableButton.text(RED._('palette.editor.inuse'));
                     nodeEntry.enableButton.addClass('disabled');
                     nodeEntry.removeButton.hide();
                 } else {
                     nodeEntry.enableButton.removeClass('disabled');
                     if (moduleInfo.local) {
-                        nodeEntry.removeButton.show();
+                        nodeEntry.removeButton.css('display', 'inline-block');
                     }
                     if (activeTypeCount === 0) {
-                        nodeEntry.enableButton.html(RED._('palette.editor.enableall'));
+                        nodeEntry.enableButton.text(RED._('palette.editor.enableall'));
                     } else {
-                        nodeEntry.enableButton.html(RED._('palette.editor.disableall'));
+                        nodeEntry.enableButton.text(RED._('palette.editor.disableall'));
                     }
                     nodeEntry.container.toggleClass("disabled",(activeTypeCount === 0));
                 }
             }
-
-            nodeEntry.updateButton.hide();
-            // if (loadedIndex.hasOwnProperty(module)) {
-            //     if (moduleInfo.version !== loadedIndex[module].version) {
-            //         nodeEntry.updateButton.show();
-            //         nodeEntry.updateButton.html(RED._('palette.editor.update',{version:loadedIndex[module].version}));
-            //     } else {
-            //         nodeEntry.updateButton.hide();
-            //     }
-            //
-            // } else {
-            //     nodeEntry.updateButton.hide();
-            // }
+            if (moduleInfo.pending_version) {
+                nodeEntry.versionSpan.html(moduleInfo.version+' <i class="fa fa-long-arrow-right"></i> '+moduleInfo.pending_version).appendTo(nodeEntry.metaRow)
+                nodeEntry.updateButton.text(RED._('palette.editor.updated')).addClass('disabled').show();
+            } else if (loadedIndex.hasOwnProperty(module)) {
+                if (semVerCompare(loadedIndex[module].version,moduleInfo.version) === 1) {
+                    nodeEntry.updateButton.show();
+                    nodeEntry.updateButton.text(RED._('palette.editor.update',{version:loadedIndex[module].version}));
+                } else {
+                    nodeEntry.updateButton.hide();
+                }
+            } else {
+                nodeEntry.updateButton.hide();
+            }
         }
-
-    }
-    function showPaletteEditor() {
-        if (RED.settings.theme('palette.editable') === false) {
-            return;
-        }
-        if (disabled) {
-            return;
-        }
-
-        initInstallTab();
-        $("#header-shade").show();
-        $("#editor-shade").show();
-        $("#sidebar-shade").show();
-        $("#sidebar-separator").hide();
-
-        editorTabs.activateTab('nodes');
-
-        $("#main-container").addClass("palette-expanded");
-        setTimeout(function() {
-            editorTabs.resize();
-            filterInput.focus();
-        },250);
-        RED.events.emit("palette-editor:open");
-        RED.keyboard.add("*",/* ESCAPE */ 27,function(){hidePaletteEditor();d3.event.preventDefault();});
-    }
-    function hidePaletteEditor() {
-        RED.keyboard.remove("*");
-        $("#main-container").removeClass("palette-expanded");
-        $("#header-shade").hide();
-        $("#editor-shade").hide();
-        $("#sidebar-shade").hide();
-        $("#sidebar-separator").show();
-        $("#palette-editor").find('.expanded').each(function(i,el) {
-            $(el).find(".palette-module-content").slideUp();
-            $(el).removeClass('expanded');
-        });
-        filterInput.searchBox('value',"");
-        searchInput.searchBox('value',"");
-        RED.events.emit("palette-editor:close");
 
     }
 
@@ -10947,36 +12492,45 @@ RED.palette.editor = (function() {
     var catalogueCount;
     var catalogueLoadStatus = [];
     var catalogueLoadStart;
+    var catalogueLoadErrors = false;
 
     var activeSort = sortModulesAZ;
 
-    function handleCatalogResponse(catalog,index,v) {
-        catalogueLoadStatus.push(v);
-        if (v.modules) {
-            v.modules.forEach(function(m) {
-                loadedIndex[m.id] = m;
-                m.index = [m.id];
-                if (m.keywords) {
-                    m.index = m.index.concat(m.keywords);
-                }
-                if (m.updated_at) {
-                    m.timestamp = new Date(m.updated_at).getTime();
-                } else {
-                    m.timestamp = 0;
-                }
-                m.index = m.index.join(",").toLowerCase();
-            })
-            loadedList = loadedList.concat(v.modules);
+    function handleCatalogResponse(err,catalog,index,v) {
+        catalogueLoadStatus.push(err||v);
+        if (!err) {
+            if (v.modules) {
+                v.modules.forEach(function(m) {
+                    loadedIndex[m.id] = m;
+                    m.index = [m.id];
+                    if (m.keywords) {
+                        m.index = m.index.concat(m.keywords);
+                    }
+                    if (m.updated_at) {
+                        m.timestamp = new Date(m.updated_at).getTime();
+                    } else {
+                        m.timestamp = 0;
+                    }
+                    m.index = m.index.join(",").toLowerCase();
+                })
+                loadedList = loadedList.concat(v.modules);
+            }
+            searchInput.searchBox('count',loadedList.length);
+        } else {
+            catalogueLoadErrors = true;
         }
-        searchInput.searchBox('count',loadedList.length);
         if (catalogueCount > 1) {
             $(".palette-module-shade-status").html(RED._('palette.editor.loading')+"<br>"+catalogueLoadStatus.length+"/"+catalogueCount);
         }
         if (catalogueLoadStatus.length === catalogueCount) {
+            if (catalogueLoadErrors) {
+                RED.notify(RED._('palette.editor.errors.catalogLoadFailed',{url: catalog}),"error",false,8000);
+            }
             var delta = 250-(Date.now() - catalogueLoadStart);
             setTimeout(function() {
                 $("#palette-module-install-shade").hide();
             },Math.max(delta,0));
+
         }
     }
 
@@ -10985,19 +12539,29 @@ RED.palette.editor = (function() {
             loadedList = [];
             loadedIndex = {};
             packageList.editableList('empty');
-            $(".palette-module-shade-status").html(RED._('palette.editor.loading'));
+
+            $(".palette-module-shade-status").text(RED._('palette.editor.loading'));
             var catalogues = RED.settings.theme('palette.catalogues')||['https://catalogue.nodered.org/catalogue.json'];
             catalogueLoadStatus = [];
+            catalogueLoadErrors = false;
             catalogueCount = catalogues.length;
             if (catalogues.length > 1) {
                 $(".palette-module-shade-status").html(RED._('palette.editor.loading')+"<br>0/"+catalogues.length);
             }
             $("#palette-module-install-shade").show();
             catalogueLoadStart = Date.now();
+            var handled = 0;
             catalogues.forEach(function(catalog,index) {
                 $.getJSON(catalog, {_: new Date().getTime()},function(v) {
-                    handleCatalogResponse(catalog,index,v);
+                    handleCatalogResponse(null,catalog,index,v);
                     refreshNodeModuleList();
+                }).fail(function(jqxhr, textStatus, error) {
+                    handleCatalogResponse(jqxhr,catalog,index);
+                }).always(function() {
+                    handled++;
+                    if (handled === catalogueCount) {
+                        searchInput.searchBox('change');
+                    }
                 })
             });
         }
@@ -11005,6 +12569,11 @@ RED.palette.editor = (function() {
 
     function refreshFilteredItems() {
         packageList.editableList('empty');
+        var currentFilter = searchInput.searchBox('value').trim();
+        if (currentFilter === ""){
+            packageList.editableList('addItem',{count:loadedList.length})
+            return;
+        }
         filteredList.sort(activeSort);
         for (var i=0;i<Math.min(10,filteredList.length);i++) {
             packageList.editableList('addItem',filteredList[i]);
@@ -11024,22 +12593,123 @@ RED.palette.editor = (function() {
         return -1 * (A.info.timestamp-B.info.timestamp);
     }
 
+
     function init() {
         if (RED.settings.theme('palette.editable') === false) {
             return;
         }
+        createSettingsPane();
 
-        RED.events.on("editor:open",function() { disabled = true; });
-        RED.events.on("editor:close",function() { disabled = false; });
-        RED.events.on("search:open",function() { disabled = true; });
-        RED.events.on("search:close",function() { disabled = false; });
+        RED.userSettings.add({
+            id:'palette',
+            title: RED._("palette.editor.palette"),
+            get: getSettingsPane,
+            close: function() {
+                settingsPane.detach();
+            },
+            focus: function() {
+                editorTabs.resize();
+                setTimeout(function() {
+                    filterInput.focus();
+                },200);
+            }
+        })
 
-        RED.keyboard.add("*", /* p */ 80,{shift:true,ctrl:true},function() {RED.palette.editor.show();d3.event.preventDefault();});
+        RED.actions.add("core:manage-palette",function() {
+                RED.userSettings.show('palette');
+            });
+
+        RED.events.on('registry:module-updated', function(ns) {
+            refreshNodeModule(ns.module);
+        });
+        RED.events.on('registry:node-set-enabled', function(ns) {
+            refreshNodeModule(ns.module);
+        });
+        RED.events.on('registry:node-set-disabled', function(ns) {
+            refreshNodeModule(ns.module);
+        });
+        RED.events.on('registry:node-type-added', function(nodeType) {
+            if (!/^subflow:/.test(nodeType)) {
+                var ns = RED.nodes.registry.getNodeSetForType(nodeType);
+                refreshNodeModule(ns.module);
+            }
+        });
+        RED.events.on('registry:node-type-removed', function(nodeType) {
+            if (!/^subflow:/.test(nodeType)) {
+                var ns = RED.nodes.registry.getNodeSetForType(nodeType);
+                refreshNodeModule(ns.module);
+            }
+        });
+        RED.events.on('registry:node-set-added', function(ns) {
+            refreshNodeModule(ns.module);
+            for (var i=0;i<filteredList.length;i++) {
+                if (filteredList[i].info.id === ns.module) {
+                    var installButton = filteredList[i].elements.installButton;
+                    installButton.addClass('disabled');
+                    installButton.text(RED._('palette.editor.installed'));
+                    break;
+                }
+            }
+        });
+        RED.events.on('registry:node-set-removed', function(ns) {
+            var module = RED.nodes.registry.getModule(ns.module);
+            if (!module) {
+                var entry = nodeEntries[ns.module];
+                if (entry) {
+                    nodeList.editableList('removeItem', entry);
+                    delete nodeEntries[ns.module];
+                    for (var i=0;i<filteredList.length;i++) {
+                        if (filteredList[i].info.id === ns.module) {
+                            var installButton = filteredList[i].elements.installButton;
+                            installButton.removeClass('disabled');
+                            installButton.text(RED._('palette.editor.install'));
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+        RED.events.on('nodes:add', function(n) {
+            if (!/^subflow:/.test(n.type)) {
+                typesInUse[n.type] = (typesInUse[n.type]||0)+1;
+                if (typesInUse[n.type] === 1) {
+                    var ns = RED.nodes.registry.getNodeSetForType(n.type);
+                    refreshNodeModule(ns.module);
+                }
+            }
+        })
+        RED.events.on('nodes:remove', function(n) {
+            if (typesInUse.hasOwnProperty(n.type)) {
+                typesInUse[n.type]--;
+                if (typesInUse[n.type] === 0) {
+                    delete typesInUse[n.type];
+                    var ns = RED.nodes.registry.getNodeSetForType(n.type);
+                    refreshNodeModule(ns.module);
+                }
+            }
+        })
+    }
+
+    var settingsPane;
+
+    function getSettingsPane() {
+        initInstallTab();
+        editorTabs.activateTab('nodes');
+        return settingsPane;
+    }
+
+
+
+    function createSettingsPane() {
+        settingsPane = $('<div id="user-settings-tab-palette"></div>');
+        var content = $('<div id="palette-editor">'+
+            '<ul id="palette-editor-tabs"></ul>'+
+        '</div>').appendTo(settingsPane);
 
         editorTabs = RED.tabs.create({
-            id:"palette-editor-tabs",
+            element: settingsPane.find('#palette-editor-tabs'),
             onchange:function(tab) {
-                $("#palette-editor .palette-editor-tab").hide();
+                content.find(".palette-editor-tab").hide();
                 tab.content.show();
                 if (filterInput) {
                     filterInput.searchBox('value',"");
@@ -11061,17 +12731,7 @@ RED.palette.editor = (function() {
         });
 
 
-        $("#editor-shade").click(function() {
-            if ($("#main-container").hasClass("palette-expanded")) {
-                hidePaletteEditor();
-            }
-        });
-
-        $("#palette-editor-close").on("click", function(e) {
-            hidePaletteEditor();
-        })
-
-        var modulesTab = $('<div>',{class:"palette-editor-tab"}).appendTo("#palette-editor");
+        var modulesTab = $('<div>',{class:"palette-editor-tab"}).appendTo(content);
 
         editorTabs.addTab({
             id: 'nodes',
@@ -11108,32 +12768,38 @@ RED.palette.editor = (function() {
                 if (entry) {
                     var headerRow = $('<div>',{class:"palette-module-header"}).appendTo(container);
                     var titleRow = $('<div class="palette-module-meta palette-module-name"><i class="fa fa-cube"></i></div>').appendTo(headerRow);
-                    $('<span>').html(entry.name).appendTo(titleRow);
+                    $('<span>').text(entry.name).appendTo(titleRow);
                     var metaRow = $('<div class="palette-module-meta palette-module-version"><i class="fa fa-tag"></i></div>').appendTo(headerRow);
-                    $('<span>').html(entry.version).appendTo(metaRow);
+                    var versionSpan = $('<span>').text(entry.version).appendTo(metaRow);
+
+                    var errorRow = $('<div class="palette-module-meta palette-module-errors"><i class="fa fa-warning"></i></div>').hide().appendTo(headerRow);
+                    var errorList = $('<ul class="palette-module-error-list"></ul>').appendTo(errorRow);
                     var buttonRow = $('<div>',{class:"palette-module-meta"}).appendTo(headerRow);
                     var setButton = $('<a href="#" class="editor-button editor-button-small palette-module-set-button"><i class="fa fa-angle-right palette-module-node-chevron"></i> </a>').appendTo(buttonRow);
                     var setCount = $('<span>').appendTo(setButton);
                     var buttonGroup = $('<div>',{class:"palette-module-button-group"}).appendTo(buttonRow);
 
-                    var updateButton = $('<a href="#" class="editor-button editor-button-small"></a>').html(RED._('palette.editor.update')).appendTo(buttonGroup);
+                    var updateButton = $('<a href="#" class="editor-button editor-button-small"></a>').text(RED._('palette.editor.update')).appendTo(buttonGroup);
+                    updateButton.attr('id','up_'+Math.floor(Math.random()*1000000000));
                     updateButton.click(function(evt) {
                         evt.preventDefault();
+                        if ($(this).hasClass('disabled')) {
+                            return;
+                        }
+                        update(entry,loadedIndex[entry.name].version,container,function(err){});
                     })
 
 
-                    var removeButton = $('<a href="#" class="editor-button editor-button-small"></a>').html(RED._('palette.editor.remove')).appendTo(buttonGroup);
+                    var removeButton = $('<a href="#" class="editor-button editor-button-small"></a>').text(RED._('palette.editor.remove')).appendTo(buttonGroup);
+                    removeButton.attr('id','up_'+Math.floor(Math.random()*1000000000));
                     removeButton.click(function(evt) {
                         evt.preventDefault();
-                        shade.show();
-                        removeNodeModule(entry.name, function(xhr) {
-                            console.log(xhr);
-                        })
+                        remove(entry,container,function(err){});
                     })
                     if (!entry.local) {
                         removeButton.hide();
                     }
-                    var enableButton = $('<a href="#" class="editor-button editor-button-small"></a>').html(RED._('palette.editor.disableall')).appendTo(buttonGroup);
+                    var enableButton = $('<a href="#" class="editor-button editor-button-small"></a>').text(RED._('palette.editor.disableall')).appendTo(buttonGroup);
 
                     var contentRow = $('<div>',{class:"palette-module-content"}).appendTo(container);
                     var shade = $('<div class="palette-module-shade hide"><img src="red/images/spin.svg" class="palette-spinner"/></div>').appendTo(container);
@@ -11142,9 +12808,12 @@ RED.palette.editor = (function() {
                         updateButton: updateButton,
                         removeButton: removeButton,
                         enableButton: enableButton,
+                        errorRow: errorRow,
+                        errorList: errorList,
                         setCount: setCount,
                         container: container,
                         shade: shade,
+                        versionSpan: versionSpan,
                         sets: {}
                     }
                     setButton.click(function(evt) {
@@ -11170,17 +12839,21 @@ RED.palette.editor = (function() {
                         set.types.forEach(function(t) {
                             var typeDiv = $('<div>',{class:"palette-module-type"}).appendTo(setRow);
                             typeSwatches[t] = $('<span>',{class:"palette-module-type-swatch"}).appendTo(typeDiv);
-                            $('<span>',{class:"palette-module-type-node"}).html(t).appendTo(typeDiv);
+                            $('<span>',{class:"palette-module-type-node"}).text(t).appendTo(typeDiv);
                         })
-
                         var enableButton = $('<a href="#" class="editor-button editor-button-small"></a>').appendTo(buttonGroup);
                         enableButton.click(function(evt) {
                             evt.preventDefault();
                             if (object.setUseCount[setName] === 0) {
                                 var currentSet = RED.nodes.registry.getNodeSet(set.id);
                                 shade.show();
-                                changeNodeState(set.id,!currentSet.enabled,shade,function(xhr){
-                                    console.log(xhr)
+                                var newState = !currentSet.enabled
+                                changeNodeState(set.id,newState,shade,function(xhr){
+                                    if (xhr) {
+                                        if (xhr.responseJSON) {
+                                            RED.notify(RED._('palette.editor.errors.'+(newState?'enable':'disable')+'Failed',{module: id,message:xhr.responseJSON.message}));
+                                        }
+                                    }
                                 });
                             }
                         })
@@ -11195,20 +12868,24 @@ RED.palette.editor = (function() {
                         evt.preventDefault();
                         if (object.totalUseCount === 0) {
                             changeNodeState(entry.name,(container.hasClass('disabled')),shade,function(xhr){
-                                console.log(xhr)
+                                if (xhr) {
+                                    if (xhr.responseJSON) {
+                                        RED.notify(RED._('palette.editor.errors.installFailed',{module: id,message:xhr.responseJSON.message}));
+                                    }
+                                }
                             });
                         }
                     })
                     refreshNodeModule(entry.name);
                 } else {
-                    $('<div>',{class:"red-ui-search-empty"}).html(RED._('search.empty')).appendTo(container);
+                    $('<div>',{class:"red-ui-search-empty"}).text(RED._('search.empty')).appendTo(container);
                 }
             }
         });
 
 
 
-        var installTab = $('<div>',{class:"palette-editor-tab hide"}).appendTo("#palette-editor");
+        var installTab = $('<div>',{class:"palette-editor-tab hide"}).appendTo(content);
 
         editorTabs.addTab({
             id: 'install',
@@ -11224,7 +12901,7 @@ RED.palette.editor = (function() {
             .searchBox({
                 delay: 300,
                 change: function() {
-                    var searchTerm = $(this).val().toLowerCase();
+                    var searchTerm = $(this).val().trim().toLowerCase();
                     if (searchTerm.length > 0) {
                         filteredList = loadedList.filter(function(m) {
                             return (m.index.indexOf(searchTerm) > -1);
@@ -11234,13 +12911,15 @@ RED.palette.editor = (function() {
                     } else {
                         searchInput.searchBox('count',loadedList.length);
                         packageList.editableList('empty');
+                        packageList.editableList('addItem',{count:loadedList.length});
+
                     }
                 }
             });
 
 
-        $('<span>').html(RED._("palette.editor.sort")+' ').appendTo(toolBar);
-        var sortGroup = $('<span class="button-group"></span> ').appendTo(toolBar);
+        $('<span>').text(RED._("palette.editor.sort")+' ').appendTo(toolBar);
+        var sortGroup = $('<span class="button-group"></span>').appendTo(toolBar);
         var sortAZ = $('<a href="#" class="sidebar-header-button-toggle selected" data-i18n="palette.editor.sortAZ"></a>').appendTo(sortGroup);
         var sortRecent = $('<a href="#" class="sidebar-header-button-toggle" data-i18n="palette.editor.sortRecent"></a>').appendTo(sortGroup);
 
@@ -11277,143 +12956,190 @@ RED.palette.editor = (function() {
         })
 
         packageList = $('<ol>',{style:"position: absolute;top: 78px;bottom: 0;left: 0;right: 0px;"}).appendTo(installTab).editableList({
-           addButton: false,
-           scrollOnAdd: false,
-           addItem: function(container,i,object) {
+            addButton: false,
+            scrollOnAdd: false,
+            addItem: function(container,i,object) {
+                if (object.count) {
+                    $('<div>',{class:"red-ui-search-empty"}).text(RED._('palette.editor.moduleCount',{count:object.count})).appendTo(container);
+                    return
+                }
+                if (object.more) {
+                    container.addClass('palette-module-more');
+                    var moreRow = $('<div>',{class:"palette-module-header palette-module"}).appendTo(container);
+                    var moreLink = $('<a href="#"></a>').text(RED._('palette.editor.more',{count:object.more})).appendTo(moreRow);
+                    moreLink.click(function(e) {
+                        e.preventDefault();
+                        packageList.editableList('removeItem',object);
+                        for (var i=object.start;i<Math.min(object.start+10,object.start+object.more);i++) {
+                            packageList.editableList('addItem',filteredList[i]);
+                        }
+                        if (object.more > 10) {
+                            packageList.editableList('addItem',{start:object.start+10, more:object.more-10})
+                        }
+                    })
+                    return;
+                }
+                if (object.info) {
+                    var entry = object.info;
+                    var headerRow = $('<div>',{class:"palette-module-header"}).appendTo(container);
+                    var titleRow = $('<div class="palette-module-meta"><i class="fa fa-cube"></i></div>').appendTo(headerRow);
+                    $('<span>',{class:"palette-module-name"}).text(entry.name||entry.id).appendTo(titleRow);
+                    $('<a target="_blank" class="palette-module-link"><i class="fa fa-external-link"></i></a>').attr('href',entry.url).appendTo(titleRow);
+                    var descRow = $('<div class="palette-module-meta"></div>').appendTo(headerRow);
+                    $('<div>',{class:"palette-module-description"}).text(entry.description).appendTo(descRow);
 
-               if (object.more) {
-                   container.addClass('palette-module-more');
-                   var moreRow = $('<div>',{class:"palette-module-header palette-module"}).appendTo(container);
-                   var moreLink = $('<a href="#"></a>').html(RED._('palette.editor.more',{count:object.more})).appendTo(moreRow);
-                   moreLink.click(function(e) {
-                       e.preventDefault();
-                       packageList.editableList('removeItem',object);
-                       for (var i=object.start;i<Math.min(object.start+10,object.start+object.more);i++) {
-                           packageList.editableList('addItem',filteredList[i]);
-                       }
-                       if (object.more > 10) {
-                           packageList.editableList('addItem',{start:object.start+10, more:object.more-10})
-                       }
-                   })
-                   return;
-               }
-               if (object.info) {
-                   var entry = object.info;
-                   var headerRow = $('<div>',{class:"palette-module-header"}).appendTo(container);
-                   var titleRow = $('<div class="palette-module-meta"><i class="fa fa-cube"></i></div>').appendTo(headerRow);
-                   $('<span>',{class:"palette-module-name"}).html(entry.name||entry.id).appendTo(titleRow);
-                   $('<a target="_blank" class="palette-module-link"><i class="fa fa-external-link"></i></a>').attr('href',entry.url).appendTo(titleRow);
-                   var descRow = $('<div class="palette-module-meta"></div>').appendTo(headerRow);
-                   $('<div>',{class:"palette-module-description"}).html(entry.description).appendTo(descRow);
+                    var metaRow = $('<div class="palette-module-meta"></div>').appendTo(headerRow);
+                    $('<span class="palette-module-version"><i class="fa fa-tag"></i> '+entry.version+'</span>').appendTo(metaRow);
+                    $('<span class="palette-module-updated"><i class="fa fa-calendar"></i> '+formatUpdatedAt(entry.updated_at)+'</span>').appendTo(metaRow);
+                    var buttonRow = $('<div>',{class:"palette-module-meta"}).appendTo(headerRow);
+                    var buttonGroup = $('<div>',{class:"palette-module-button-group"}).appendTo(buttonRow);
+                    var installButton = $('<a href="#" class="editor-button editor-button-small"></a>').text(RED._('palette.editor.install')).appendTo(buttonGroup);
+                    installButton.click(function(e) {
+                        e.preventDefault();
+                        if (!$(this).hasClass('disabled')) {
+                            install(entry,container,function(xhr) {});
+                        }
+                    })
+                    if (nodeEntries.hasOwnProperty(entry.id)) {
+                        installButton.addClass('disabled');
+                        installButton.text(RED._('palette.editor.installed'));
+                    }
 
-                   var metaRow = $('<div class="palette-module-meta"></div>').appendTo(headerRow);
-                   $('<span class="palette-module-version"><i class="fa fa-tag"></i> '+entry.version+'</span>').appendTo(metaRow);
-                   $('<span class="palette-module-updated"><i class="fa fa-calendar"></i> '+formatUpdatedAt(entry.updated_at)+'</span>').appendTo(metaRow);
-                   var buttonRow = $('<div>',{class:"palette-module-meta"}).appendTo(headerRow);
-                   var buttonGroup = $('<div>',{class:"palette-module-button-group"}).appendTo(buttonRow);
-                   var shade = $('<div class="palette-module-shade hide"><img src="red/images/spin.svg" class="palette-spinner"/></div>').appendTo(container);
-                   var installButton = $('<a href="#" class="editor-button editor-button-small"></a>').html(RED._('palette.editor.install')).appendTo(buttonGroup);
-                   installButton.click(function(e) {
-                       e.preventDefault();
-                       if (!$(this).hasClass('disabled')) {
-                           installNodeModule(entry.id,shade,function(xhr) {
-                               if (xhr) {
-                                   if (xhr.responseJSON) {
-                                       RED.notify(RED._('palette.editor.errors.installFailed',{module: entry.id,message:xhr.responseJSON.message}));
-                                   }
-                               }
-                           })
-                       }
-                   })
-                   if (nodeEntries.hasOwnProperty(entry.id)) {
-                       installButton.addClass('disabled');
-                       installButton.html(RED._('palette.editor.installed'));
-                   }
-
-                   object.elements = {
-                       installButton:installButton
-                   }
-               } else {
-                   $('<div>',{class:"red-ui-search-empty"}).html(RED._('search.empty')).appendTo(container);
-               }
-           }
-       });
-
-       $('<div id="palette-module-install-shade" class="palette-module-shade hide"><div class="palette-module-shade-status"></div><img src="red/images/spin.svg" class="palette-spinner"/></div>').appendTo(installTab);
-
-        RED.events.on('registry:node-set-enabled', function(ns) {
-            refreshNodeModule(ns.module);
-        });
-        RED.events.on('registry:node-set-disabled', function(ns) {
-            refreshNodeModule(ns.module);
-        });
-        RED.events.on('registry:node-type-added', function(nodeType) {
-            if (!/^subflow:/.test(nodeType)) {
-                var ns = RED.nodes.registry.getNodeSetForType(nodeType);
-                refreshNodeModule(ns.module);
-            }
-        });
-        RED.events.on('registry:node-type-removed', function(nodeType) {
-            if (!/^subflow:/.test(nodeType)) {
-                var ns = RED.nodes.registry.getNodeSetForType(nodeType);
-                refreshNodeModule(ns.module);
-            }
-        });
-        RED.events.on('registry:node-set-added', function(ns) {
-            refreshNodeModule(ns.module);
-            for (var i=0;i<filteredList.length;i++) {
-                if (filteredList[i].info.id === ns.module) {
-                    filteredList[i].elements.installButton.hide();
-                    break;
+                    object.elements = {
+                        installButton:installButton
+                    }
+                } else {
+                    $('<div>',{class:"red-ui-search-empty"}).text(RED._('search.empty')).appendTo(container);
                 }
             }
         });
-        RED.events.on('registry:node-set-removed', function(ns) {
-            var module = RED.nodes.registry.getModule(ns.module);
-            if (!module) {
-                var entry = nodeEntries[ns.module];
-                if (entry) {
-                    nodeList.editableList('removeItem', entry);
-                    delete nodeEntries[ns.module];
-                    for (var i=0;i<filteredList.length;i++) {
-                        if (filteredList[i].info.id === ns.module) {
-                            filteredList[i].elements.installButton.show();
-                            break;
-                        }
+
+        $('<div id="palette-module-install-shade" class="palette-module-shade hide"><div class="palette-module-shade-status"></div><img src="red/images/spin.svg" class="palette-spinner"/></div>').appendTo(installTab);
+    }
+    function update(entry,version,container,done) {
+        if (RED.settings.theme('palette.editable') === false) {
+            done(new Error('Palette not editable'));
+            return;
+        }
+        var notification = RED.notify(RED._("palette.editor.confirm.update.body",{module:entry.name}),{
+            modal: true,
+            fixed: true,
+            buttons: [
+                {
+                    text: RED._("common.label.cancel"),
+                    click: function() {
+                        notification.close();
+                    }
+                },
+                {
+                    text: RED._("palette.editor.confirm.button.update"),
+                    class: "primary palette-module-install-confirm-button-update",
+                    click: function() {
+                        var spinner = RED.utils.addSpinnerOverlay(container, true);
+                        installNodeModule(entry.name,version,function(xhr) {
+                            spinner.remove();
+                            if (xhr) {
+                                if (xhr.responseJSON) {
+                                    RED.notify(RED._('palette.editor.errors.updateFailed',{module: entry.name,message:xhr.responseJSON.message}));
+                                }
+                            }
+                            done(xhr);
+                        });
+                        notification.close();
                     }
                 }
+            ]
+        })
+    }
+    function remove(entry,container,done) {
+        if (RED.settings.theme('palette.editable') === false) {
+            done(new Error('Palette not editable'));
+            return;
+        }
+        var notification = RED.notify(RED._("palette.editor.confirm.remove.body",{module:entry.name}),{
+            modal: true,
+            fixed: true,
+            buttons: [
+                {
+                    text: RED._("common.label.cancel"),
+                    click: function() {
+                        notification.close();
+                    }
+                },
+                {
+                    text: RED._("palette.editor.confirm.button.remove"),
+                    class: "primary palette-module-install-confirm-button-remove",
+                    click: function() {
+                        var spinner = RED.utils.addSpinnerOverlay(container, true);
+                        removeNodeModule(entry.name, function(xhr) {
+                            spinner.remove();
+                            if (xhr) {
+                                if (xhr.responseJSON) {
+                                    RED.notify(RED._('palette.editor.errors.removeFailed',{module: entry.name,message:xhr.responseJSON.message}));
+                                }
+                            }
+                        })
+                        notification.close();
+                    }
+                }
+            ]
+        })
+    }
+    function install(entry,container,done) {
+        if (RED.settings.theme('palette.editable') === false) {
+            done(new Error('Palette not editable'));
+            return;
+        }
+        var buttons = [
+            {
+                text: RED._("common.label.cancel"),
+                click: function() {
+                    notification.close();
+                }
+            }
+        ];
+        if (entry.url) {
+            buttons.push({
+                text: RED._("palette.editor.confirm.button.review"),
+                class: "primary palette-module-install-confirm-button-install",
+                click: function() {
+                    var url = entry.url||"";
+                    window.open(url);
+                }
+            });
+        }
+        buttons.push({
+            text: RED._("palette.editor.confirm.button.install"),
+            class: "primary palette-module-install-confirm-button-install",
+            click: function() {
+                var spinner = RED.utils.addSpinnerOverlay(container, true);
+                installNodeModule(entry.id,entry.version,function(xhr) {
+                    spinner.remove();
+                     if (xhr) {
+                         if (xhr.responseJSON) {
+                             RED.notify(RED._('palette.editor.errors.installFailed',{module: entry.id,message:xhr.responseJSON.message}));
+                         }
+                     }
+                     done(xhr);
+                });
+                notification.close();
             }
         });
-        RED.events.on('nodes:add', function(n) {
-            if (!/^subflow:/.test(n.type)) {
-                typesInUse[n.type] = (typesInUse[n.type]||0)+1;
-                if (typesInUse[n.type] === 1) {
-                    var ns = RED.nodes.registry.getNodeSetForType(n.type);
-                    refreshNodeModule(ns.module);
-                }
-            }
-        })
-        RED.events.on('nodes:remove', function(n) {
-            if (typesInUse.hasOwnProperty(n.type)) {
-                typesInUse[n.type]--;
-                if (typesInUse[n.type] === 0) {
-                    delete typesInUse[n.type];
-                    var ns = RED.nodes.registry.getNodeSetForType(n.type);
-                    refreshNodeModule(ns.module);
-                }
-            }
-        })
 
-
+        var notification = RED.notify(RED._("palette.editor.confirm.install.body",{module:entry.id}),{
+            modal: true,
+            fixed: true,
+            buttons: buttons
+        })
     }
 
     return {
         init: init,
-        show: showPaletteEditor
+        install: install
     }
 })();
 ;/**
- * Copyright 2013, 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -11462,7 +13188,7 @@ RED.editor = (function() {
                 isValid = validateNode(subflow);
                 hasChanged = subflow.changed;
             }
-            node.valid = isValid;
+            node.valid = isValid && validateNodeProperties(node, node._def.defaults, node);
             node.changed = node.changed || hasChanged;
         } else if (node._def) {
             node.valid = validateNodeProperties(node, node._def.defaults, node);
@@ -11522,6 +13248,17 @@ RED.editor = (function() {
                 }
             }
         }
+        if (node.icon) {
+            var iconPath = RED.utils.separateIconPath(node.icon);
+            if (!iconPath.module) {
+                return isValid;
+            }
+            var iconSets = RED.nodes.getIconSets();
+            var iconFileList = iconSets[iconPath.module];
+            if (!iconFileList || iconFileList.indexOf(iconPath.file) === -1) {
+                isValid = false;
+            }
+        }
         return isValid;
     }
 
@@ -11573,7 +13310,29 @@ RED.editor = (function() {
                 }
             }
         }
+        validateIcon(node);
     }
+
+    function validateIcon(node) {
+        if (node._def.hasOwnProperty("defaults") && !node._def.defaults.hasOwnProperty("icon") && node.icon) {
+            var iconPath = RED.utils.separateIconPath(node.icon);
+            var iconSets = RED.nodes.getIconSets();
+            var iconFileList = iconSets[iconPath.module];
+            var iconModule = $("#node-settings-icon-module");
+            var iconFile = $("#node-settings-icon-file");
+            if (!iconFileList) {
+                iconModule.addClass("input-error");
+                iconFile.removeClass("input-error");
+            } else if (iconFileList.indexOf(iconPath.file) === -1) {
+                iconModule.removeClass("input-error");
+                iconFile.addClass("input-error");
+            } else {
+                iconModule.removeClass("input-error");
+                iconFile.removeClass("input-error");
+            }
+        }
+    }
+
     function validateNodeEditorProperty(node,defaults,property,prefix) {
         var input = $("#"+prefix+"-"+property);
         if (input.length > 0) {
@@ -11594,19 +13353,31 @@ RED.editor = (function() {
      * Marks the node as dirty and needing a size check.
      * Removes any links to non-existant outputs.
      * @param node - the node that has been updated
+     * @param outputMap - (optional) a map of old->new port numbers if wires should be moved
      * @returns {array} the links that were removed due to this update
      */
-    function updateNodeProperties(node) {
+    function updateNodeProperties(node, outputMap) {
         node.resize = true;
         node.dirty = true;
         var removedLinks = [];
         if (node.ports) {
+            if (outputMap) {
+                RED.nodes.eachLink(function(l) {
+                    if (l.source === node && outputMap.hasOwnProperty(l.sourcePort)) {
+                        if (outputMap[l.sourcePort] === "-1") {
+                            removedLinks.push(l);
+                        } else {
+                            l.sourcePort = outputMap[l.sourcePort];
+                        }
+                    }
+                });
+            }
             if (node.outputs < node.ports.length) {
                 while (node.outputs < node.ports.length) {
                     node.ports.pop();
                 }
                 RED.nodes.eachLink(function(l) {
-                    if (l.source === node && l.sourcePort >= node.outputs) {
+                    if (l.source === node && l.sourcePort >= node.outputs && removedLinks.indexOf(l) === -1) {
                         removedLinks.push(l);
                     }
                 });
@@ -11667,17 +13438,8 @@ RED.editor = (function() {
         var configNode = RED.nodes.node(node[property]);
         var node_def = RED.nodes.getType(type);
 
-        if (configNode && node_def.label) {
-            if (typeof node_def.label == "function") {
-                try {
-                    label = node_def.label.call(configNode);
-                } catch(err) {
-                    console.log("Definition error: "+node_def.type+".label",err);
-                    label = node_def.type;
-                }
-            } else {
-                label = node_def.label;
-            }
+        if (configNode) {
+            label = RED.utils.getNodeLabel(configNode,configNode.id);
         }
         input.val(label);
     }
@@ -11832,7 +13594,7 @@ RED.editor = (function() {
      * @param definition - the node definition
      * @param prefix - the prefix to use in the input element ids (node-input|node-config-input)
      */
-    function prepareEditDialog(node,definition,prefix) {
+    function prepareEditDialog(node,definition,prefix,done) {
         for (var d in definition.defaults) {
             if (definition.defaults.hasOwnProperty(d)) {
                 if (definition.defaults[d].type) {
@@ -11876,6 +13638,9 @@ RED.editor = (function() {
                 }
             }
             validateNodeEditor(node,prefix);
+            if (done) {
+                done();
+            }
         }
 
         if (definition.credentials) {
@@ -11896,12 +13661,20 @@ RED.editor = (function() {
     }
 
     function getEditStackTitle() {
-
         var title = '<ul class="editor-tray-breadcrumbs">';
-        for (var i=0;i<editStack.length;i++) {
+        var label;
+        for (var i=editStack.length-1;i<editStack.length;i++) {
             var node = editStack[i];
-            var label = node.type;
-            if (node.type === 'subflow') {
+            label = node.type;
+            if (node.type === '_expression') {
+                label = RED._("expressionEditor.title");
+            } else if (node.type === '_json') {
+                label = RED._("jsonEditor.title");
+            } else if (node.type === '_markdown') {
+                label = RED._("markdownEditor.title");
+            } else if (node.type === '_buffer') {
+                label = RED._("bufferEditor.title");
+            } else if (node.type === 'subflow') {
                 label = RED._("subflow.editSubflow",{name:node.name})
             } else if (node.type.indexOf("subflow:")===0) {
                 var subflow = RED.nodes.subflow(node.type.substring(8));
@@ -11925,11 +13698,318 @@ RED.editor = (function() {
             title += '<li>'+label+'</li>';
         }
         title += '</ul>';
-        return title;
+        return label;
+    }
+
+    function buildEditForm(container,formId,type,ns) {
+        var dialogForm = $('<form id="'+formId+'" class="form-horizontal" autocomplete="off"></form>').appendTo(container);
+        dialogForm.html($("script[data-template-name='"+type+"']").html());
+        ns = ns||"node-red";
+        dialogForm.find('[data-i18n]').each(function() {
+            var current = $(this).attr("data-i18n");
+            var keys = current.split(";");
+            for (var i=0;i<keys.length;i++) {
+                var key = keys[i];
+                if (key.indexOf(":") === -1) {
+                    var prefix = "";
+                    if (key.indexOf("[")===0) {
+                        var parts = key.split("]");
+                        prefix = parts[0]+"]";
+                        key = parts[1];
+                    }
+                    keys[i] = prefix+ns+":"+key;
+                }
+            }
+            $(this).attr("data-i18n",keys.join(";"));
+        });
+        // Add dummy fields to prevent 'Enter' submitting the form in some
+        // cases, and also prevent browser auto-fill of password
+        // Add in reverse order as they are prepended...
+        $('<input type="password" style="display: none;" />').prependTo(dialogForm);
+        $('<input type="text" style="display: none;" />').prependTo(dialogForm);
+        dialogForm.submit(function(e) { e.preventDefault();});
+        return dialogForm;
+    }
+
+    function refreshLabelForm(container,node) {
+
+        var inputPlaceholder = node._def.inputLabels?RED._("editor.defaultLabel"):RED._("editor.noDefaultLabel");
+        var outputPlaceholder = node._def.outputLabels?RED._("editor.defaultLabel"):RED._("editor.noDefaultLabel");
+
+        var inputsDiv = $("#node-label-form-inputs");
+        var outputsDiv = $("#node-label-form-outputs");
+
+        var inputCount = node.inputs || node._def.inputs || 0;
+        var children = inputsDiv.children();
+        var childCount = children.length;
+        if (childCount === 1 && $(children[0]).hasClass('node-label-form-none')) {
+            childCount--;
+        }
+
+        if (childCount < inputCount) {
+            if (childCount === 0) {
+                // remove the 'none' placeholder
+                $(children[0]).remove();
+            }
+            for (i = childCount;i<inputCount;i++) {
+                buildLabelRow("input",i,"",inputPlaceholder).appendTo(inputsDiv);
+            }
+        } else if (childCount > inputCount) {
+            for (i=inputCount;i<childCount;i++) {
+                $(children[i]).remove();
+            }
+            if (outputCount === 0) {
+                buildLabelRow().appendTo(inputsDiv);
+            }
+        }
+
+        var outputCount;
+        var i;
+        var formOutputs = $("#node-input-outputs").val();
+
+        if (formOutputs === undefined) {
+            outputCount = node.outputs || node._def.outputs || 0;
+        } else if (isNaN(formOutputs)) {
+            var outputMap = JSON.parse(formOutputs);
+            var keys = Object.keys(outputMap);
+            children = outputsDiv.children();
+            childCount = children.length;
+            if (childCount === 1 && $(children[0]).hasClass('node-label-form-none')) {
+                childCount--;
+            }
+
+            outputCount = 0;
+            var rows = [];
+            keys.forEach(function(p) {
+                var row = $("#node-label-form-output-"+p).parent();
+                if (row.length === 0 && outputMap[p] !== -1) {
+                    if (childCount === 0) {
+                        $(children[0]).remove();
+                        childCount = -1;
+                    }
+                    row = buildLabelRow("output",p,"",outputPlaceholder);
+                } else {
+                    row.detach();
+                }
+                if (outputMap[p] !== -1) {
+                    outputCount++;
+                    rows.push({i:parseInt(outputMap[p]),r:row});
+                }
+            });
+            rows.sort(function(A,B) {
+                return A.i-B.i;
+            })
+            rows.forEach(function(r,i) {
+                r.r.find("label").text((i+1)+".");
+                r.r.appendTo(outputsDiv);
+            })
+            if (rows.length === 0) {
+                buildLabelRow("output",i,"").appendTo(outputsDiv);
+            } else {
+
+            }
+        } else {
+            outputCount = Math.max(0,parseInt(formOutputs));
+        }
+        children = outputsDiv.children();
+        childCount = children.length;
+        if (childCount === 1 && $(children[0]).hasClass('node-label-form-none')) {
+            childCount--;
+        }
+        if (childCount < outputCount) {
+            if (childCount === 0) {
+                // remove the 'none' placeholder
+                $(children[0]).remove();
+            }
+            for (i = childCount;i<outputCount;i++) {
+                buildLabelRow("output",i,"").appendTo(outputsDiv);
+            }
+        } else if (childCount > outputCount) {
+            for (i=outputCount;i<childCount;i++) {
+                $(children[i]).remove();
+            }
+            if (outputCount === 0) {
+                buildLabelRow().appendTo(outputsDiv);
+            }
+        }
+    }
+    function buildLabelRow(type, index, value, placeHolder) {
+        var result = $('<div>',{class:"node-label-form-row"});
+        if (type === undefined) {
+            $('<span>').text(RED._("editor.noDefaultLabel")).appendTo(result);
+            result.addClass("node-label-form-none");
+        } else {
+            result.addClass("");
+            var id = "node-label-form-"+type+"-"+index;
+            $('<label>',{for:id}).text((index+1)+".").appendTo(result);
+            var input = $('<input>',{type:"text",id:id, placeholder: placeHolder}).val(value).appendTo(result);
+            var clear = $('<button class="editor-button editor-button-small"><i class="fa fa-times"></i></button>').appendTo(result);
+            clear.click(function(evt) {
+                evt.preventDefault();
+                input.val("");
+            })
+        }
+        return result;
+    }
+    function buildLabelForm(container,node) {
+        var dialogForm = $('<form class="dialog-form form-horizontal" autocomplete="off"></form>').appendTo(container);
+
+        var inputCount = node.inputs || node._def.inputs || 0;
+        var outputCount = node.outputs || node._def.outputs || 0;
+        if (node.type === 'subflow') {
+            inputCount = node.in.length;
+            outputCount = node.out.length;
+        }
+
+        var inputLabels = node.inputLabels || [];
+        var outputLabels = node.outputLabels || [];
+
+        var inputPlaceholder = node._def.inputLabels?RED._("editor.defaultLabel"):RED._("editor.noDefaultLabel");
+        var outputPlaceholder = node._def.outputLabels?RED._("editor.defaultLabel"):RED._("editor.noDefaultLabel");
+
+        var i,row;
+        $('<div class="form-row"><span data-i18n="editor.labelInputs"></span><div id="node-label-form-inputs"></div></div>').appendTo(dialogForm);
+        var inputsDiv = $("#node-label-form-inputs");
+        if (inputCount > 0) {
+            for (i=0;i<inputCount;i++) {
+                buildLabelRow("input",i,inputLabels[i],inputPlaceholder).appendTo(inputsDiv);
+            }
+        } else {
+            buildLabelRow().appendTo(inputsDiv);
+        }
+        $('<div class="form-row"><span data-i18n="editor.labelOutputs"></span><div id="node-label-form-outputs"></div></div>').appendTo(dialogForm);
+        var outputsDiv = $("#node-label-form-outputs");
+        if (outputCount > 0) {
+            for (i=0;i<outputCount;i++) {
+                buildLabelRow("output",i,outputLabels[i],outputPlaceholder).appendTo(outputsDiv);
+            }
+        } else {
+            buildLabelRow().appendTo(outputsDiv);
+        }
+
+        if ((!node._def.defaults || !node._def.defaults.hasOwnProperty("icon"))) {
+            $('<div class="form-row"><div id="node-settings-icon"></div></div>').appendTo(dialogForm);
+            var iconDiv = $("#node-settings-icon");
+            $('<label data-i18n="editor.settingIcon">').appendTo(iconDiv);
+            var iconForm = $('<div>',{class:"node-label-form-row"});
+            iconForm.appendTo(iconDiv);
+            $('<label>').appendTo(iconForm);
+
+            var selectIconModule = $('<select id="node-settings-icon-module"><option value=""></option></select>').appendTo(iconForm);
+            var iconPath;
+            if (node.icon) {
+                iconPath = RED.utils.separateIconPath(node.icon);
+            } else {
+                iconPath = RED.utils.getDefaultNodeIcon(node._def, node);
+            }
+            var iconSets = RED.nodes.getIconSets();
+            Object.keys(iconSets).forEach(function(moduleName) {
+                selectIconModule.append($("<option></option>").val(moduleName).text(moduleName));
+            });
+            if (iconPath.module && !iconSets[iconPath.module]) {
+                selectIconModule.append($("<option disabled></option>").val(iconPath.module).text(iconPath.module));
+            }
+            selectIconModule.val(iconPath.module);
+            var iconModuleHidden = $('<input type="hidden" id="node-settings-icon-module-hidden"></input>').appendTo(iconForm);
+            iconModuleHidden.val(iconPath.module);
+
+            var selectIconFile = $('<select id="node-settings-icon-file"><option value=""></option></select>').appendTo(iconForm);
+            selectIconModule.change(function() {
+                moduleChange(selectIconModule, selectIconFile, iconModuleHidden, iconFileHidden, iconSets, true);
+            });
+            var iconFileHidden = $('<input type="hidden" id="node-settings-icon-file-hidden"></input>').appendTo(iconForm);
+            iconFileHidden.val(iconPath.file);
+            selectIconFile.change(function() {
+                selectIconFile.removeClass("input-error");
+                var fileName = selectIconFile.val();
+                iconFileHidden.val(fileName);
+            });
+            var clear = $('<button class="editor-button editor-button-small"><i class="fa fa-times"></i></button>').appendTo(iconForm);
+            clear.click(function(evt) {
+                evt.preventDefault();
+                var iconPath = RED.utils.getDefaultNodeIcon(node._def, node);
+                selectIconModule.val(iconPath.module);
+                moduleChange(selectIconModule, selectIconFile, iconModuleHidden, iconFileHidden, iconSets, true);
+                selectIconFile.removeClass("input-error");
+                selectIconFile.val(iconPath.file);
+                iconFileHidden.val(iconPath.file);
+            });
+
+            moduleChange(selectIconModule, selectIconFile, iconModuleHidden, iconFileHidden, iconSets, false);
+            var iconFileList = iconSets[selectIconModule.val()];
+            if (!iconFileList || iconFileList.indexOf(iconPath.file) === -1) {
+                selectIconFile.append($("<option disabled></option>").val(iconPath.file).text(iconPath.file));
+            }
+            selectIconFile.val(iconPath.file);
+        }
+    }
+
+    function moduleChange(selectIconModule, selectIconFile, iconModuleHidden, iconFileHidden, iconSets, updateIconFile) {
+        selectIconFile.children().remove();
+        var moduleName = selectIconModule.val();
+        if (moduleName !== null) {
+            iconModuleHidden.val(moduleName);
+        }
+        var iconFileList = iconSets[moduleName];
+        if (iconFileList) {
+            iconFileList.forEach(function(fileName) {
+                if (updateIconFile) {
+                    updateIconFile = false;
+                    iconFileHidden.val(fileName);
+                }
+                selectIconFile.append($("<option></option>").val(fileName).text(fileName));
+            });
+        }
+        selectIconFile.prop("disabled", !iconFileList);
+        selectIconFile.removeClass("input-error");
+        selectIconModule.removeClass("input-error");
+    }
+
+    function updateLabels(editing_node, changes, outputMap) {
+        var inputLabels = $("#node-label-form-inputs").children().find("input");
+        var outputLabels = $("#node-label-form-outputs").children().find("input");
+
+        var hasNonBlankLabel = false;
+        var changed = false;
+        var newValue = inputLabels.map(function() {
+            var v = $(this).val();
+            hasNonBlankLabel = hasNonBlankLabel || v!== "";
+            return v;
+        }).toArray().slice(0,editing_node.inputs);
+        if ((editing_node.inputLabels === undefined && hasNonBlankLabel) ||
+            (editing_node.inputLabels !== undefined && JSON.stringify(newValue) !== JSON.stringify(editing_node.inputLabels))) {
+            changes.inputLabels = editing_node.inputLabels;
+            editing_node.inputLabels = newValue;
+            changed = true;
+        }
+        hasNonBlankLabel = false;
+        newValue = new Array(editing_node.outputs);
+        outputLabels.each(function() {
+            var index = $(this).attr('id').substring(23); // node-label-form-output-<index>
+            if (outputMap && outputMap.hasOwnProperty(index)) {
+                index = parseInt(outputMap[index]);
+                if (index === -1) {
+                    return;
+                }
+            }
+            var v = $(this).val();
+            hasNonBlankLabel = hasNonBlankLabel || v!== "";
+            newValue[index] = v;
+        });
+
+        if ((editing_node.outputLabels === undefined && hasNonBlankLabel) ||
+            (editing_node.outputLabels !== undefined && JSON.stringify(newValue) !== JSON.stringify(editing_node.outputLabels))) {
+            changes.outputLabels = editing_node.outputLabels;
+            editing_node.outputLabels = newValue;
+            changed = true;
+        }
+        return changed;
     }
 
     function showEditDialog(node) {
         var editing_node = node;
+        var isDefaultIcon;
+        var defaultIcon;
         editStack.push(node);
         RED.view.state(RED.state.EDITING);
         var type = node.type;
@@ -11939,6 +14019,33 @@ RED.editor = (function() {
         var trayOptions = {
             title: getEditStackTitle(),
             buttons: [
+                {
+                    id: "node-dialog-delete",
+                    class: 'leftButton',
+                    text: RED._("common.label.delete"),
+                    click: function() {
+                        var startDirty = RED.nodes.dirty();
+                        var removedNodes = [];
+                        var removedLinks = [];
+                        var removedEntities = RED.nodes.remove(editing_node.id);
+                        removedNodes.push(editing_node);
+                        removedNodes = removedNodes.concat(removedEntities.nodes);
+                        removedLinks = removedLinks.concat(removedEntities.links);
+
+                        var historyEvent = {
+                            t:'delete',
+                            nodes:removedNodes,
+                            links:removedLinks,
+                            changes: {},
+                            dirty: startDirty
+                        }
+
+                        RED.nodes.dirty(true);
+                        RED.view.redraw(true);
+                        RED.history.push(historyEvent);
+                        RED.tray.close();
+                    }
+                },
                 {
                     id: "node-dialog-cancel",
                     text: RED._("common.label.cancel"),
@@ -11984,6 +14091,7 @@ RED.editor = (function() {
                         var changed = false;
                         var wasDirty = RED.nodes.dirty();
                         var d;
+                        var outputMap;
 
                         if (editing_node._def.oneditsave) {
                             var oldValues = {};
@@ -12022,11 +14130,11 @@ RED.editor = (function() {
                             }
                         }
 
+                        var newValue;
                         if (editing_node._def.defaults) {
                             for (d in editing_node._def.defaults) {
                                 if (editing_node._def.defaults.hasOwnProperty(d)) {
                                     var input = $("#node-input-"+d);
-                                    var newValue;
                                     if (input.attr('type') === "checkbox") {
                                         newValue = input.prop('checked');
                                     } else if ("format" in editing_node._def.defaults[d] && editing_node._def.defaults[d].format !== "" && input[0].nodeName === "DIV") {
@@ -12035,8 +14143,44 @@ RED.editor = (function() {
                                         newValue = input.val();
                                     }
                                     if (newValue != null) {
-                                        if (d === "outputs" && (newValue.trim() === "" || isNaN(newValue))) {
-                                            continue;
+                                        if (d === "outputs") {
+                                            if  (newValue.trim() === "") {
+                                                continue;
+                                            }
+                                            if (isNaN(newValue)) {
+                                                outputMap = JSON.parse(newValue);
+                                                var outputCount = 0;
+                                                var outputsChanged = false;
+                                                var keys = Object.keys(outputMap);
+                                                keys.forEach(function(p) {
+                                                    if (isNaN(p)) {
+                                                        // New output;
+                                                        outputCount ++;
+                                                        delete outputMap[p];
+                                                    } else {
+                                                        outputMap[p] = outputMap[p]+"";
+                                                        if (outputMap[p] !== "-1") {
+                                                            outputCount++;
+                                                            if (outputMap[p] !== p) {
+                                                                // Output moved
+                                                                outputsChanged = true;
+                                                            } else {
+                                                                delete outputMap[p];
+                                                            }
+                                                        } else {
+                                                            // Output removed
+                                                            outputsChanged = true;
+                                                        }
+                                                    }
+                                                });
+
+                                                newValue = outputCount;
+                                                if (outputsChanged) {
+                                                    changed = true;
+                                                }
+                                            } else {
+                                                newValue = parseInt(newValue);
+                                            }
                                         }
                                         if (editing_node[d] != newValue) {
                                             if (editing_node._def.defaults[d].type) {
@@ -12068,8 +14212,46 @@ RED.editor = (function() {
                             var credsChanged = updateNodeCredentials(editing_node,credDefinition,prefix);
                             changed = changed || credsChanged;
                         }
+                        // if (editing_node.hasOwnProperty("_outputs")) {
+                        //     outputMap = editing_node._outputs;
+                        //     delete editing_node._outputs;
+                        //     if (Object.keys(outputMap).length > 0) {
+                        //         changed = true;
+                        //     }
+                        // }
+                        var removedLinks = updateNodeProperties(editing_node,outputMap);
 
-                        var removedLinks = updateNodeProperties(editing_node);
+                        if (updateLabels(editing_node, changes, outputMap)) {
+                            changed = true;
+                        }
+
+                        if (!editing_node._def.defaults || !editing_node._def.defaults.hasOwnProperty("icon")) {
+                            var iconModule = $("#node-settings-icon-module-hidden").val();
+                            var iconFile = $("#node-settings-icon-file-hidden").val();
+                            var icon = (iconModule && iconFile) ? iconModule+"/"+iconFile : "";
+                            if (!isDefaultIcon) {
+                                if (icon !== editing_node.icon) {
+                                    changes.icon = editing_node.icon;
+                                    editing_node.icon = icon;
+                                    changed = true;
+                                }
+                            } else {
+                                if (icon !== defaultIcon) {
+                                    changes.icon = editing_node.icon;
+                                    editing_node.icon = icon;
+                                    changed = true;
+                                } else {
+                                    var iconPath = RED.utils.getDefaultNodeIcon(editing_node._def, editing_node);
+                                    var currentDefaultIcon = iconPath.module+"/"+iconPath.file;
+                                    if (defaultIcon !== currentDefaultIcon) {
+                                        changes.icon = editing_node.icon;
+                                        editing_node.icon = currentDefaultIcon;
+                                        changed = true;
+                                    }
+                                }
+                            }
+                        }
+
                         if (changed) {
                             var wasChanged = editing_node.changed;
                             editing_node.changed = true;
@@ -12099,6 +14281,9 @@ RED.editor = (function() {
                                 dirty:wasDirty,
                                 changed:wasChanged
                             };
+                            if (outputMap) {
+                                historyEvent.outputMap = outputMap;
+                            }
                             if (subflowInstances) {
                                 historyEvent.subflow = {
                                     instances:subflowInstances
@@ -12115,8 +14300,9 @@ RED.editor = (function() {
             ],
             resize: function(dimensions) {
                 editTrayWidthCache[type] = dimensions.width;
+                $(".editor-tray-content").height(dimensions.height - 78);
+                var form = $(".editor-tray-content form").height(dimensions.height - 78 - 40);
                 if (editing_node && editing_node._def.oneditresize) {
-                    var form = $("#dialog-form");
                     try {
                         editing_node._def.oneditresize.call(editing_node,{width:form.width(),height:form.height()});
                     } catch(err) {
@@ -12124,39 +14310,53 @@ RED.editor = (function() {
                     }
                 }
             },
-            open: function(tray) {
+            open: function(tray, done) {
+                var trayFooter = tray.find(".editor-tray-footer");
+                var trayBody = tray.find('.editor-tray-body');
+                trayBody.parent().css('overflow','hidden');
+
+                var stack = RED.stack.create({
+                    container: trayBody,
+                    singleExpanded: true
+                });
+                var nodeProperties = stack.add({
+                    title: RED._("editor.nodeProperties"),
+                    expanded: true
+                });
+                nodeProperties.content.addClass("editor-tray-content");
+
+                var portLabels = stack.add({
+                    title: RED._("editor.portLabels"),
+                    onexpand: function() {
+                        refreshLabelForm(this.content,node);
+                    }
+                });
+                portLabels.content.addClass("editor-tray-content");
+
+
                 if (editing_node) {
                     RED.sidebar.info.refresh(editing_node);
                 }
-                var trayBody = tray.find('.editor-tray-body');
-                var dialogForm = $('<form id="dialog-form" class="form-horizontal"></form>').appendTo(trayBody);
-                dialogForm.html($("script[data-template-name='"+type+"']").html());
                 var ns;
                 if (node._def.set.module === "node-red") {
                     ns = "node-red";
                 } else {
                     ns = node._def.set.id;
                 }
-                dialogForm.find('[data-i18n]').each(function() {
-                    var current = $(this).attr("data-i18n");
-                    var keys = current.split(";");
-                    for (var i=0;i<keys.length;i++) {
-                        var key = keys[i];
-                        if (key.indexOf(":") === -1) {
-                            var prefix = "";
-                            if (key.indexOf("[")===0) {
-                                var parts = key.split("]");
-                                prefix = parts[0]+"]";
-                                key = parts[1];
-                            }
-                            keys[i] = prefix+ns+":"+key;
-                        }
-                    }
-                    $(this).attr("data-i18n",keys.join(";"));
+                var iconPath = RED.utils.getDefaultNodeIcon(node._def,node);
+                defaultIcon = iconPath.module+"/"+iconPath.file;
+                if (node.icon && node.icon !== defaultIcon) {
+                    isDefaultIcon = false;
+                } else {
+                    isDefaultIcon = true;
+                }
+                buildEditForm(nodeProperties.content,"dialog-form",type,ns);
+                buildLabelForm(portLabels.content,node);
+
+                prepareEditDialog(node,node._def,"node-input", function() {
+                    trayBody.i18n();
+                    done();
                 });
-                $('<input type="text" style="display: none;" />').prependTo(dialogForm);
-                prepareEditDialog(node,node._def,"node-input");
-                dialogForm.i18n();
             },
             close: function() {
                 if (RED.view.state() != RED.state.IMPORT_DRAGGING) {
@@ -12241,13 +14441,12 @@ RED.editor = (function() {
                     try {
                         editing_config_node._def.oneditresize.call(editing_config_node,{width:form.width(),height:form.height()});
                     } catch(err) {
-                        console.log("oneditresize",editing_node.id,editing_node.type,err.toString());
+                        console.log("oneditresize",editing_config_node.id,editing_config_node.type,err.toString());
                     }
                 }
             },
-            open: function(tray) {
+            open: function(tray, done) {
                 var trayHeader = tray.find(".editor-tray-header");
-                var trayBody = tray.find(".editor-tray-body");
                 var trayFooter = tray.find(".editor-tray-footer");
 
                 if (node_def.hasUsers !== false) {
@@ -12255,73 +14454,62 @@ RED.editor = (function() {
                 }
                 trayFooter.append('<span id="node-config-dialog-scope-container"><span id="node-config-dialog-scope-warning" data-i18n="[title]editor.errors.scopeChange"><i class="fa fa-warning"></i></span><select id="node-config-dialog-scope"></select></span>');
 
-                var dialogForm = $('<form id="node-config-dialog-edit-form" class="form-horizontal"></form>').appendTo(trayBody);
-                dialogForm.html($("script[data-template-name='"+type+"']").html());
-                dialogForm.find('[data-i18n]').each(function() {
-                    var current = $(this).attr("data-i18n");
-                    if (current.indexOf(":") === -1) {
-                        var prefix = "";
-                        if (current.indexOf("[")===0) {
-                            var parts = current.split("]");
-                            prefix = parts[0]+"]";
-                            current = parts[1];
-                        }
-                        $(this).attr("data-i18n",prefix+ns+":"+current);
-                    }
-                });
-                $('<input type="text" style="display: none;" />').prependTo(dialogForm);
-                prepareEditDialog(editing_config_node,node_def,"node-config-input");
-                if (editing_config_node._def.exclusive) {
-                    $("#node-config-dialog-scope").hide();
-                } else {
-                    $("#node-config-dialog-scope").show();
-                }
-                $("#node-config-dialog-scope-warning").hide();
+                var dialogForm = buildEditForm(tray.find('.editor-tray-body'),"node-config-dialog-edit-form",type,ns);
 
-                var nodeUserFlows = {};
-                editing_config_node.users.forEach(function(n) {
-                    nodeUserFlows[n.z] = true;
-                });
-                var flowCount = Object.keys(nodeUserFlows).length;
-                var tabSelect = $("#node-config-dialog-scope").empty();
-                tabSelect.off("change");
-                tabSelect.append('<option value=""'+(!editing_config_node.z?" selected":"")+' data-i18n="sidebar.config.global"></option>');
-                tabSelect.append('<option disabled data-i18n="sidebar.config.flows"></option>');
-                RED.nodes.eachWorkspace(function(ws) {
-                    var workspaceLabel = ws.label;
-                    if (nodeUserFlows[ws.id]) {
-                        workspaceLabel = "* "+workspaceLabel;
+                prepareEditDialog(editing_config_node,node_def,"node-config-input", function() {
+                    if (editing_config_node._def.exclusive) {
+                        $("#node-config-dialog-scope").hide();
+                    } else {
+                        $("#node-config-dialog-scope").show();
                     }
-                    tabSelect.append('<option value="'+ws.id+'"'+(ws.id==editing_config_node.z?" selected":"")+'>'+workspaceLabel+'</option>');
-                });
-                tabSelect.append('<option disabled data-i18n="sidebar.config.subflows"></option>');
-                RED.nodes.eachSubflow(function(ws) {
-                    var workspaceLabel = ws.name;
-                    if (nodeUserFlows[ws.id]) {
-                        workspaceLabel = "* "+workspaceLabel;
-                    }
-                    tabSelect.append('<option value="'+ws.id+'"'+(ws.id==editing_config_node.z?" selected":"")+'>'+workspaceLabel+'</option>');
-                });
-                if (flowCount > 0) {
-                    tabSelect.on('change',function() {
-                        var newScope = $(this).val();
-                        if (newScope === '') {
-                            // global scope - everyone can use it
-                            $("#node-config-dialog-scope-warning").hide();
-                        } else if (!nodeUserFlows[newScope] || flowCount > 1) {
-                            // a user will loose access to it
-                            $("#node-config-dialog-scope-warning").show();
-                        } else {
-                            $("#node-config-dialog-scope-warning").hide();
-                        }
+                    $("#node-config-dialog-scope-warning").hide();
+
+                    var nodeUserFlows = {};
+                    editing_config_node.users.forEach(function(n) {
+                        nodeUserFlows[n.z] = true;
                     });
-                }
-                tabSelect.i18n();
+                    var flowCount = Object.keys(nodeUserFlows).length;
+                    var tabSelect = $("#node-config-dialog-scope").empty();
+                    tabSelect.off("change");
+                    tabSelect.append('<option value=""'+(!editing_config_node.z?" selected":"")+' data-i18n="sidebar.config.global"></option>');
+                    tabSelect.append('<option disabled data-i18n="sidebar.config.flows"></option>');
+                    RED.nodes.eachWorkspace(function(ws) {
+                        var workspaceLabel = ws.label;
+                        if (nodeUserFlows[ws.id]) {
+                            workspaceLabel = "* "+workspaceLabel;
+                        }
+                        tabSelect.append('<option value="'+ws.id+'"'+(ws.id==editing_config_node.z?" selected":"")+'>'+workspaceLabel+'</option>');
+                    });
+                    tabSelect.append('<option disabled data-i18n="sidebar.config.subflows"></option>');
+                    RED.nodes.eachSubflow(function(ws) {
+                        var workspaceLabel = ws.name;
+                        if (nodeUserFlows[ws.id]) {
+                            workspaceLabel = "* "+workspaceLabel;
+                        }
+                        tabSelect.append('<option value="'+ws.id+'"'+(ws.id==editing_config_node.z?" selected":"")+'>'+workspaceLabel+'</option>');
+                    });
+                    if (flowCount > 0) {
+                        tabSelect.on('change',function() {
+                            var newScope = $(this).val();
+                            if (newScope === '') {
+                                // global scope - everyone can use it
+                                $("#node-config-dialog-scope-warning").hide();
+                            } else if (!nodeUserFlows[newScope] || flowCount > 1) {
+                                // a user will loose access to it
+                                $("#node-config-dialog-scope-warning").show();
+                            } else {
+                                $("#node-config-dialog-scope-warning").hide();
+                            }
+                        });
+                    }
+                    tabSelect.i18n();
 
-                dialogForm.i18n();
-                if (node_def.hasUsers !== false) {
-                    $("#node-config-dialog-user-count").find("span").html(RED._("editor.nodesUse", {count:editing_config_node.users.length})).parent().show();
-                }
+                    dialogForm.i18n();
+                    if (node_def.hasUsers !== false) {
+                        $("#node-config-dialog-user-count").find("span").text(RED._("editor.nodesUse", {count:editing_config_node.users.length})).parent().show();
+                    }
+                    done();
+                });
             },
             close: function() {
                 RED.workspaces.refresh();
@@ -12574,17 +14762,7 @@ RED.editor = (function() {
 
                 RED.nodes.eachConfig(function(config) {
                     if (config.type == type && (!config.z || config.z === activeWorkspace.id)) {
-                        var label = "";
-                        if (typeof node_def.label == "function") {
-                            try {
-                                label = node_def.label.call(config);
-                            } catch(err) {
-                                console.log("Definition error: "+node_def.type+".label",err);
-                                label = node_def.type;
-                            }
-                        } else {
-                            label = node_def.label;
-                        }
+                        var label = RED.utils.getNodeLabel(config,config.id);
                         config.__label__ = label;
                         configNodes.push(config);
                     }
@@ -12651,10 +14829,25 @@ RED.editor = (function() {
                             editing_node.info = newDescription;
                             changed = true;
                         }
+                        if (updateLabels(editing_node, changes, null)) {
+                            changed = true;
+                        }
+                        var iconModule = $("#node-settings-icon-module-hidden").val();
+                        var iconFile = $("#node-settings-icon-file-hidden").val();
+                        var icon = (iconModule && iconFile) ? iconModule+"/"+iconFile : "";
+                        if ((editing_node.icon === undefined && icon !== "node-red/subflow.png") ||
+                            (editing_node.icon !== undefined && editing_node.icon !== icon)) {
+                            changes.icon = editing_node.icon;
+                            editing_node.icon = icon;
+                            changed = true;
+                        }
 
                         RED.palette.refresh();
 
                         if (changed) {
+                            var wasChanged = editing_node.changed;
+                            editing_node.changed = true;
+                            validateNode(editing_node);
                             var subflowInstances = [];
                             RED.nodes.eachNode(function(n) {
                                 if (n.type == "subflow:"+editing_node.id) {
@@ -12665,10 +14858,9 @@ RED.editor = (function() {
                                     n.changed = true;
                                     n.dirty = true;
                                     updateNodeProperties(n);
+                                    validateNode(n);
                                 }
                             });
-                            var wasChanged = editing_node.changed;
-                            editing_node.changed = true;
                             RED.nodes.dirty(true);
                             var historyEvent = {
                                 t:'edit',
@@ -12688,7 +14880,10 @@ RED.editor = (function() {
                     }
                 }
             ],
-            resize: function() {
+            resize: function(dimensions) {
+                $(".editor-tray-content").height(dimensions.height - 78);
+                var form = $(".editor-tray-content form").height(dimensions.height - 78 - 40);
+
                 var rows = $("#dialog-form>div:not(.node-text-editor-row)");
                 var editorRow = $("#dialog-form>div.node-text-editor-row");
                 var height = $("#dialog-form").height();
@@ -12700,33 +14895,30 @@ RED.editor = (function() {
                 subflowEditor.resize();
             },
             open: function(tray) {
+                var trayFooter = tray.find(".editor-tray-footer");
+                var trayBody = tray.find('.editor-tray-body');
+                trayBody.parent().css('overflow','hidden');
+
+                var stack = RED.stack.create({
+                    container: trayBody,
+                    singleExpanded: true
+                });
+                var nodeProperties = stack.add({
+                    title: RED._("editor.nodeProperties"),
+                    expanded: true
+                });
+                nodeProperties.content.addClass("editor-tray-content");
+                var portLabels = stack.add({
+                    title: RED._("editor.portLabels")
+                });
+                portLabels.content.addClass("editor-tray-content");
+
+
+
                 if (editing_node) {
                     RED.sidebar.info.refresh(editing_node);
                 }
-                var trayBody = tray.find('.editor-tray-body');
-                var dialogForm = $('<form id="dialog-form" class="form-horizontal"></form>').appendTo(trayBody);
-                dialogForm.html($("script[data-template-name='subflow-template']").html());
-                var ns = "node-red";
-                dialogForm.find('[data-i18n]').each(function() {
-                    var current = $(this).attr("data-i18n");
-                    var keys = current.split(";");
-                    for (var i=0;i<keys.length;i++) {
-                        var key = keys[i];
-                        if (key.indexOf(":") === -1) {
-                            var prefix = "";
-                            if (key.indexOf("[")===0) {
-                                var parts = key.split("]");
-                                prefix = parts[0]+"]";
-                                key = parts[1];
-                            }
-                            keys[i] = prefix+ns+":"+key;
-                        }
-                    }
-                    $(this).attr("data-i18n",keys.join(";"));
-                });
-                $('<input type="text" style="display: none;" />').prependTo(dialogForm);
-
-                dialogForm.submit(function(e) { e.preventDefault();});
+                var dialogForm = buildEditForm(nodeProperties.content,"dialog-form","subflow-template");
                 subflowEditor = RED.editor.createEditor({
                     id: 'subflow-input-info-editor',
                     mode: 'ace/mode/markdown',
@@ -12744,8 +14936,11 @@ RED.editor = (function() {
                         userCount++;
                     }
                 });
-                $("#subflow-dialog-user-count").html(RED._("subflow.subflowInstances", {count:userCount})).show();
-                dialogForm.i18n();
+                $("#subflow-dialog-user-count").text(RED._("subflow.subflowInstances", {count:userCount})).show();
+
+                buildLabelForm(portLabels.content,subflow);
+                validateIcon(subflow);
+                trayBody.i18n();
             },
             close: function() {
                 if (RED.view.state() != RED.state.IMPORT_DRAGGING) {
@@ -12753,6 +14948,7 @@ RED.editor = (function() {
                 }
                 RED.sidebar.info.refresh(editing_node);
                 RED.workspaces.refresh();
+                subflowEditor.destroy();
                 editStack.pop();
                 editing_node = null;
             },
@@ -12762,29 +14958,696 @@ RED.editor = (function() {
         RED.tray.show(trayOptions);
     }
 
+
+    var expressionTestCache = {};
+
+    function editExpression(options) {
+        var expressionTestCacheId = "_";
+        if (editStack.length > 0) {
+            expressionTestCacheId = editStack[editStack.length-1].id;
+        }
+
+        var value = options.value;
+        var onComplete = options.complete;
+        var type = "_expression"
+        editStack.push({type:type});
+        RED.view.state(RED.state.EDITING);
+        var expressionEditor;
+        var testDataEditor;
+        var testResultEditor
+        var panels;
+
+        var trayOptions = {
+            title: getEditStackTitle(),
+            width: "inherit",
+            buttons: [
+                {
+                    id: "node-dialog-cancel",
+                    text: RED._("common.label.cancel"),
+                    click: function() {
+                        RED.tray.close();
+                    }
+                },
+                {
+                    id: "node-dialog-ok",
+                    text: RED._("common.label.done"),
+                    class: "primary",
+                    click: function() {
+                        $("#node-input-expression-help").text("");
+                        onComplete(expressionEditor.getValue());
+                        RED.tray.close();
+                    }
+                }
+            ],
+            resize: function(dimensions) {
+                if (dimensions) {
+                    editTrayWidthCache[type] = dimensions.width;
+                }
+                var height = $("#dialog-form").height();
+                if (panels) {
+                    panels.resize(height);
+                }
+
+            },
+            open: function(tray) {
+                var trayBody = tray.find('.editor-tray-body');
+                trayBody.addClass("node-input-expression-editor")
+                var dialogForm = buildEditForm(tray.find('.editor-tray-body'),'dialog-form','_expression','editor');
+                var funcSelect = $("#node-input-expression-func");
+                Object.keys(jsonata.functions).forEach(function(f) {
+                    funcSelect.append($("<option></option>").val(f).text(f));
+                })
+                funcSelect.change(function(e) {
+                    var f = $(this).val();
+                    var args = RED._('jsonata:'+f+".args",{defaultValue:''});
+                    var title = "<h5>"+f+"("+args+")</h5>";
+                    var body = marked(RED._('jsonata:'+f+'.desc',{defaultValue:''}));
+                    $("#node-input-expression-help").html(title+"<p>"+body+"</p>");
+
+                })
+                expressionEditor = RED.editor.createEditor({
+                    id: 'node-input-expression',
+                    value: "",
+                    mode:"ace/mode/jsonata",
+                    options: {
+                        enableBasicAutocompletion:true,
+                        enableSnippets:true,
+                        enableLiveAutocompletion: true
+                    }
+                });
+                var currentToken = null;
+                var currentTokenPos = -1;
+                var currentFunctionMarker = null;
+
+                expressionEditor.getSession().setValue(value||"",-1);
+                expressionEditor.on("changeSelection", function() {
+                    var c = expressionEditor.getCursorPosition();
+                    var token = expressionEditor.getSession().getTokenAt(c.row,c.column);
+                    if (token !== currentToken || (token && /paren/.test(token.type) && c.column !== currentTokenPos)) {
+                        currentToken = token;
+                        var r,p;
+                        var scopedFunction = null;
+                        if (token && token.type === 'keyword') {
+                            r = c.row;
+                            scopedFunction = token;
+                        } else {
+                            var depth = 0;
+                            var next = false;
+                            if (token) {
+                                if (token.type === 'paren.rparen') {
+                                    // If this is a block of parens ')))', set
+                                    // depth to offset against the cursor position
+                                    // within the block
+                                    currentTokenPos = c.column;
+                                    depth = c.column - (token.start + token.value.length);
+                                }
+                                r = c.row;
+                                p = token.index;
+                            } else {
+                                r = c.row-1;
+                                p = -1;
+                            }
+                            while ( scopedFunction === null && r > -1) {
+                                var rowTokens = expressionEditor.getSession().getTokens(r);
+                                if (p === -1) {
+                                    p = rowTokens.length-1;
+                                }
+                                while (p > -1) {
+                                    var type = rowTokens[p].type;
+                                    if (next) {
+                                        if (type === 'keyword') {
+                                            scopedFunction = rowTokens[p];
+                                            // console.log("HIT",scopedFunction);
+                                            break;
+                                        }
+                                        next = false;
+                                    }
+                                    if (type === 'paren.lparen') {
+                                        depth-=rowTokens[p].value.length;
+                                    } else if (type === 'paren.rparen') {
+                                        depth+=rowTokens[p].value.length;
+                                    }
+                                    if (depth < 0) {
+                                        next = true;
+                                        depth = 0;
+                                    }
+                                    // console.log(r,p,depth,next,rowTokens[p]);
+                                    p--;
+                                }
+                                if (!scopedFunction) {
+                                    r--;
+                                }
+                            }
+                        }
+                        expressionEditor.session.removeMarker(currentFunctionMarker);
+                        if (scopedFunction) {
+                        //console.log(token,.map(function(t) { return t.type}));
+                            funcSelect.val(scopedFunction.value).change();
+                        }
+                    }
+                });
+
+                dialogForm.i18n();
+                $("#node-input-expression-func-insert").click(function(e) {
+                    e.preventDefault();
+                    var pos = expressionEditor.getCursorPosition();
+                    var f = funcSelect.val();
+                    var snippet = jsonata.getFunctionSnippet(f);
+                    expressionEditor.insertSnippet(snippet);
+                    expressionEditor.focus();
+                });
+                $("#node-input-expression-reformat").click(function(evt) {
+                    evt.preventDefault();
+                    var v = expressionEditor.getValue()||"";
+                    try {
+                        v = jsonata.format(v);
+                    } catch(err) {
+                        // TODO: do an optimistic auto-format
+                    }
+                    expressionEditor.getSession().setValue(v||"",-1);
+                });
+
+                var tabs = RED.tabs.create({
+                    element: $("#node-input-expression-tabs"),
+                    onchange:function(tab) {
+                        $(".node-input-expression-tab-content").hide();
+                        tab.content.show();
+                        trayOptions.resize();
+                    }
+                })
+
+                tabs.addTab({
+                    id: 'expression-help',
+                    label: RED._('expressionEditor.functionReference'),
+                    content: $("#node-input-expression-tab-help")
+                });
+                tabs.addTab({
+                    id: 'expression-tests',
+                    label: RED._('expressionEditor.test'),
+                    content: $("#node-input-expression-tab-test")
+                });
+                testDataEditor = RED.editor.createEditor({
+                    id: 'node-input-expression-test-data',
+                    value: expressionTestCache[expressionTestCacheId] || '{\n    "payload": "hello world"\n}',
+                    mode:"ace/mode/json",
+                    lineNumbers: false
+                });
+                var changeTimer;
+                $(".node-input-expression-legacy").click(function(e) {
+                    e.preventDefault();
+                    RED.sidebar.info.set(RED._("expressionEditor.compatModeDesc"));
+                    RED.sidebar.info.show();
+                })
+                var testExpression = function() {
+                    var value = testDataEditor.getValue();
+                    var parsedData;
+                    var currentExpression = expressionEditor.getValue();
+                    var expr;
+                    var usesContext = false;
+                    var legacyMode = /(^|[^a-zA-Z0-9_'"])msg([^a-zA-Z0-9_'"]|$)/.test(currentExpression);
+                    $(".node-input-expression-legacy").toggle(legacyMode);
+                    try {
+                        expr = jsonata(currentExpression);
+                        expr.assign('flowContext',function(val) {
+                            usesContext = true;
+                            return null;
+                        });
+                        expr.assign('globalContext',function(val) {
+                            usesContext = true;
+                            return null;
+                        });
+                    } catch(err) {
+                        testResultEditor.setValue(RED._("expressionEditor.errors.invalid-expr",{message:err.message}),-1);
+                        return;
+                    }
+                    try {
+                        parsedData = JSON.parse(value);
+                    } catch(err) {
+                        testResultEditor.setValue(RED._("expressionEditor.errors.invalid-msg",{message:err.toString()}))
+                        return;
+                    }
+
+                    try {
+                        var result = expr.evaluate(legacyMode?{msg:parsedData}:parsedData);
+                        if (usesContext) {
+                            testResultEditor.setValue(RED._("expressionEditor.errors.context-unsupported"),-1);
+                            return;
+                        }
+
+                        var formattedResult;
+                        if (result !== undefined) {
+                            formattedResult = JSON.stringify(result,null,4);
+                        } else {
+                            formattedResult = RED._("expressionEditor.noMatch");
+                        }
+                        testResultEditor.setValue(formattedResult,-1);
+                    } catch(err) {
+                        testResultEditor.setValue(RED._("expressionEditor.errors.eval",{message:err.message}),-1);
+                    }
+                }
+
+                testDataEditor.getSession().on('change', function() {
+                    clearTimeout(changeTimer);
+                    changeTimer = setTimeout(testExpression,200);
+                    expressionTestCache[expressionTestCacheId] = testDataEditor.getValue();
+                });
+                expressionEditor.getSession().on('change', function() {
+                    clearTimeout(changeTimer);
+                    changeTimer = setTimeout(testExpression,200);
+                });
+
+                testResultEditor = RED.editor.createEditor({
+                    id: 'node-input-expression-test-result',
+                    value: "",
+                    mode:"ace/mode/json",
+                    lineNumbers: false,
+                    readOnly: true
+                });
+                panels = RED.panels.create({
+                    id:"node-input-expression-panels",
+                    resize: function(p1Height,p2Height) {
+                        var p1 = $("#node-input-expression-panel-expr");
+                        p1Height -= $(p1.children()[0]).outerHeight(true);
+                        var editorRow = $(p1.children()[1]);
+                        p1Height -= (parseInt(editorRow.css("marginTop"))+parseInt(editorRow.css("marginBottom")));
+                        $("#node-input-expression").css("height",(p1Height-5)+"px");
+                        expressionEditor.resize();
+
+                        var p2 = $("#node-input-expression-panel-info > .form-row > div:first-child");
+                        p2Height -= p2.outerHeight(true) + 20;
+                        $(".node-input-expression-tab-content").height(p2Height);
+                        $("#node-input-expression-test-data").css("height",(p2Height-5)+"px");
+                        testDataEditor.resize();
+                        $("#node-input-expression-test-result").css("height",(p2Height-5)+"px");
+                        testResultEditor.resize();
+                    }
+                });
+
+                $("#node-input-example-reformat").click(function(evt) {
+                    evt.preventDefault();
+                    var v = testDataEditor.getValue()||"";
+                    try {
+                        v = JSON.stringify(JSON.parse(v),null,4);
+                    } catch(err) {
+                        // TODO: do an optimistic auto-format
+                    }
+                    testDataEditor.getSession().setValue(v||"",-1);
+                });
+
+                testExpression();
+            },
+            close: function() {
+                editStack.pop();
+                expressionEditor.destroy();
+                testDataEditor.destroy();
+            },
+            show: function() {}
+        }
+        RED.tray.show(trayOptions);
+    }
+
+
+    function editJSON(options) {
+        var value = options.value;
+        var onComplete = options.complete;
+        var type = "_json"
+        editStack.push({type:type});
+        RED.view.state(RED.state.EDITING);
+        var expressionEditor;
+        var changeTimer;
+
+        var checkValid = function() {
+            var v = expressionEditor.getValue();
+            try {
+                JSON.parse(v);
+                $("#node-dialog-ok").removeClass('disabled');
+                return true;
+            } catch(err) {
+                $("#node-dialog-ok").addClass('disabled');
+                return false;
+            }
+        }
+        var trayOptions = {
+            title: options.title || getEditStackTitle(),
+            width: "inherit",
+            buttons: [
+                {
+                    id: "node-dialog-cancel",
+                    text: RED._("common.label.cancel"),
+                    click: function() {
+                        RED.tray.close();
+                    }
+                },
+                {
+                    id: "node-dialog-ok",
+                    text: RED._("common.label.done"),
+                    class: "primary",
+                    click: function() {
+                        if (options.requireValid && !checkValid()) {
+                            return;
+                        }
+                        onComplete(expressionEditor.getValue());
+                        RED.tray.close();
+                    }
+                }
+            ],
+            resize: function(dimensions) {
+                editTrayWidthCache[type] = dimensions.width;
+
+                var rows = $("#dialog-form>div:not(.node-text-editor-row)");
+                var editorRow = $("#dialog-form>div.node-text-editor-row");
+                var height = $("#dialog-form").height();
+                for (var i=0;i<rows.size();i++) {
+                    height -= $(rows[i]).outerHeight(true);
+                }
+                height -= (parseInt($("#dialog-form").css("marginTop"))+parseInt($("#dialog-form").css("marginBottom")));
+                $(".node-text-editor").css("height",height+"px");
+                expressionEditor.resize();
+            },
+            open: function(tray) {
+                var trayBody = tray.find('.editor-tray-body');
+                var dialogForm = buildEditForm(tray.find('.editor-tray-body'),'dialog-form',type,'editor');
+                expressionEditor = RED.editor.createEditor({
+                    id: 'node-input-json',
+                    value: "",
+                    mode:"ace/mode/json"
+                });
+                expressionEditor.getSession().setValue(value||"",-1);
+                if (options.requireValid) {
+                    expressionEditor.getSession().on('change', function() {
+                        clearTimeout(changeTimer);
+                        changeTimer = setTimeout(checkValid,200);
+                    });
+                    checkValid();
+                }
+                $("#node-input-json-reformat").click(function(evt) {
+                    evt.preventDefault();
+                    var v = expressionEditor.getValue()||"";
+                    try {
+                        v = JSON.stringify(JSON.parse(v),null,4);
+                    } catch(err) {
+                        // TODO: do an optimistic auto-format
+                    }
+                    expressionEditor.getSession().setValue(v||"",-1);
+                });
+                dialogForm.i18n();
+            },
+            close: function() {
+                editStack.pop();
+                expressionEditor.destroy();
+            },
+            show: function() {}
+        }
+        RED.tray.show(trayOptions);
+    }
+
+    function editMarkdown(options) {
+        var value = options.value;
+        var onComplete = options.complete;
+        var type = "_markdown"
+        editStack.push({type:type});
+        RED.view.state(RED.state.EDITING);
+        var expressionEditor;
+
+        var trayOptions = {
+            title: options.title || getEditStackTitle(),
+            width: "inherit",
+            buttons: [
+                {
+                    id: "node-dialog-cancel",
+                    text: RED._("common.label.cancel"),
+                    click: function() {
+                        RED.tray.close();
+                    }
+                },
+                {
+                    id: "node-dialog-ok",
+                    text: RED._("common.label.done"),
+                    class: "primary",
+                    click: function() {
+                        onComplete(expressionEditor.getValue());
+                        RED.tray.close();
+                    }
+                }
+            ],
+            resize: function(dimensions) {
+                editTrayWidthCache[type] = dimensions.width;
+
+                var rows = $("#dialog-form>div:not(.node-text-editor-row)");
+                var editorRow = $("#dialog-form>div.node-text-editor-row");
+                var height = $("#dialog-form").height();
+                for (var i=0;i<rows.size();i++) {
+                    height -= $(rows[i]).outerHeight(true);
+                }
+                height -= (parseInt($("#dialog-form").css("marginTop"))+parseInt($("#dialog-form").css("marginBottom")));
+                $(".node-text-editor").css("height",height+"px");
+                expressionEditor.resize();
+            },
+            open: function(tray) {
+                var trayBody = tray.find('.editor-tray-body');
+                var dialogForm = buildEditForm(tray.find('.editor-tray-body'),'dialog-form',type,'editor');
+                expressionEditor = RED.editor.createEditor({
+                    id: 'node-input-markdown',
+                    value: value,
+                    mode:"ace/mode/markdown"
+                });
+                if (options.header) {
+                    options.header.appendTo(tray.find('#node-input-markdown-title'));
+                }
+
+                dialogForm.i18n();
+            },
+            close: function() {
+                editStack.pop();
+                expressionEditor.destroy();
+            },
+            show: function() {}
+        }
+        RED.tray.show(trayOptions);
+    }
+
+    function stringToUTF8Array(str) {
+        var data = [];
+        var i=0, l = str.length;
+        for (i=0; i<l; i++) {
+            var char = str.charCodeAt(i);
+            if (char < 0x80) {
+                data.push(char);
+            } else if (char < 0x800) {
+                data.push(0xc0 | (char >> 6));
+                data.push(0x80 | (char & 0x3f));
+            } else if (char < 0xd800 || char >= 0xe000) {
+                data.push(0xe0 | (char >> 12));
+                data.push(0x80 | ((char>>6) & 0x3f));
+                data.push(0x80 | (char & 0x3f));
+            } else {
+                i++;
+                char = 0x10000 + (((char & 0x3ff)<<10) | (str.charAt(i) & 0x3ff));
+                data.push(0xf0 | (char >>18));
+                data.push(0x80 | ((char>>12) & 0x3f));
+                data.push(0x80 | ((char>>6) & 0x3f));
+                data.push(0x80 | (char & 0x3f));
+            }
+        }
+        return data;
+    }
+
+    function editBuffer(options) {
+        var value = options.value;
+        var onComplete = options.complete;
+        var type = "_buffer"
+        editStack.push({type:type});
+        RED.view.state(RED.state.EDITING);
+        var bufferStringEditor = [];
+        var bufferBinValue;
+
+        var panels;
+
+        var trayOptions = {
+            title: getEditStackTitle(),
+            width: "inherit",
+            buttons: [
+                {
+                    id: "node-dialog-cancel",
+                    text: RED._("common.label.cancel"),
+                    click: function() {
+                        RED.tray.close();
+                    }
+                },
+                {
+                    id: "node-dialog-ok",
+                    text: RED._("common.label.done"),
+                    class: "primary",
+                    click: function() {
+                        onComplete(JSON.stringify(bufferBinValue));
+                        RED.tray.close();
+                    }
+                }
+            ],
+            resize: function(dimensions) {
+                if (dimensions) {
+                    editTrayWidthCache[type] = dimensions.width;
+                }
+                var height = $("#dialog-form").height();
+                if (panels) {
+                    panels.resize(height);
+                }
+            },
+            open: function(tray) {
+                var trayBody = tray.find('.editor-tray-body');
+                var dialogForm = buildEditForm(tray.find('.editor-tray-body'),'dialog-form',type,'editor');
+
+                bufferStringEditor = RED.editor.createEditor({
+                    id: 'node-input-buffer-str',
+                    value: "",
+                    mode:"ace/mode/text"
+                });
+                bufferStringEditor.getSession().setValue(value||"",-1);
+
+                bufferBinEditor = RED.editor.createEditor({
+                    id: 'node-input-buffer-bin',
+                    value: "",
+                    mode:"ace/mode/text",
+                    readOnly: true
+                });
+
+                var changeTimer;
+                var buildBuffer = function(data) {
+                    var valid = true;
+                    var isString = typeof data === 'string';
+                    var binBuffer = [];
+                    if (isString) {
+                        bufferBinValue = stringToUTF8Array(data);
+                    } else {
+                        bufferBinValue = data;
+                    }
+                    var i=0,l=bufferBinValue.length;
+                    var c = 0;
+                    for(i=0;i<l;i++) {
+                        var d = parseInt(bufferBinValue[i]);
+                        if (!isString && (isNaN(d) || d < 0 || d > 255)) {
+                            valid = false;
+                            break;
+                        }
+                        if (i>0) {
+                            if (i%8 === 0) {
+                                if (i%16 === 0) {
+                                    binBuffer.push("\n");
+                                } else {
+                                    binBuffer.push("  ");
+                                }
+                            } else {
+                                binBuffer.push(" ");
+                            }
+                        }
+                        binBuffer.push((d<16?"0":"")+d.toString(16).toUpperCase());
+                    }
+                    if (valid) {
+                        $("#node-input-buffer-type-string").toggle(isString);
+                        $("#node-input-buffer-type-array").toggle(!isString);
+                        bufferBinEditor.setValue(binBuffer.join(""),1);
+                    }
+                    return valid;
+                }
+                var bufferStringUpdate = function() {
+                    var value = bufferStringEditor.getValue();
+                    var isValidArray = false;
+                    if (/^[\s]*\[[\s\S]*\][\s]*$/.test(value)) {
+                        isValidArray = true;
+                        try {
+                            var data = JSON.parse(value);
+                            isValidArray = buildBuffer(data);
+                        } catch(err) {
+                            isValidArray = false;
+                        }
+                    }
+                    if (!isValidArray) {
+                        buildBuffer(value);
+                    }
+
+                }
+                bufferStringEditor.getSession().on('change', function() {
+                    clearTimeout(changeTimer);
+                    changeTimer = setTimeout(bufferStringUpdate,200);
+                });
+
+                bufferStringUpdate();
+
+                dialogForm.i18n();
+
+                panels = RED.panels.create({
+                    id:"node-input-buffer-panels",
+                    resize: function(p1Height,p2Height) {
+                        var p1 = $("#node-input-buffer-panel-str");
+                        p1Height -= $(p1.children()[0]).outerHeight(true);
+                        var editorRow = $(p1.children()[1]);
+                        p1Height -= (parseInt(editorRow.css("marginTop"))+parseInt(editorRow.css("marginBottom")));
+                        $("#node-input-buffer-str").css("height",(p1Height-5)+"px");
+                        bufferStringEditor.resize();
+
+                        var p2 = $("#node-input-buffer-panel-bin");
+                        editorRow = $(p2.children()[0]);
+                        p2Height -= (parseInt(editorRow.css("marginTop"))+parseInt(editorRow.css("marginBottom")));
+                        $("#node-input-buffer-bin").css("height",(p2Height-5)+"px");
+                        bufferBinEditor.resize();
+                    }
+                });
+
+                $(".node-input-buffer-type").click(function(e) {
+                    e.preventDefault();
+                    RED.sidebar.info.set(RED._("bufferEditor.modeDesc"));
+                    RED.sidebar.info.show();
+                })
+
+
+            },
+            close: function() {
+                editStack.pop();
+                bufferStringEditor.destroy();
+                bufferBinEditor.destroy();
+            },
+            show: function() {}
+        }
+        RED.tray.show(trayOptions);
+    }
+
     return {
         init: function() {
             RED.tray.init();
-            $(window).on('keydown', function(evt) {
-                if (evt.keyCode === $.ui.keyCode.ESCAPE && (evt.metaKey || evt.ctrlKey)) {
-                    $("#node-dialog-cancel").click();
-                    $("#node-config-dialog-cancel").click();
-                } else if (evt.keyCode === $.ui.keyCode.ENTER && (evt.metaKey || evt.ctrlKey)) {
-                    $("#node-dialog-ok").click();
-                    $("#node-config-dialog-ok").click();
-                }
+            RED.actions.add("core:confirm-edit-tray", function() {
+                $("#node-dialog-ok").click();
+                $("#node-config-dialog-ok").click();
+            });
+            RED.actions.add("core:cancel-edit-tray", function() {
+                $("#node-dialog-cancel").click();
+                $("#node-config-dialog-cancel").click();
             });
         },
         edit: showEditDialog,
         editConfig: showEditConfigNodeDialog,
         editSubflow: showEditSubflowDialog,
+        editExpression: editExpression,
+        editJSON: editJSON,
+        editMarkdown: editMarkdown,
+        editBuffer: editBuffer,
         validateNode: validateNode,
         updateNodeProperties: updateNodeProperties, // TODO: only exposed for edit-undo
 
+
         createEditor: function(options) {
-            var editor = ace.edit(options.id);
+            var editor = ace.edit(options.id||options.element);
             editor.setTheme("ace/theme/tomorrow");
             var session = editor.getSession();
+            session.on("changeAnnotation", function () {
+                var annotations = session.getAnnotations() || [];
+                var i = annotations.length;
+                var len = annotations.length;
+                while (i--) {
+                    if (/doctype first\. Expected/.test(annotations[i].text)) { annotations.splice(i, 1); }
+                    else if (/Unexpected End of file\. Expected/.test(annotations[i].text)) { annotations.splice(i, 1); }
+                }
+                if (len > annotations.length) { session.setAnnotations(annotations); }
+            });
             if (options.mode) {
                 session.setMode(options.mode);
             }
@@ -12801,6 +15664,13 @@ RED.editor = (function() {
                     enableSnippets:true
                 });
             }
+            if (options.readOnly) {
+                editor.setOption('readOnly',options.readOnly);
+                editor.container.classList.add("ace_read-only");
+            }
+            if (options.hasOwnProperty('lineNumbers')) {
+                editor.renderer.setOption('showGutter',options.lineNumbers);
+            }
             editor.$blockScrolling = Infinity;
             if (options.value) {
                 session.setValue(options.value,-1);
@@ -12808,17 +15678,16 @@ RED.editor = (function() {
             if (options.globals) {
                 setTimeout(function() {
                     if (!!session.$worker) {
-                        session.$worker.send("setOptions", [{globals: options.globals, esversion:6}]);
+                        session.$worker.send("setOptions", [{globals: options.globals, esversion:6, sub:true, asi:true, maxerr:1000}]);
                     }
                 },100);
             }
-
             return editor;
         }
     }
 })();
 ;/**
- * Copyright 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -12851,7 +15720,15 @@ RED.tray = (function() {
         // var growButton = $('<a class="editor-tray-resize-button" style="cursor: w-resize;"><i class="fa fa-angle-left"></i></a>').appendTo(resizer);
         // var shrinkButton = $('<a class="editor-tray-resize-button" style="cursor: e-resize;"><i style="margin-left: 1px;" class="fa fa-angle-right"></i></a>').appendTo(resizer);
         if (options.title) {
-            $('<div class="editor-tray-titlebar">'+options.title+'</div>').appendTo(header);
+            var titles = stack.map(function(e) { return e.options.title });
+            titles.push(options.title);
+            var title = '<ul class="editor-tray-breadcrumbs"><li>'+titles.join("</li><li>")+'</li></ul>';
+
+            $('<div class="editor-tray-titlebar">'+title+'</div>').appendTo(header);
+        }
+        if (options.width === Infinity) {
+            options.maximized = true;
+            resizer.addClass('editor-tray-resize-maximised');
         }
         var buttonBar = $('<div class="editor-tray-toolbar"></div>').appendTo(header);
         var primaryButton;
@@ -12863,7 +15740,7 @@ RED.tray = (function() {
                     b.attr('id',button.id);
                 }
                 if (button.text) {
-                    b.html(button.text);
+                    b.text(button.text);
                 }
                 if (button.click) {
                     b.click((function(action) {
@@ -12893,7 +15770,8 @@ RED.tray = (function() {
         };
         stack.push(tray);
 
-        el.draggable({
+        if (!options.maximized) {
+            el.draggable({
                 handle: resizer,
                 axis: "x",
                 start:function(event,ui) {
@@ -12922,92 +15800,80 @@ RED.tray = (function() {
                     tray.width = -ui.position.left;
                 }
             });
-
-        if (options.open) {
-            options.open(el);
         }
 
-        $("#header-shade").show();
-        $("#editor-shade").show();
-        $("#palette-shade").show();
-        $(".sidebar-shade").show();
-
-        tray.preferredWidth = Math.max(el.width(),500);
-        body.css({"minWidth":tray.preferredWidth-40});
-
-        if (options.width) {
-            if (options.width > $("#editor-stack").position().left-8) {
-                options.width = $("#editor-stack").position().left-8;
+        function finishBuild() {
+            $("#header-shade").show();
+            $("#editor-shade").show();
+            $("#palette-shade").show();
+            $(".sidebar-shade").show();
+            tray.preferredWidth = Math.max(el.width(),500);
+            if (!options.maximized) {
+                body.css({"minWidth":tray.preferredWidth-40});
             }
-            el.width(options.width);
-        } else {
-            el.width(tray.preferredWidth);
-        }
+            if (options.width) {
+                if (options.width > $("#editor-stack").position().left-8) {
+                    options.width = $("#editor-stack").position().left-8;
+                }
+                el.width(options.width);
+            } else {
+                el.width(tray.preferredWidth);
+            }
 
-        tray.width = el.width();
-        if (tray.width > $("#editor-stack").position().left-8) {
-            tray.width = Math.max(0/*tray.preferredWidth*/,$("#editor-stack").position().left-8);
-            el.width(tray.width);
-        }
+            tray.width = el.width();
+            if (tray.width > $("#editor-stack").position().left-8) {
+                tray.width = Math.max(0/*tray.preferredWidth*/,$("#editor-stack").position().left-8);
+                el.width(tray.width);
+            }
 
-        // tray.body.parent().width(Math.min($("#editor-stack").position().left-8,tray.width));
+            // tray.body.parent().width(Math.min($("#editor-stack").position().left-8,tray.width));
 
-        el.css({
-            right: -(el.width()+10)+"px",
-            transition: "right 0.25s ease"
-        });
-        $("#workspace").scrollLeft(0);
-        handleWindowResize();
-        openingTray = true;
-        setTimeout(function() {
+            el.css({
+                right: -(el.width()+10)+"px",
+                transition: "right 0.25s ease"
+            });
+            $("#workspace").scrollLeft(0);
+            handleWindowResize();
+            openingTray = true;
             setTimeout(function() {
-                if (!options.width) {
-                    el.width(Math.min(tray.preferredWidth,$("#editor-stack").position().left-8));
-                }
-                if (options.resize) {
-                    options.resize({width:el.width()});
-                }
-                if (options.show) {
-                    options.show();
-                }
                 setTimeout(function() {
-                    // Delay resetting the flag, so we don't close prematurely
-                    openingTray = false;
-                },200);
-            },150);
-            el.css({right:0});
-        },0);
+                    if (!options.width) {
+                        el.width(Math.min(tray.preferredWidth,$("#editor-stack").position().left-8));
+                    }
+                    if (options.resize) {
+                        options.resize({width:el.width()});
+                    }
+                    if (options.show) {
+                        options.show();
+                    }
+                    setTimeout(function() {
+                        // Delay resetting the flag, so we don't close prematurely
+                        openingTray = false;
+                    },200);
+                    body.find(":focusable:first").focus();
 
-        // growButton.click(function(e) {
-        //     e.preventDefault();
-        //     tray.lastWidth = tray.width;
-        //     tray.width = $("#editor-stack").position().left-8;
-        //     el.width(tray.width);
-        //     if (options.resize) {
-        //         options.resize({width:tray.width});
-        //     }
-        // });
-        // shrinkButton.click(function(e) {
-        //     e.preventDefault();
-        //     if (tray.lastWidth && tray.width > tray.lastWidth) {
-        //         tray.width = tray.lastWidth;
-        //     } else if (tray.width > tray.preferredWidth) {
-        //         tray.width = tray.preferredWidth;
-        //     }
-        //     el.width(tray.width);
-        //     if (options.resize) {
-        //         options.resize({width:tray.width});
-        //     }
-        // });
-
+                },150);
+                el.css({right:0});
+            },0);
+        }
+        if (options.open) {
+            if (options.open.length === 1) {
+                options.open(el);
+                finishBuild();
+            } else {
+                options.open(el,finishBuild);
+            }
+        } else {
+            finishBuild();
+        }
     }
 
     function handleWindowResize() {
         if (stack.length > 0) {
             var tray = stack[stack.length-1];
             var trayHeight = tray.tray.height()-tray.header.outerHeight()-tray.footer.outerHeight();
-            tray.body.height(trayHeight-40);
-            if (tray.width > $("#editor-stack").position().left-8) {
+            tray.body.height(trayHeight);
+            if (tray.options.maximized || tray.width > $("#editor-stack").position().left-8) {
                 tray.width = $("#editor-stack").position().left-8;
                 tray.tray.width(tray.width);
                 // tray.body.parent().width(tray.width);
@@ -13017,7 +15883,7 @@ RED.tray = (function() {
                 // tray.body.parent().width(tray.width);
             }
             if (tray.options.resize) {
-                tray.options.resize({width:tray.width});
+                tray.options.resize({width:tray.width, height:trayHeight});
             }
         }
     }
@@ -13036,8 +15902,11 @@ RED.tray = (function() {
             });
         },
         show: function show(options) {
-            if (stack.length > 0) {
+            if (stack.length > 0 && !options.overlay) {
                 var oldTray = stack[stack.length-1];
+                if (options.width === "inherit") {
+                    options.width = oldTray.tray.width();
+                }
                 oldTray.tray.css({
                     right: -(oldTray.tray.width()+10)+"px"
                 });
@@ -13064,14 +15933,21 @@ RED.tray = (function() {
                     tray.tray.remove();
                     if (stack.length > 0) {
                         var oldTray = stack[stack.length-1];
-                        oldTray.tray.appendTo("#editor-stack");
-                        setTimeout(function() {
+                        if (!oldTray.options.overlay) {
+                            oldTray.tray.appendTo("#editor-stack");
+                            setTimeout(function() {
+                                handleWindowResize();
+                                oldTray.tray.css({right:0});
+                                if (oldTray.options.show) {
+                                    oldTray.options.show();
+                                }
+                            },0);
+                        } else {
                             handleWindowResize();
-                            oldTray.tray.css({right:0});
                             if (oldTray.options.show) {
                                 oldTray.options.show();
                             }
-                        },0);
+                        }
                     }
                     if (done) {
                         done();
@@ -13090,7 +15966,7 @@ RED.tray = (function() {
     }
 })();
 ;/**
- * Copyright 2015 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13112,6 +15988,7 @@ RED.clipboard = (function() {
     var dialogContainer;
     var exportNodesDialog;
     var importNodesDialog;
+    var disabled = false;
 
     function setupDialogs() {
         dialog = $('<div id="clipboard-dialog" class="hide node-red-dialog"><form class="dialog-form form-horizontal"></form></div>')
@@ -13219,6 +16096,9 @@ RED.clipboard = (function() {
     }
 
     function importNodes() {
+        if (disabled) {
+            return;
+        }
         dialogContainer.empty();
         dialogContainer.append($(importNodesDialog));
         dialogContainer.i18n();
@@ -13244,13 +16124,19 @@ RED.clipboard = (function() {
     }
 
     function exportNodes() {
+        if (disabled) {
+            return;
+        }
+
         dialogContainer.empty();
         dialogContainer.append($(exportNodesDialog));
         dialogContainer.i18n();
+        var format = RED.settings.flowFilePretty ? "export-format-full" : "export-format-mini";
 
         $("#export-format-group > a").click(function(evt) {
             evt.preventDefault();
             if ($(this).hasClass('disabled') || $(this).hasClass('selected')) {
+                $("#clipboard-export").focus();
                 return;
             }
             $(this).parent().children().removeClass('selected');
@@ -13260,18 +16146,21 @@ RED.clipboard = (function() {
             if (flow.length > 0) {
                 var nodes = JSON.parse(flow);
 
-                var format = $(this).attr('id');
+                format = $(this).attr('id');
                 if (format === 'export-format-full') {
                     flow = JSON.stringify(nodes,null,4);
                 } else {
                     flow = JSON.stringify(nodes);
                 }
                 $("#clipboard-export").val(flow);
+                $("#clipboard-export").focus();
             }
         });
+
         $("#export-range-group > a").click(function(evt) {
             evt.preventDefault();
             if ($(this).hasClass('disabled') || $(this).hasClass('selected')) {
+                $("#clipboard-export").focus();
                 return;
             }
             $(this).parent().children().removeClass('selected');
@@ -13281,7 +16170,8 @@ RED.clipboard = (function() {
             var nodes = null;
             if (type === 'export-range-selected') {
                 var selection = RED.view.selection();
-                nodes = RED.nodes.createExportableNodeSet(selection.nodes);
+                // Don't include the subflow meta-port nodes in the exported selection
+                nodes = RED.nodes.createExportableNodeSet(selection.nodes.filter(function(n) { return n.type !== 'subflow'}));
             } else if (type === 'export-range-flow') {
                 var activeWorkspace = RED.workspaces.active();
                 nodes = RED.nodes.filterNodes({z:activeWorkspace});
@@ -13292,7 +16182,7 @@ RED.clipboard = (function() {
                 nodes = RED.nodes.createCompleteNodeSet(false);
             }
             if (nodes !== null) {
-                if (RED.settings.flowFilePretty) {
+                if (format === "export-format-full") {
                     flow = JSON.stringify(nodes,null,4);
                 } else {
                     flow = JSON.stringify(nodes);
@@ -13304,6 +16194,7 @@ RED.clipboard = (function() {
                 $("#export-copy").addClass('disabled');
             }
             $("#clipboard-export").val(flow);
+            $("#clipboard-export").focus();
         })
 
         $("#clipboard-dialog-ok").hide();
@@ -13317,7 +16208,7 @@ RED.clipboard = (function() {
             $("#export-range-selected").addClass('disabled').removeClass('selected');
             $("#export-range-flow").click();
         }
-        if (RED.settings.flowFilePretty) {
+        if (format === "export-format-full") {
             $("#export-format-full").click();
         } else {
             $("#export-format-mini").click();
@@ -13333,27 +16224,58 @@ RED.clipboard = (function() {
             });
         dialog.dialog("option","title",RED._("clipboard.exportNodes")).dialog( "open" );
 
-        setTimeout(function() {
-            $("#clipboard-export").focus();
-            if (!document.queryCommandEnabled("copy")) {
-                $("#clipboard-dialog-cancel").hide();
-                $("#clipboard-dialog-close").show();
-            } else {
-                $("#clipboard-dialog-cancel").show();
-                $("#clipboard-dialog-copy").show();
-            }
-
-        },0);
+        $("#clipboard-export").focus();
+        if (!document.queryCommandSupported("copy")) {
+            $("#clipboard-dialog-cancel").hide();
+            $("#clipboard-dialog-close").show();
+        } else {
+            $("#clipboard-dialog-cancel").show();
+            $("#clipboard-dialog-copy").show();
+        }
     }
 
     function hideDropTarget() {
         $("#dropTarget").hide();
-        RED.keyboard.remove(/* ESCAPE */ 27);
+        RED.keyboard.remove("escape");
     }
-
+    function copyText(value,element,msg) {
+        var truncated = false;
+        if (typeof value !== "string" ) {
+            value = JSON.stringify(value, function(key,value) {
+                if (value !== null && typeof value === 'object') {
+                    if (value.__encoded__ && value.hasOwnProperty('data') && value.hasOwnProperty('length')) {
+                        truncated = value.data.length !== value.length;
+                        return value.data;
+                    }
+                }
+                return value;
+            });
+        }
+        if (truncated) {
+            msg += "_truncated";
+        }
+        $("#clipboard-hidden").val(value).select();
+        var result =  document.execCommand("copy");
+        if (result && element) {
+            var popover = RED.popover.create({
+                target: element,
+                direction: 'left',
+                size: 'small',
+                content: RED._(msg)
+            });
+            setTimeout(function() {
+                popover.close();
+            },1000);
+            popover.open();
+        }
+        return result;
+    }
     return {
         init: function() {
             setupDialogs();
+
+            $('<input type="text" id="clipboard-hidden">').appendTo("body");
+
             RED.events.on("view:selection-changed",function(selection) {
                 if (!selection.nodes) {
                     RED.menu.setDisabled("menu-item-export",true);
@@ -13365,18 +16287,30 @@ RED.clipboard = (function() {
                     RED.menu.setDisabled("menu-item-export-library",false);
                 }
             });
-            RED.keyboard.add("workspace", /* e */ 69,{ctrl:true},function(){exportNodes();d3.event.preventDefault();});
-            RED.keyboard.add("workspace", /* i */ 73,{ctrl:true},function(){importNodes();d3.event.preventDefault();});
+
+            RED.actions.add("core:show-export-dialog",exportNodes);
+            RED.actions.add("core:show-import-dialog",importNodes);
+
+
+            RED.events.on("editor:open",function() { disabled = true; });
+            RED.events.on("editor:close",function() { disabled = false; });
+            RED.events.on("search:open",function() { disabled = true; });
+            RED.events.on("search:close",function() { disabled = false; });
+            RED.events.on("type-search:open",function() { disabled = true; });
+            RED.events.on("type-search:close",function() { disabled = false; });
+
 
             $('#chart').on("dragenter",function(event) {
-                if ($.inArray("text/plain",event.originalEvent.dataTransfer.types) != -1) {
+                if ($.inArray("text/plain",event.originalEvent.dataTransfer.types) != -1 ||
+                     $.inArray("Files",event.originalEvent.dataTransfer.types) != -1) {
                     $("#dropTarget").css({display:'table'});
-                    RED.keyboard.add("*", /* ESCAPE */ 27,hideDropTarget);
+                    RED.keyboard.add("*", "escape" ,hideDropTarget);
                 }
             });
 
             $('#dropTarget').on("dragover",function(event) {
-                if ($.inArray("text/plain",event.originalEvent.dataTransfer.types) != -1) {
+                if ($.inArray("text/plain",event.originalEvent.dataTransfer.types) != -1 ||
+                     $.inArray("Files",event.originalEvent.dataTransfer.types) != -1) {
                     event.preventDefault();
                 }
             })
@@ -13384,20 +16318,35 @@ RED.clipboard = (function() {
                 hideDropTarget();
             })
             .on("drop",function(event) {
-                var data = event.originalEvent.dataTransfer.getData("text/plain");
+                if ($.inArray("text/plain",event.originalEvent.dataTransfer.types) != -1) {
+                    var data = event.originalEvent.dataTransfer.getData("text/plain");
+                    data = data.substring(data.indexOf('['),data.lastIndexOf(']')+1);
+                    RED.view.importNodes(data);
+                } else if ($.inArray("Files",event.originalEvent.dataTransfer.types) != -1) {
+                    var files = event.originalEvent.dataTransfer.files;
+                    if (files.length === 1) {
+                        var file = files[0];
+                        var reader = new FileReader();
+                        reader.onload = (function(theFile) {
+                            return function(e) {
+                                RED.view.importNodes(e.target.result);
+                            };
+                        })(file);
+                        reader.readAsText(file);
+                    }
+                }
                 hideDropTarget();
-                data = data.substring(data.indexOf('['),data.lastIndexOf(']')+1);
-                RED.view.importNodes(data);
                 event.preventDefault();
             });
 
         },
         import: importNodes,
-        export: exportNodes
+        export: exportNodes,
+        copyText: copyText
     }
 })();
 ;/**
- * Copyright 2013, 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13413,8 +16362,8 @@ RED.clipboard = (function() {
  **/
 RED.library = (function() {
 
-
     var exportToLibraryDialog;
+    var elementPrefix = "node-input-";
 
     function loadFlowLibrary() {
         $.getJSON("library/flows",function(data) {
@@ -13436,7 +16385,7 @@ RED.library = (function() {
                             li.className = "dropdown-submenu pull-left";
                             a = document.createElement("a");
                             a.href="#";
-                            var label = i.replace(/^node-red-contrib-/,"").replace(/^node-red-node-/,"").replace(/-/," ").replace(/_/," ");
+                            var label = i.replace(/^@.*\//,"").replace(/^node-red-contrib-/,"").replace(/^node-red-node-/,"").replace(/-/," ").replace(/_/," ");
                             a.innerHTML = label;
                             li.appendChild(a);
                             li.appendChild(buildMenu(data.d[i],root+(root!==""?"/":"")+i));
@@ -13484,6 +16433,7 @@ RED.library = (function() {
         var libraryData = {};
         var selectedLibraryItem = null;
         var libraryEditor = null;
+        elementPrefix = options.elementPrefix || "node-input-";
 
         // Orion editor has set/getText
         // ACE editor has set/getValue
@@ -13508,7 +16458,7 @@ RED.library = (function() {
         function buildFileList(root,data) {
             var ul = document.createElement("ul");
             var li;
-            for (var i=0;i<data.length;i++) {
+            for (var i=0; i<data.length; i++) {
                 var v = data[i];
                 if (typeof v === "string") {
                     // directory
@@ -13555,16 +16505,14 @@ RED.library = (function() {
             return ul;
         }
 
-        $('#node-input-name').css("width","60%").after(
-            '<div class="btn-group" style="margin-left: 5px;">'+
+        $('#'+elementPrefix+"name").css("width","calc(100% - 52px)").after(
+            '<div class="btn-group" style="margin-left:5px;">'+
             '<a id="node-input-'+options.type+'-lookup" class="editor-button" data-toggle="dropdown"><i class="fa fa-book"></i> <i class="fa fa-caret-down"></i></a>'+
             '<ul class="dropdown-menu pull-right" role="menu">'+
             '<li><a id="node-input-'+options.type+'-menu-open-library" tabindex="-1" href="#">'+RED._("library.openLibrary")+'</a></li>'+
             '<li><a id="node-input-'+options.type+'-menu-save-library" tabindex="-1" href="#">'+RED._("library.saveToLibrary")+'</a></li>'+
             '</ul></div>'
         );
-
-
 
         $('#node-input-'+options.type+'-menu-open-library').click(function(e) {
             $("#node-select-library").children().remove();
@@ -13587,7 +16535,7 @@ RED.library = (function() {
 
         $('#node-input-'+options.type+'-menu-save-library').click(function(e) {
             //var found = false;
-            var name = $("#node-input-name").val().replace(/(^\s*)|(\s*$)/g,"");
+            var name = $("#"+elementPrefix+"name").val().replace(/(^\s*)|(\s*$)/g,"");
 
             //var buildPathList = function(data,root) {
             //    var paths = [];
@@ -13662,9 +16610,9 @@ RED.library = (function() {
                     class: "primary",
                     click: function() {
                         if (selectedLibraryItem) {
-                            for (var i=0;i<options.fields.length;i++) {
+                            for (var i=0; i<options.fields.length; i++) {
                                 var field = options.fields[i];
-                                $("#node-input-"+field).val(selectedLibraryItem[field]);
+                                $("#"+elementPrefix+field).val(selectedLibraryItem[field]);
                             }
                             options.editor.setValue(libraryEditor.getValue(),-1);
                         }
@@ -13686,7 +16634,7 @@ RED.library = (function() {
         });
 
         function saveToLibrary(overwrite) {
-            var name = $("#node-input-name").val().replace(/(^\s*)|(\s*$)/g,"");
+            var name = $("#"+elementPrefix+"name").val().replace(/(^\s*)|(\s*$)/g,"");
             if (name === "") {
                 name = RED._("library.unnamedType",{type:options.type});
             }
@@ -13725,12 +16673,12 @@ RED.library = (function() {
             }
             var queryArgs = [];
             var data = {};
-            for (var i=0;i<options.fields.length;i++) {
+            for (var i=0; i<options.fields.length; i++) {
                 var field = options.fields[i];
                 if (field == "name") {
                     data.name = name;
                 } else {
-                    data[field] = $("#node-input-"+field).val();
+                    data[field] = $("#"+elementPrefix+field).val();
                 }
             }
 
@@ -13808,6 +16756,9 @@ RED.library = (function() {
 
     return {
         init: function() {
+
+            RED.actions.add("core:library-export",exportFlow);
+
             RED.events.on("view:selection-changed",function(selection) {
                 if (!selection.nodes) {
                     RED.menu.setDisabled("menu-item-export",true);
@@ -13889,7 +16840,7 @@ RED.library = (function() {
     }
 })();
 ;/**
- * Copyright 2013, 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13903,10 +16854,49 @@ RED.library = (function() {
  * See the License for the specific language governing permissions and
  * limitations under the License.
  **/
-RED.notify = (function() {
+RED.notifications = (function() {
+
+    /*
+    // Example usage for a modal dialog with buttons
+    var myNotification = RED.notify("This is the message to display",{
+        modal: true,
+        fixed: true,
+        type: 'warning',
+        buttons: [
+            {
+                text: "cancel",
+                click: function(e) {
+                    myNotification.close();
+                }
+            },
+            {
+                text: "okay",
+                class:"primary",
+                click: function(e) {
+                    myNotification.close();
+                }
+            }
+        ]
+    });
+    */
+
+    var persistentNotifications = {};
+
     var currentNotifications = [];
     var c = 0;
-    return function(msg,type,fixed,timeout) {
+    function notify(msg,type,fixed,timeout) {
+        var options = {};
+        if (type !== null && typeof type === 'object') {
+            options = type;
+            fixed = options.fixed;
+            timeout = options.timeout;
+            type = options.type;
+        }
+
+        if (options.modal) {
+            $("#full-shade").show();
+        }
+
         if (currentNotifications.length > 4) {
             var ll = currentNotifications.length;
             for (var i = 0;ll > 4 && i<currentNotifications.length;i+=1) {
@@ -13925,27 +16915,126 @@ RED.notify = (function() {
         if (type) {
             n.className = "notification notification-"+type;
         }
+        if (options.width) {
+            var parentWidth = $("#notifications").width();
+            if (options.width > parentWidth) {
+                var margin = -(options.width-parentWidth)/2;
+                $(n).css({
+                    width: options.width+"px",
+                    marginLeft: margin+"px"
+                })
+            }
+        }
         n.style.display = "none";
-        n.innerHTML = msg;
+        if (typeof msg === "string") {
+            if (!/<p>/i.test(msg)) {
+                msg = "<p>"+msg+"</p>";
+            }
+            n.innerHTML = msg;
+        } else {
+            $(n).append(msg);
+        }
+        if (options.buttons) {
+            var buttonSet = $('<div style="margin-top: 20px;" class="ui-dialog-buttonset"></div>').appendTo(n)
+            options.buttons.forEach(function(buttonDef) {
+                var b = $('<button>').text(buttonDef.text).click(buttonDef.click).appendTo(buttonSet);
+                if (buttonDef.id) {
+                    b.attr('id',buttonDef.id);
+                }
+                if (buttonDef.class) {
+                    b.addClass(buttonDef.class);
+                }
+            })
+        }
+
+
         $("#notifications").append(n);
         $(n).slideDown(300);
         n.close = (function() {
             var nn = n;
             return function() {
+                if (nn.closed) {
+                    return;
+                }
+                nn.closed = true;
                 currentNotifications.splice(currentNotifications.indexOf(nn),1);
+                if (options.id) {
+                    delete persistentNotifications[options.id];
+                    if (Object.keys(persistentNotifications).length === 0) {
+                        notificationButtonWrapper.hide();
+                    }
+                }
                 $(nn).slideUp(300, function() {
                     nn.parentNode.removeChild(nn);
                 });
+                if (options.modal) {
+                    $("#full-shade").hide();
+                }
             };
+        })();
+        n.hideNotification = (function() {
+            var nn = n;
+            return function() {
+                if (nn.closed) {
+                    return
+                }
+                nn.hidden = true;
+                $(nn).slideUp(300);
+            }
+        })();
+        n.showNotification = (function() {
+            var nn = n;
+            return function() {
+                if (nn.closed || !nn.hidden) {
+                    return
+                }
+                nn.hidden = false;
+                $(nn).slideDown(300);
+            }
         })();
 
         n.update = (function() {
             var nn = n;
-            return function(msg) {
-                nn.innerHTML = msg;
+            return function(msg,options) {
+                if (typeof msg === "string") {
+                    if (!/<p>/i.test(msg)) {
+                        msg = "<p>"+msg+"</p>";
+                    }
+                    nn.innerHTML = msg;
+                } else {
+                    $(nn).empty().append(msg);
+                }
+                var timeout;
+                if (typeof options === 'number') {
+                    timeout = options;
+                } else if (options !== undefined) {
+                    timeout = options.timeout;
+                    if (options.buttons) {
+                        var buttonSet = $('<div style="margin-top: 20px;" class="ui-dialog-buttonset"></div>').appendTo(nn)
+                        options.buttons.forEach(function(buttonDef) {
+                            var b = $('<button>').text(buttonDef.text).click(buttonDef.click).appendTo(buttonSet);
+                            if (buttonDef.id) {
+                                b.attr('id',buttonDef.id);
+                            }
+                            if (buttonDef.class) {
+                                b.addClass(buttonDef.class);
+                            }
+                        })
+                    }
+                }
+                if (timeout !== undefined && timeout > 0) {
+                    window.clearTimeout(nn.timeoutid);
+                    nn.timeoutid = window.setTimeout(nn.close,timeout);
+                } else {
+                    window.clearTimeout(nn.timeoutid);
+                }
+                if (nn.hidden) {
+                    nn.showNotification();
+                }
+
             }
         })();
-        
+
         if (!fixed) {
             $(n).click((function() {
                 var nn = n;
@@ -13954,15 +17043,53 @@ RED.notify = (function() {
                     window.clearTimeout(nn.timeoutid);
                 };
             })());
-            n.timeoutid = window.setTimeout(n.close,timeout||3000);
+            n.timeoutid = window.setTimeout(n.close,timeout||5000);
         }
         currentNotifications.push(n);
+        if (options.id) {
+            persistentNotifications[options.id] = n;
+            notificationButtonWrapper.show();
+        }
         c+=1;
         return n;
     }
+
+    RED.notify = notify;
+
+
+    function hidePersistent() {
+        for(var i in persistentNotifications) {
+            if (persistentNotifications.hasOwnProperty(i)) {
+                persistentNotifications[i].hideNotification();
+            }
+        }
+    }
+    function showPersistent() {
+        for(var i in persistentNotifications) {
+            if (persistentNotifications.hasOwnProperty(i)) {
+                persistentNotifications[i].showNotification();
+            }
+        }
+    }
+
+    var notificationButtonWrapper;
+
+    return {
+        init: function() {
+            notificationButtonWrapper = $('<li>'+
+                '<a id="btn-notifications" class="button" href="#">'+
+                '<i class="fa fa-warning"></i>'+
+                '</a>'+
+                '</li>').prependTo(".header-toolbar").hide();
+            $('#btn-notifications').click(function() {
+                showPersistent();
+            })
+        },
+        notify: notify
+    }
 })();
 ;/**
- * Copyright 2013, 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13990,24 +17117,19 @@ RED.search = (function() {
     var results = [];
 
     function indexNode(n) {
-        var l = "";
-        if (n._def && n._def.label) {
-            l = n._def.label;
-            try {
-                l = (typeof l === "function" ? l.call(n) : l);
-                if (l) {
-                    l = (""+l).toLowerCase();
-                    index[l] = index[l] || {};
-                    index[l][n.id] = {node:n,label:l}
-                }
-            } catch(err) {
-                console.log("Definition error: "+n.type+".label",err);
-            }
+        var l = RED.utils.getNodeLabel(n);
+        if (l) {
+            l = (""+l).toLowerCase();
+            index[l] = index[l] || {};
+            index[l][n.id] = {node:n,label:l}
         }
         l = l||n.label||n.name||n.id||"";
 
 
         var properties = ['id','type','name','label','info'];
+        if (n._def && n._def.defaults) {
+            properties = properties.concat(Object.keys(n._def.defaults));
+        }
         for (var i=0;i<properties.length;i++) {
             if (n.hasOwnProperty(properties[i])) {
                 var v = n[properties[i]];
@@ -14093,7 +17215,7 @@ RED.search = (function() {
     function createDialog() {
         dialog = $("<div>",{id:"red-ui-search",class:"red-ui-search"}).appendTo("#main-container");
         var searchDiv = $("<div>",{class:"red-ui-search-container"}).appendTo(dialog);
-        searchInput = $('<input type="text" placeholder="search your flows">').appendTo(searchDiv).searchBox({
+        searchInput = $('<input type="text" data-i18n="[placeholder]menu.label.searchInput">').appendTo(searchDiv).searchBox({
             delay: 200,
             change: function() {
                 search($(this).val());
@@ -14134,6 +17256,7 @@ RED.search = (function() {
                 }
             }
         });
+        searchInput.i18n();
 
         var searchResultsDiv = $("<div>",{class:"red-ui-search-results-container"}).appendTo(dialog);
         searchResults = $('<ol>',{id:"search-result-list", style:"position: absolute;top: 5px;bottom: 5px;left: 5px;right: 5px;"}).appendTo(searchResultsDiv).editableList({
@@ -14141,7 +17264,7 @@ RED.search = (function() {
             addItem: function(container,i,object) {
                 var node = object.node;
                 if (node === undefined) {
-                    $('<div>',{class:"red-ui-search-empty"}).html(RED._('search.empty')).appendTo(container);
+                    $('<div>',{class:"red-ui-search-empty"}).text(RED._('search.empty')).appendTo(container);
 
                 } else {
                     var def = node._def;
@@ -14149,25 +17272,14 @@ RED.search = (function() {
 
                     var nodeDiv = $('<div>',{class:"red-ui-search-result-node"}).appendTo(div);
                     var colour = def.color;
-                    var icon_url = "arrow-in.png";
+                    var icon_url = RED.utils.getNodeIcon(def,node);
                     if (node.type === 'tab') {
                         colour = "#C0DEED";
-                        icon_url = "subflow.png";
-                    } else if (def.category === 'config') {
-                        icon_url = "cog.png";
-                    } else if (node.type === 'unknown') {
-                        icon_url = "alert.png";
-                    } else {
-                        try {
-                            icon_url = (typeof def.icon === "function" ? def.icon.call({}) : def.icon);
-                        } catch(err) {
-                            console.log("Definition error: "+nt+".icon",err);
-                        }
                     }
                     nodeDiv.css('backgroundColor',colour);
 
                     var iconContainer = $('<div/>',{class:"palette_icon_container"}).appendTo(nodeDiv);
-                    $('<div/>',{class:"palette_icon",style:"background-image: url(icons/"+icon_url+")"}).appendTo(iconContainer);
+                    $('<div/>',{class:"palette_icon",style:"background-image: url("+icon_url+")"}).appendTo(iconContainer);
 
                     var contentDiv = $('<div>',{class:"red-ui-search-result-description"}).appendTo(div);
                     if (node.z) {
@@ -14178,12 +17290,12 @@ RED.search = (function() {
                         } else {
                             workspace = "flow:"+workspace.label;
                         }
-                        $('<div>',{class:"red-ui-search-result-node-flow"}).html(workspace).appendTo(contentDiv);
+                        $('<div>',{class:"red-ui-search-result-node-flow"}).text(workspace).appendTo(contentDiv);
                     }
 
-                    $('<div>',{class:"red-ui-search-result-node-label"}).html(object.label || node.id).appendTo(contentDiv);
-                    $('<div>',{class:"red-ui-search-result-node-type"}).html(node.type).appendTo(contentDiv);
-                    $('<div>',{class:"red-ui-search-result-node-id"}).html(node.id).appendTo(contentDiv);
+                    $('<div>',{class:"red-ui-search-result-node-label"}).text(object.label || node.id).appendTo(contentDiv);
+                    $('<div>',{class:"red-ui-search-result-node-type"}).text(node.type).appendTo(contentDiv);
+                    $('<div>',{class:"red-ui-search-result-node-id"}).text(node.id).appendTo(contentDiv);
 
                     div.click(function(evt) {
                         evt.preventDefault();
@@ -14201,8 +17313,11 @@ RED.search = (function() {
     }
 
     function show() {
+        if (disabled) {
+            return;
+        }
         if (!visible) {
-            RED.keyboard.add("*",/* ESCAPE */ 27,function(){hide();d3.event.preventDefault();});
+            RED.keyboard.add("*","escape",function(){hide()});
             $("#header-shade").show();
             $("#editor-shade").show();
             $("#palette-shade").show();
@@ -14212,7 +17327,7 @@ RED.search = (function() {
             if (dialog === null) {
                 createDialog();
             }
-            dialog.slideDown();
+            dialog.slideDown(300);
             RED.events.emit("search:open");
             visible = true;
         }
@@ -14220,7 +17335,7 @@ RED.search = (function() {
     }
     function hide() {
         if (visible) {
-            RED.keyboard.remove(/* ESCAPE */ 27);
+            RED.keyboard.remove("escape");
             visible = false;
             $("#header-shade").hide();
             $("#editor-shade").hide();
@@ -14237,11 +17352,12 @@ RED.search = (function() {
     }
 
     function init() {
-        RED.keyboard.add("*",/* . */ 190,{ctrl:true},function(){if (!disabled) { show(); } d3.event.preventDefault();});
+        RED.actions.add("core:search",show);
+
         RED.events.on("editor:open",function() { disabled = true; });
         RED.events.on("editor:close",function() { disabled = false; });
-        RED.events.on("palette-editor:open",function() { disabled = true; });
-        RED.events.on("palette-editor:close",function() { disabled = false; });
+        RED.events.on("type-search:open",function() { disabled = true; });
+        RED.events.on("type-search:close",function() { disabled = false; });
 
 
 
@@ -14259,7 +17375,7 @@ RED.search = (function() {
 
 })();
 ;/**
- * Copyright 2015 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14399,7 +17515,7 @@ RED.subflow = (function() {
         RED.view.select();
         RED.nodes.dirty(true);
         RED.view.redraw();
-        $("#workspace-subflow-output .spinner-value").html(subflow.out.length);
+        $("#workspace-subflow-output .spinner-value").text(subflow.out.length);
     }
 
     function removeSubflowOutput(removedSubflowOutputs) {
@@ -14476,7 +17592,7 @@ RED.subflow = (function() {
             $("#workspace-subflow-input-add").toggleClass("active", activeSubflow.in.length !== 0);
             $("#workspace-subflow-input-remove").toggleClass("active",activeSubflow.in.length === 0);
 
-            $("#workspace-subflow-output .spinner-value").html(activeSubflow.out.length);
+            $("#workspace-subflow-output .spinner-value").text(activeSubflow.out.length);
         }
     }
 
@@ -14566,50 +17682,13 @@ RED.subflow = (function() {
 
         $("#workspace-subflow-delete").click(function(event) {
             event.preventDefault();
-            var removedNodes = [];
-            var removedLinks = [];
             var startDirty = RED.nodes.dirty();
+            var historyEvent = removeSubflow(RED.workspaces.active());
+            historyEvent.t = 'delete';
+            historyEvent.dirty = startDirty;
 
-            var activeSubflow = getSubflow();
+            RED.history.push(historyEvent);
 
-            RED.nodes.eachNode(function(n) {
-                if (n.type == "subflow:"+activeSubflow.id) {
-                    removedNodes.push(n);
-                }
-                if (n.z == activeSubflow.id) {
-                    removedNodes.push(n);
-                }
-            });
-            RED.nodes.eachConfig(function(n) {
-                if (n.z == activeSubflow.id) {
-                    removedNodes.push(n);
-                }
-            });
-
-            var removedConfigNodes = [];
-            for (var i=0;i<removedNodes.length;i++) {
-                var removedEntities = RED.nodes.remove(removedNodes[i].id);
-                removedLinks = removedLinks.concat(removedEntities.links);
-                removedConfigNodes = removedConfigNodes.concat(removedEntities.nodes);
-            }
-            // TODO: this whole delete logic should be in RED.nodes.removeSubflow..
-            removedNodes = removedNodes.concat(removedConfigNodes);
-
-            RED.nodes.removeSubflow(activeSubflow);
-
-            RED.history.push({
-                    t:'delete',
-                    nodes:removedNodes,
-                    links:removedLinks,
-                    subflow: {
-                        subflow: activeSubflow
-                    },
-                    dirty:startDirty
-            });
-
-            RED.workspaces.remove(activeSubflow);
-            RED.nodes.dirty(true);
-            RED.view.redraw();
         });
 
         refreshToolbar(activeSubflow);
@@ -14622,7 +17701,48 @@ RED.subflow = (function() {
         $("#chart").css({"margin-top": "0"});
     }
 
+    function removeSubflow(id) {
+        var removedNodes = [];
+        var removedLinks = [];
 
+        var activeSubflow = RED.nodes.subflow(id);
+
+        RED.nodes.eachNode(function(n) {
+            if (n.type == "subflow:"+activeSubflow.id) {
+                removedNodes.push(n);
+            }
+            if (n.z == activeSubflow.id) {
+                removedNodes.push(n);
+            }
+        });
+        RED.nodes.eachConfig(function(n) {
+            if (n.z == activeSubflow.id) {
+                removedNodes.push(n);
+            }
+        });
+
+        var removedConfigNodes = [];
+        for (var i=0;i<removedNodes.length;i++) {
+            var removedEntities = RED.nodes.remove(removedNodes[i].id);
+            removedLinks = removedLinks.concat(removedEntities.links);
+            removedConfigNodes = removedConfigNodes.concat(removedEntities.nodes);
+        }
+        // TODO: this whole delete logic should be in RED.nodes.removeSubflow..
+        removedNodes = removedNodes.concat(removedConfigNodes);
+
+        RED.nodes.removeSubflow(activeSubflow);
+        RED.workspaces.remove(activeSubflow);
+        RED.nodes.dirty(true);
+        RED.view.redraw();
+
+        return {
+            nodes:removedNodes,
+            links:removedLinks,
+            subflow: {
+                subflow: activeSubflow
+            }
+        }
+    }
     function init() {
         RED.events.on("workspace:change",function(event) {
             var activeSubflow = RED.nodes.subflow(event.workspace);
@@ -14640,6 +17760,8 @@ RED.subflow = (function() {
             }
         });
 
+        RED.actions.add("core:create-subflow",createSubflow);
+        RED.actions.add("core:convert-to-subflow",convertToSubflow);
     }
 
     function createSubflow() {
@@ -14877,13 +17999,14 @@ RED.subflow = (function() {
         init: init,
         createSubflow: createSubflow,
         convertToSubflow: convertToSubflow,
+        removeSubflow: removeSubflow,
         refresh: refresh,
         removeInput: removeSubflowInput,
         removeOutput: removeSubflowOutput
     }
 })();
 ;/**
- * Copyright 2014 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.

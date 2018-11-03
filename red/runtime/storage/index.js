@@ -1,5 +1,5 @@
 /**
- * Copyright 2013, 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -40,8 +40,8 @@ function moduleSelector(aSettings) {
   return toReturn
 }
 
-function isMalicious(path) {
-  return path.indexOf('../') !== -1 || path.indexOf('..\\') !== -1
+function is_malicious(path) {
+  return path.indexOf('../') != -1 || path.indexOf('..\\') != -1
 }
 
 var storageModuleInterface = {
@@ -58,13 +58,27 @@ var storageModuleInterface = {
     } catch (e) {
       return when.reject(e)
     }
-    return storageModule.init(runtime.settings)
+    if (!!storageModule.projects) {
+      var projectsEnabled = false
+      if (
+        runtime.settings.hasOwnProperty('editorTheme') &&
+        runtime.settings.editorTheme.hasOwnProperty('projects')
+      ) {
+        projectsEnabled = runtime.settings.editorTheme.projects.enabled === true
+      }
+      if (projectsEnabled) {
+        storageModuleInterface.projects = storageModule.projects
+      }
+    }
+    if (storageModule.sshkeys) {
+      storageModuleInterface.sshkeys = storageModule.sshkeys
+    }
+    return storageModule.init(runtime.settings, runtime)
   },
   getFlows: function() {
     return storageModule.getFlows().then(function(flows) {
-      console.log('FLOWS SUCCESS')
       return storageModule.getCredentials().then(function(creds) {
-        console.log('CREDENTIAL SUCCESS', creds)
+        console.log('FLOW & CREDENTIAL SUCCESS')
         var result = {
           flows: flows,
           credentials: creds
@@ -90,12 +104,41 @@ var storageModuleInterface = {
       await storageModule.saveCredentials(alteredCredentials, flows)
     }
     delete config.credentialsDirty
-    return storageModule.saveFlows(flows, credentials, screenshot).then(() => {
-      return crypto
-        .createHash('md5')
-        .update(JSON.stringify(config))
-        .digest('hex')
-    })
+    return storageModule
+      .saveFlows(flows, credentials, screenshot)
+      .then(function(response) {
+        console.log(response, '----------response------------')
+        return crypto
+          .createHash('md5')
+          .update(JSON.stringify(config))
+          .digest('hex')
+      })
+      .catch(function(err) {
+        if (err) {
+          console.log(err, 'save flow error in node red')
+        }
+      })
+    // var flows = config.flows;
+    // var credentials = config.credentials;
+    // var credentialSavePromise;
+    // if (config.credentialsDirty) {
+    //     credentialSavePromise = storageModule.saveCredentials(credentials);
+    // } else {
+    //     credentialSavePromise = when.resolve();
+    // }
+    // delete config.credentialsDirty;
+
+    // return credentialSavePromise.then(function() {
+    //     return storageModule.saveFlows(flows).then(function() {
+    //         return crypto.createHash('md5').update(JSON.stringify(config.flows)).digest("hex");
+    //     })
+    // });
+  },
+  // getCredentials: function() {
+  //     return storageModule.getCredentials();
+  // },
+  saveCredentials: function(credentials) {
+    return storageModule.saveCredentials(credentials)
   },
   getSettings: function() {
     if (settingsAvailable) {
@@ -125,9 +168,11 @@ var storageModuleInterface = {
       return when.resolve()
     }
   },
+
   /* Library Functions */
+
   getLibraryEntry: function(type, path) {
-    if (isMalicious(path)) {
+    if (is_malicious(path)) {
       var err = new Error()
       err.code = 'forbidden'
       return when.reject(err)
@@ -135,7 +180,7 @@ var storageModuleInterface = {
     return storageModule.getLibraryEntry(type, path)
   },
   saveLibraryEntry: function(type, path, meta, body) {
-    if (isMalicious(path)) {
+    if (is_malicious(path)) {
       var err = new Error()
       err.code = 'forbidden'
       return when.reject(err)
@@ -155,7 +200,7 @@ var storageModuleInterface = {
     }
   },
   getFlow: function(fn) {
-    if (isMalicious(fn)) {
+    if (is_malicious(fn)) {
       var err = new Error()
       err.code = 'forbidden'
       return when.reject(err)
@@ -167,7 +212,7 @@ var storageModuleInterface = {
     }
   },
   saveFlow: function(fn, data) {
-    if (isMalicious(fn)) {
+    if (is_malicious(fn)) {
       var err = new Error()
       err.code = 'forbidden'
       return when.reject(err)
@@ -200,14 +245,14 @@ function listFlows(path) {
           if (r.value.fn) {
             var name = r.value.name
             if (!name) {
-              name = r.value.fn.split('.')[0]
+              name = r.value.fn.replace(/\.json$/, '')
             }
             result.f = result.f || []
             result.f.push(name)
           } else {
             result.d = result.d || {}
             result.d[res[i]] = r.value
-            // console.log(">",r.value);
+            //console.log(">",r.value);
           }
           i++
         })

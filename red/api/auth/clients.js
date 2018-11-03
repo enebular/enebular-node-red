@@ -1,5 +1,5 @@
 /**
- * Copyright 2015 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,8 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  **/
- 
-var when = require("when");
 
 var clients = [
     {id:"node-red-editor",secret:"not_available"},
@@ -25,9 +23,9 @@ module.exports = {
     get: function(id) {
         for (var i=0;i<clients.length;i++) {
             if (clients[i].id == id) {
-                return when.resolve(clients[i]);
+                return Promise.resolve(clients[i]);
             }
         }
-        return when.resolve(null);
+        return Promise.resolve(null);
     }
 }

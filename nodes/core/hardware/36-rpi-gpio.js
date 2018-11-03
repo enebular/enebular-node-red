@@ -1,18 +1,3 @@
-/**
- * Copyright 2013,2016 IBM Corp.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- **/
 
 module.exports = function(RED) {
     "use strict";
@@ -22,25 +7,30 @@ module.exports = function(RED) {
 
     var gpioCommand = __dirname+'/nrgpio';
 
-    // try {
-    //     var cpuinfo = fs.readFileSync("/proc/cpuinfo").toString();
-    //     if (cpuinfo.indexOf(": BCM") === -1) { throw "Info : "+RED._("rpi-gpio.errors.ignorenode"); }
-    // } catch(err) {
-    //     throw "Info : "+RED._("rpi-gpio.errors.ignorenode");
-    // }
+    try {
+        var cpuinfo = fs.readFileSync("/proc/cpuinfo").toString();
+        if (cpuinfo.indexOf(": BCM") === -1) { throw "Info : "+RED._("rpi-gpio.errors.ignorenode"); }
+    } catch(err) {
+        throw "Info : "+RED._("rpi-gpio.errors.ignorenode");
+    }
 
-    // try {
-    //     fs.statSync("/usr/share/doc/python-rpi.gpio"); // test on Raspbian
-    //     // /usr/lib/python2.7/dist-packages/RPi/GPIO
-    // } catch(err) {
-    //     try {
-    //         fs.statSync("/usr/lib/python2.7/site-packages/RPi/GPIO"); // test on Arch
-    //     }
-    //     catch(err) {
-    //         RED.log.warn(RED._("rpi-gpio.errors.libnotfound"));
-    //         throw "Warning : "+RED._("rpi-gpio.errors.libnotfound");
-    //     }
-    // }
+    try {
+        fs.statSync("/usr/share/doc/python-rpi.gpio"); // test on Raspbian
+        // /usr/lib/python2.7/dist-packages/RPi/GPIO
+    } catch(err) {
+        try {
+            fs.statSync("/usr/lib/python2.7/site-packages/RPi/GPIO"); // test on Arch
+        }
+        catch(err) {
+            try {
+                fs.statSync("/usr/lib/python2.7/dist-packages/RPi/GPIO"); // test on Hypriot
+            }
+            catch(err) {
+                RED.log.warn(RED._("rpi-gpio.errors.libnotfound"));
+                throw "Warning : "+RED._("rpi-gpio.errors.libnotfound");
+            }
+        }
+    }
 
     if ( !(1 & parseInt((fs.statSync(gpioCommand).mode & parseInt("777", 8)).toString(8)[0]) )) {
         RED.log.error(RED._("rpi-gpio.errors.needtobeexecutable",{command:gpioCommand}));
@@ -79,7 +69,8 @@ module.exports = function(RED) {
             node.child.stdout.on('data', function (data) {
                 var d = data.toString().trim().split("\n");
                 for (var i = 0; i < d.length; i++) {
-                    if (node.running && node.buttonState !== -1 && !isNaN(Number(d[i]))) {
+                    if (d[i] === '') { return; }
+                    if (node.running && node.buttonState !== -1 && !isNaN(Number(d[i])) && node.buttonState !== d[i]) {
                         node.send({ topic:"pi/"+node.pin, payload:Number(d[i]) });
                     }
                     node.buttonState = d[i];
@@ -132,6 +123,7 @@ module.exports = function(RED) {
         this.pin = n.pin;
         this.set = n.set || false;
         this.level = n.level || 0;
+        this.freq = n.freq || 100;
         this.out = n.out || "out";
         var node = this;
         if (!pinsInUse.hasOwnProperty(this.pin)) {
@@ -150,9 +142,9 @@ module.exports = function(RED) {
             var limit = 1;
             if (node.out === "pwm") { limit = 100; }
             if ((out >= 0) && (out <= limit)) {
-                if (RED.settings.verbose) { node.log("out: "+msg.payload); }
+                if (RED.settings.verbose) { node.log("out: "+out); }
                 if (node.child !== null) {
-                    node.child.stdin.write(msg.payload+"\n");
+                    node.child.stdin.write(out+"\n");
                     node.status({fill:"green",shape:"dot",text:msg.payload.toString()});
                 }
                 else {
@@ -168,7 +160,7 @@ module.exports = function(RED) {
                 node.child = spawn(gpioCommand, [node.out,node.pin,node.level]);
                 node.status({fill:"green",shape:"dot",text:node.level});
             } else {
-                node.child = spawn(gpioCommand, [node.out,node.pin]);
+                node.child = spawn(gpioCommand, [node.out,node.pin,node.freq]);
                 node.status({fill:"green",shape:"dot",text:"common.status.ok"});
             }
             node.running = true;

@@ -1,5 +1,5 @@
 /**
- * Copyright 2015 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,8 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  **/
-
-var when = require("when");
 
 function generateToken(length) {
     var c = "ABCDEFGHIJKLMNOPQRSTUZWXYZabcdefghijklmnopqrstuvwxyz1234567890";
@@ -49,7 +47,7 @@ function expireSessions() {
     if (modified) {
         return storage.saveSessions(sessions);
     } else {
-        return when.resolve();
+        return Promise.resolve();
     }
 }
 function loadSessions() {
@@ -69,7 +67,7 @@ module.exports = {
         // At this point, storage will not have been initialised, so defer loading
         // the sessions until there's a request for them.
         loadedSessions = null;
-        return when.resolve();
+        return Promise.resolve();
     },
     get: function(token) {
         return loadSessions().then(function() {
@@ -78,7 +76,7 @@ module.exports = {
                     return expireSessions().then(function() { return null });
                 }
             }
-            return when.resolve(sessions[token]);
+            return Promise.resolve(sessions[token]);
         });
     },
     create: function(user,client,scope) {

@@ -1,5 +1,5 @@
 /**
- * Copyright 2014, 2015 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ var sinon = require("sinon");
 var when = require("when");
 var path = require("path");
 var fs = require('fs');
+var EventEmitter = require('events');
 
 var child_process = require('child_process');
 var installer = require("../../../../../red/runtime/nodes/registry/installer");
@@ -31,6 +32,9 @@ describe('nodes/registry/installer', function() {
         installer.init({});
     });
     afterEach(function() {
+        if (child_process.spawn.restore) {
+            child_process.spawn.restore();
+        }
         if (child_process.execFile.restore) {
             child_process.execFile.restore();
         }
@@ -46,6 +50,9 @@ describe('nodes/registry/installer', function() {
         if (registry.getModuleInfo.restore) {
             registry.getModuleInfo.restore();
         }
+        if (typeRegistry.getModuleInfo.restore) {
+            typeRegistry.getModuleInfo.restore();
+        }
 
         if (require('fs').statSync.restore) {
             require('fs').statSync.restore();
@@ -55,8 +62,15 @@ describe('nodes/registry/installer', function() {
 
     describe("installs module", function() {
         it("rejects when npm returns a 404", function(done) {
-            sinon.stub(child_process,"execFile",function(cmd,args,opt,cb) {
-                cb(new Error(),""," 404  this_wont_exist");
+            sinon.stub(child_process,"spawn",function(cmd,args,opt) {
+                var ee = new EventEmitter();
+                ee.stdout = new EventEmitter();
+                ee.stderr = new EventEmitter();
+                setTimeout(function() {
+                    ee.stderr.emit('data'," 404  this_wont_exist");
+                    ee.emit('close',1);
+                },10)
+                return ee;
             });
 
             installer.installModule("this_wont_exist").otherwise(function(err) {
@@ -64,9 +78,49 @@ describe('nodes/registry/installer', function() {
                 done();
             });
         });
+        it("rejects when npm does not find specified version", function(done) {
+            sinon.stub(child_process,"spawn",function(cmd,args,opt) {
+                var ee = new EventEmitter();
+                ee.stdout = new EventEmitter();
+                ee.stderr = new EventEmitter();
+                setTimeout(function() {
+                    ee.stderr.emit('data'," version not found: this_wont_exist@0.1.2");
+                    ee.emit('close',1);
+                },10)
+                return ee;
+            });
+            sinon.stub(typeRegistry,"getModuleInfo", function() {
+                return {
+                    version: "0.1.1"
+                }
+            });
+
+            installer.installModule("this_wont_exist","0.1.2").otherwise(function(err) {
+                err.code.should.be.eql(404);
+                done();
+            });
+        });
+        it("rejects when update requested to existing version", function(done) {
+            sinon.stub(typeRegistry,"getModuleInfo", function() {
+                return {
+                    version: "0.1.1"
+                }
+            });
+            installer.installModule("this_wont_exist","0.1.1").otherwise(function(err) {
+                err.code.should.be.eql('module_already_loaded');
+                done();
+            });
+        });
         it("rejects with generic error", function(done) {
-            sinon.stub(child_process,"execFile",function(cmd,args,opt,cb) {
-                cb(new Error("test_error"),"","");
+            sinon.stub(child_process,"spawn",function(cmd,args,opt,cb) {
+                var ee = new EventEmitter();
+                ee.stdout = new EventEmitter();
+                ee.stderr = new EventEmitter();
+                setTimeout(function() {
+                    ee.stderr.emit('data'," kaboom!");
+                    ee.emit('close',1);
+                },10)
+                return ee;
             });
 
             installer.installModule("this_wont_exist").then(function() {
@@ -77,8 +131,14 @@ describe('nodes/registry/installer', function() {
         });
         it("succeeds when module is found", function(done) {
             var nodeInfo = {nodes:{module:"foo",types:["a"]}};
-            sinon.stub(child_process,"execFile",function(cmd,args,opt,cb) {
-                cb(null,"","");
+            sinon.stub(child_process,"spawn",function(cmd,args,opt) {
+                var ee = new EventEmitter();
+                ee.stdout = new EventEmitter();
+                ee.stderr = new EventEmitter();
+                setTimeout(function() {
+                    ee.emit('close',0);
+                },10)
+                return ee;
             });
             var addModule = sinon.stub(registry,"addModule",function(md) {
                 return when.resolve(nodeInfo);
@@ -95,12 +155,20 @@ describe('nodes/registry/installer', function() {
             });
         });
         it("rejects when non-existant path is provided", function(done) {
+            this.timeout(10000);
             var resourcesDir = path.resolve(path.join(__dirname,"..","resources","local","TestNodeModule","node_modules","NonExistant"));
             installer.installModule(resourcesDir).then(function() {
                 done(new Error("Unexpected success"));
             }).otherwise(function(err) {
-                err.code.should.eql(404);
-                done();
+                if (err.hasOwnProperty("code")) {
+                    err.code.should.eql(404);
+                    done();
+                }
+                else {
+                    console.log("ERRROR::"+err.toString()+"::");
+                    err.toString().should.eql("Error: Install failed");
+                    done();
+                }
             });
         });
         it("succeeds when path is valid node-red module", function(done) {
@@ -109,8 +177,14 @@ describe('nodes/registry/installer', function() {
                 return when.resolve(nodeInfo);
             });
             var resourcesDir = path.resolve(path.join(__dirname,"..","resources","local","TestNodeModule","node_modules","TestNodeModule"));
-            sinon.stub(child_process,"execFile",function(cmd,args,opt,cb) {
-                cb(null,"","");
+            sinon.stub(child_process,"spawn",function(cmd,args,opt) {
+                var ee = new EventEmitter();
+                ee.stdout = new EventEmitter();
+                ee.stderr = new EventEmitter();
+                setTimeout(function() {
+                    ee.emit('close',0);
+                },10)
+                return ee;
             });
             installer.installModule(resourcesDir).then(function(info) {
                 info.should.eql(nodeInfo);

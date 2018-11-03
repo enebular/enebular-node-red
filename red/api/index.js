@@ -1,5 +1,5 @@
 /**
- * Copyright 2014, 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,312 +14,102 @@
  * limitations under the License.
  **/
 
-var express = require('express')
-var bodyParser = require('body-parser')
-var util = require('util')
-var path = require('path')
-var passport = require('passport')
-var when = require('when')
-var cors = require('cors')
+var express = require("express");
+var bodyParser = require("body-parser");
+var util = require('util');
+var passport = require('passport');
+var when = require('when');
+var cors = require('cors');
 
-var ui = require('./ui')
-var nodes = require('./nodes')
-var flows = require('./flows')
-var flow = require('./flow')
-var library = require('./library')
-var info = require('./info')
-var theme = require('./theme')
-var locales = require('./locales')
-var credentials = require('./credentials')
-var comms = require('./comms')
+var auth = require("./auth");
+var apiUtil = require("./util");
 
-var auth = require('./auth')
-var needsPermission = auth.needsPermission
+var adminApp;
+var server;
+var runtime;
+var editor;
 
-var i18n
-var log
-var adminApp
-var nodeApp
-var server
-var runtime
+function init(_server,_runtime) {
+    server = _server;
+    runtime = _runtime;
+    var settings = runtime.settings;
+    if (settings.httpAdminRoot !== false) {
+        apiUtil.init(runtime);
+        adminApp = express();
+        auth.init(runtime);
 
-var errorHandler = function(err, req, res, next) {
-  if (err.message === 'request entity too large') {
-    log.error(err)
-  } else {
-    console.log(err.stack)
-  }
-  log.audit(
-    {
-      event: 'api.error',
-      error: err.code || 'unexpected_error',
-      message: err.toString()
-    },
-    req
-  )
-  res.status(400).json({ error: 'unexpected_error', message: err.toString() })
-}
+        var maxApiRequestSize = settings.apiMaxLength || '5mb';
+        adminApp.use(bodyParser.json({limit:maxApiRequestSize}));
+        adminApp.use(bodyParser.urlencoded({limit:maxApiRequestSize,extended:true}));
 
-var ensureRuntimeStarted = function(req, res, next) {
-  if (!runtime.isStarted()) {
-    log.error('Node-RED runtime not started')
-    res.status(503).send('Not started')
-  } else {
-    next()
-  }
-}
+        adminApp.get("/auth/login",auth.login,apiUtil.errorHandler);
+        if (settings.adminAuth) {
+            if (settings.adminAuth.type === "strategy") {
+                auth.genericStrategy(adminApp,settings.adminAuth.strategy);
+            } else if (settings.adminAuth.type === "credentials") {
+                adminApp.use(passport.initialize());
+                adminApp.post("/auth/token",
+                    auth.ensureClientSecret,
+                    auth.authenticateClient,
+                    auth.getToken,
+                    auth.errorHandler
+                );
+            }
+            adminApp.post("/auth/revoke",auth.needsPermission(""),auth.revoke,apiUtil.errorHandler);
+        }
 
-function init(_server, _runtime) {
-  server = _server
-  runtime = _runtime
-  var settings = runtime.settings
-  i18n = runtime.i18n
-  log = runtime.log
-  if (settings.httpNodeRoot !== false) {
-    nodeApp = express()
-  }
-  if (settings.httpAdminRoot !== false) {
-    comms.init(server, runtime)
-    adminApp = express()
-    auth.init(runtime)
-    credentials.init(runtime)
-    flows.init(runtime)
-    flow.init(runtime)
-    info.init(runtime)
-    library.init(adminApp, runtime)
-    locales.init(runtime)
-    nodes.init(runtime)
+        // Editor
+        if (!settings.disableEditor) {
+            editor = require("./editor");
+            var editorApp = editor.init(server, runtime);
+            adminApp.use(editorApp);
+        }
 
-    // Editor
-    if (!settings.disableEditor) {
-      ui.init(runtime)
-      var editorApp = express()
-      if (settings.requireHttps === true) {
-        editorApp.enable('trust proxy')
-        editorApp.use(function(req, res, next) {
-          if (req.secure) {
-            next()
-          } else {
-            res.redirect('https://' + req.headers.host + req.originalUrl)
-          }
-        })
-      }
-      editorApp.get('/', ensureRuntimeStarted, ui.ensureSlash, ui.editor)
-      editorApp.get('/icons/:icon', ui.icon)
-      theme.init(runtime)
-      if (settings.editorTheme) {
-        editorApp.use('/theme', theme.app())
-      }
-      editorApp.use('/', ui.editorResources)
-      adminApp.use(editorApp)
+        if (settings.httpAdminCors) {
+            var corsHandler = cors(settings.httpAdminCors);
+            adminApp.use(corsHandler);
+        }
+
+        var adminApiApp = require("./admin").init(runtime);
+        adminApp.use(adminApiApp);
+    } else {
+        adminApp = null;
     }
-    var maxApiRequestSize = settings.apiMaxLength || '5mb'
-    adminApp.use(bodyParser.json({ limit: maxApiRequestSize }))
-    adminApp.use(
-      bodyParser.urlencoded({ limit: maxApiRequestSize, extended: true })
-    )
-
-    adminApp.get('/auth/login', auth.login, errorHandler)
-
-    if (settings.adminAuth) {
-      //TODO: all passport references ought to be in ./auth
-      adminApp.use(passport.initialize())
-      adminApp.post(
-        '/auth/token',
-        auth.ensureClientSecret,
-        auth.authenticateClient,
-        auth.getToken,
-        auth.errorHandler
-      )
-      adminApp.post(
-        '/auth/revoke',
-        needsPermission(''),
-        auth.revoke,
-        errorHandler
-      )
-    }
-    if (settings.httpAdminCors) {
-      var corsHandler = cors(settings.httpAdminCors)
-      adminApp.use(corsHandler)
-    }
-
-    var inNodeReading = function(req, res, next) {
-      console.log('-------------in node read getall')
-      next()
-    }
-    var inLibrary = function(req, res, next) {
-      console.log('--------- in library/flows')
-      next()
-    }
-
-    var inGetdatFlow = function(req, res, next) {
-      console.log('------------in /flows read get')
-      next()
-    }
-    // Flows
-    adminApp.get(
-      '/flows',
-      needsPermission('flows.read'),
-      inGetdatFlow,
-      flows.get,
-      errorHandler
-    )
-    adminApp.post(
-      '/flows',
-      needsPermission('flows.write'),
-      flows.post,
-      errorHandler
-    )
-
-    adminApp.get(
-      '/flow/:id',
-      needsPermission('flows.read'),
-      flow.get,
-      errorHandler
-    )
-    adminApp.post(
-      '/flow',
-      needsPermission('flows.write'),
-      flow.post,
-      errorHandler
-    )
-    adminApp.delete(
-      '/flow/:id',
-      needsPermission('flows.write'),
-      flow.delete,
-      errorHandler
-    )
-    adminApp.put(
-      '/flow/:id',
-      needsPermission('flows.write'),
-      flow.put,
-      errorHandler
-    )
-
-    // Nodes
-    adminApp.get(
-      '/nodes',
-      needsPermission('nodes.read'),
-      inNodeReading,
-      nodes.getAll,
-      errorHandler
-    )
-    adminApp.post(
-      '/nodes',
-      needsPermission('nodes.write'),
-      nodes.post,
-      errorHandler
-    )
-
-    adminApp.get(
-      /\/nodes\/((@[^\/]+\/)?[^\/]+)$/,
-      needsPermission('nodes.read'),
-      nodes.getModule,
-      errorHandler
-    )
-    adminApp.put(
-      /\/nodes\/((@[^\/]+\/)?[^\/]+)$/,
-      needsPermission('nodes.write'),
-      nodes.putModule,
-      errorHandler
-    )
-    adminApp.delete(
-      /\/nodes\/((@[^\/]+\/)?[^\/]+)$/,
-      needsPermission('nodes.write'),
-      nodes.delete,
-      errorHandler
-    )
-
-    adminApp.get(
-      /\/nodes\/((@[^\/]+\/)?[^\/]+)\/([^\/]+)$/,
-      needsPermission('nodes.read'),
-      nodes.getSet,
-      errorHandler
-    )
-    adminApp.put(
-      /\/nodes\/((@[^\/]+\/)?[^\/]+)\/([^\/]+)$/,
-      needsPermission('nodes.write'),
-      nodes.putSet,
-      errorHandler
-    )
-
-    adminApp.get(
-      '/credentials/:type/:id',
-      needsPermission('credentials.read'),
-      credentials.get,
-      errorHandler
-    )
-
-    adminApp.get(/locales\/(.+)\/?$/, locales.get, errorHandler)
-
-    // Library
-    adminApp.post(
-      new RegExp('/library/flows/(.*)'),
-      needsPermission('library.write'),
-      library.post,
-      errorHandler
-    )
-    adminApp.get(
-      '/library/flows',
-      needsPermission('library.read'),
-      inLibrary,
-      library.getAll,
-      errorHandler
-    )
-    adminApp.get(
-      new RegExp('/library/flows/(.*)'),
-      needsPermission('library.read'),
-      library.get,
-      errorHandler
-    )
-
-    // Settings
-    adminApp.get(
-      '/settings',
-      needsPermission('settings.read'),
-      info.settings,
-      errorHandler
-    )
-
-    // Error Handler
-    //adminApp.use(errorHandler);
-  }
 }
 function start() {
-  return i18n
-    .registerMessageCatalog(
-      'editor',
-      path.resolve(path.join(__dirname, 'locales')),
-      'editor.json'
-    )
-    .then(function() {
-      comms.start()
-    })
+    if (editor) {
+        return editor.start();
+    } else {
+        return when.resolve();
+    }
 }
 function stop() {
-  comms.stop()
-  return when.resolve()
+    if (editor) {
+        editor.stop();
+    }
+    return when.resolve();
 }
 module.exports = {
-  init: init,
-  start: start,
-  stop: stop,
-  library: {
-    register: library.register
-  },
-  auth: {
-    needsPermission: auth.needsPermission
-  },
-  comms: {
-    publish: comms.publish
-  },
-  get adminApp() {
-    return adminApp
-  },
-  get nodeApp() {
-    return nodeApp
-  },
-  get server() {
-    return server
-  }
-}
+    init: init,
+    start: start,
+    stop: stop,
+    library: {
+        register: function(type) {
+            if (editor) {
+                editor.registerLibrary(type);
+            }
+        }
+    },
+    auth: {
+        needsPermission: auth.needsPermission
+    },
+    comms: {
+        publish: function(topic,data,retain) {
+            if (editor) {
+                editor.publish(topic,data,retain);
+            }
+        }
+    },
+    get adminApp() { return adminApp; },
+    get server() { return server; }
+};

@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,13 +14,16 @@
  * limitations under the License.
  **/
 
+#user-settings-tab-palette {
+    height: 100%;
+}
+
 #palette-editor {
     text-align: left;
-    display: none;
     position: absolute;
     top: 0px;
     right: 0;
-    bottom: 25px;
+    bottom: 0;
     left:0;
     padding: 0;
     box-sizing:border-box;
@@ -46,12 +49,17 @@
                 .palette-module-version {
                     color: #aaa;
                 }
-
+                .palette-module-errors .fa-warning {
+                    opacity: 0.5;
+                }
+                ul.palette-module-error-list li {
+                    color: #aaa;
+                }
 
 
             }
             .red-ui-editableList-item-content {
-                padding: 12px 8px;
+                padding: 12px 16px;
             }
             &:last-child {
                 // border-bottom: 1px solid $primary-border-color;
@@ -61,7 +69,7 @@
     }
     .palette-editor-tab {
         position:absolute;
-        top:115px;
+        top:35px;
         left:0;
         right:0;
         bottom:0
@@ -72,57 +80,9 @@
         padding: 8px 10px;
         border-bottom: 1px solid $primary-border-color;
         text-align: right;
-
-        .button-group {
-            margin-right: 10px;
-        }
-    }
-    .palette-module-button-group {
-        position: absolute;
-        right: 0;
-        bottom: 0;
-        a {
-            margin-left: 5px;
-        }
-    }
-    .palette-module-shade {
-        position: absolute;
-        top: 0;
-        bottom:0;
-        left:0;
-        right:0;
-        background: $shade-color;
-        text-align: center;
-        padding-top: 20px;
-    }
-    #palette-module-install-shade {
-        padding-top: 80px;
     }
     .palette-module-shade-status {
         color: #666;
-    }
-
-    .palette-module-meta {
-        color: #666;
-        position: relative;
-        &.disabled {
-            color: #ccc;
-        }
-
-        .fa {
-            width: 15px;
-            text-align: center;
-            margin-right: 5px;
-        }
-    }
-    .palette-module-name {
-        white-space: nowrap;
-        @include enable-selection;
-    }
-    .palette-module-version, .palette-module-updated, .palette-module-link {
-        font-style:italic;
-        font-size: 0.8em;
-        @include enable-selection;
     }
     .palette-module-updated {
         margin-left: 10px;
@@ -229,4 +189,63 @@
         }
     }
 
+}
+.palette-module-meta {
+    color: #666;
+    position: relative;
+    &.disabled {
+        color: #ccc;
+    }
+
+    .fa {
+        width: 15px;
+        text-align: center;
+        margin-right: 5px;
+    }
+}
+.palette-module-name {
+    white-space: nowrap;
+    @include enable-selection;
+}
+.palette-module-version, .palette-module-updated, .palette-module-link {
+    font-style:italic;
+    font-size: 0.8em;
+    @include enable-selection;
+}
+.palette-module-section {
+    padding:0 !important;
+    background: #f9f9f9 !important;
+    font-size: 0.9em;
+    color: #666;
+
+}
+.palette-module-button-group {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    a {
+        margin-left: 5px;
+    }
+}
+.palette-module-meta .fa-warning {
+    color: #AD1625;
+}
+ul.palette-module-error-list {
+    display: inline-block;
+    list-style-type: none;
+    margin: 0;
+    font-size: 0.9em;
+    li {
+        border: none;
+        background: none;
+    }
+}
+
+.palette-module-shade {
+    @include shade;
+    text-align: center;
+    padding-top: 20px;
+}
+#palette-module-install-shade {
+    padding-top: 80px;
 }

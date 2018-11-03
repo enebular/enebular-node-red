@@ -1,5 +1,5 @@
 /**
- * Copyright 2013, 2015 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@
 
 @import "jquery";
 @import "bootstrap";
+@import "ace";
 
 @import "dropdownMenu";
 
@@ -36,6 +37,7 @@
 @import "library";
 @import "search";
 
+@import "panels";
 @import "tabs";
 @import "tab-config";
 @import "tab-info";
@@ -44,15 +46,23 @@
 @import "palette-editor";
 @import "diff";
 
+@import "userSettings";
+
+@import "projects";
+
 
 @import "ui/common/editableList";
 @import "ui/common/searchBox";
 @import "ui/common/typedInput";
+@import "ui/common/nodeList";
+@import "ui/common/checkboxSet";
+@import "ui/common/stack";
 
 @import "dragdrop";
 
 @import "keyboard";
 
+@import "debug";
 
 body {
     font-size: 14px;
@@ -118,4 +128,8 @@ pre code {
   white-space: pre-wrap;
   background-color: transparent;
   border: 0;
+}
+
+.hide {
+    display: none;
 }

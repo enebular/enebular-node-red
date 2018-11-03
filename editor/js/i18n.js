@@ -1,5 +1,5 @@
 /**
- * Copyright 2013, 2015 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,11 +19,11 @@ RED.i18n = (function() {
     return {
         init: function(done) {
             i18n.init({
-                resGetPath: 'locales/__ns__',
+                resGetPath: 'locales/__ns__?lng=__lng__',
                 dynamicLoad: false,
                 load:'current',
                 ns: {
-                    namespaces: ["editor","node-red"],
+                    namespaces: ["editor","node-red","jsonata","infotips"],
                     defaultNs: "editor"
                 },
                 fallbackLng: ['en-US'],
@@ -37,7 +37,50 @@ RED.i18n = (function() {
 
         },
         loadCatalog: function(namespace,done) {
-            i18n.loadNamespace(namespace,done);
+            var languageList = i18n.functions.toLanguages(i18n.detectLanguage());
+            var toLoad = languageList.length;
+            languageList.forEach(function(lang) {
+                $.ajax({
+                    headers: {
+                        "Accept":"application/json"
+                    },
+                    cache: false,
+                    url: 'locales/'+namespace+'?lng='+lang,
+                    success: function(data) {
+                        i18n.addResourceBundle(lang,namespace,data);
+                        toLoad--;
+                        if (toLoad === 0) {
+                            done();
+                        }
+                    }
+                });
+            })
+
+        },
+
+        loadNodeCatalogs: function(done) {
+            var languageList = i18n.functions.toLanguages(i18n.detectLanguage());
+            var toLoad = languageList.length;
+
+            languageList.forEach(function(lang) {
+                $.ajax({
+                    headers: {
+                        "Accept":"application/json"
+                    },
+                    cache: false,
+                    url: 'locales/nodes?lng='+lang,
+                    success: function(data) {
+                        var namespaces = Object.keys(data);
+                        namespaces.forEach(function(ns) {
+                            i18n.addResourceBundle(lang,ns,data[ns]);
+                        });
+                        toLoad--;
+                        if (toLoad === 0) {
+                            done();
+                        }
+                    }
+                });
+            })
         }
     }
 })();

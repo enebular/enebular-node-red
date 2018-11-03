@@ -1,5 +1,5 @@
 /**
- * Copyright 2015 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,59 +15,129 @@
  **/
 
 RED.popover = (function() {
-
-
+    var deltaSizes = {
+        "default": {
+            top: 10,
+            leftRight: 17,
+            leftLeft: 25
+        },
+        "small": {
+            top: 5,
+            leftRight: 17,
+            leftLeft: 16
+        }
+    }
     function createPopover(options) {
         var target = options.target;
-
+        var direction = options.direction || "right";
+        var trigger = options.trigger;
         var content = options.content;
         var delay = options.delay;
+        var autoClose = options.autoClose;
+        var width = options.width||"auto";
+        var size = options.size||"default";
+        if (!deltaSizes[size]) {
+            throw new Error("Invalid RED.popover size value:",size);
+        }
+
         var timer = null;
         var active;
         var div;
 
-        var openPopup = function() {
+        var openPopup = function(instant) {
             if (active) {
-                div = $('<div class="red-ui-popover"></div>').html(content).appendTo("body");
+                div = $('<div class="red-ui-popover red-ui-popover-'+direction+'"></div>').appendTo("body");
+                if (size !== "default") {
+                    div.addClass("red-ui-popover-size-"+size);
+                }
+                if (typeof content === 'function') {
+                    content.call(res).appendTo(div);
+                } else {
+                    div.html(content);
+                }
+                if (width !== "auto") {
+                    div.width(width);
+                }
+
+
                 var targetPos = target.offset();
                 var targetWidth = target.width();
                 var targetHeight = target.height();
-
                 var divHeight = div.height();
-                div.css({top: targetPos.top+targetHeight/2-divHeight/2-10,left:targetPos.left+targetWidth+17});
-
-                div.fadeIn("fast");
+                var divWidth = div.width();
+                if (direction === 'right') {
+                    div.css({top: targetPos.top+targetHeight/2-divHeight/2-deltaSizes[size].top,left:targetPos.left+targetWidth+deltaSizes[size].leftRight});
+                } else if (direction === 'left') {
+                    div.css({top: targetPos.top+targetHeight/2-divHeight/2-deltaSizes[size].top,left:targetPos.left-deltaSizes[size].leftLeft-divWidth});
+                }
+                if (instant) {
+                    div.show();
+                } else {
+                    div.fadeIn("fast");
+                }
             }
         }
-        var closePopup = function() {
+        var closePopup = function(instant) {
             if (!active) {
                 if (div) {
-                    div.fadeOut("fast",function() {
+                    if (instant) {
                         $(this).remove();
-                    });
+                    } else {
+                        div.fadeOut("fast",function() {
+                            $(this).remove();
+                        });
+                    }
                     div = null;
                 }
             }
         }
 
-        target.on('mouseenter',function(e) {
-            clearTimeout(timer);
-            active = true;
-            timer = setTimeout(openPopup,delay.show);
-        });
-        target.on('mouseleave', function(e) {
-            if (timer) {
+        if (trigger === 'hover') {
+            target.on('mouseenter',function(e) {
                 clearTimeout(timer);
-            }
-            active = false;
-            setTimeout(closePopup,delay.hide);
-        });
+                active = true;
+                timer = setTimeout(openPopup,delay.show);
+            });
+            target.on('mouseleave', function(e) {
+                if (timer) {
+                    clearTimeout(timer);
+                }
+                active = false;
+                setTimeout(closePopup,delay.hide);
+            });
+        } else if (trigger === 'click') {
+            target.click(function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                active = !active;
+                if (!active) {
+                    closePopup();
+                } else {
+                    openPopup();
+                }
+            });
+        } else if (autoClose) {
+            setTimeout(function() {
+                active = false;
+                closePopup();
+            },autoClose);
+        }
         var res = {
             setContent: function(_content) {
                 content = _content;
+                return res;
+            },
+            open: function (instant) {
+                active = true;
+                openPopup(instant);
+                return res;
+            },
+            close: function (instant) {
+                active = false;
+                closePopup(instant);
+                return res;
             }
         }
-        target.data('popover',res);
         return res;
 
     }

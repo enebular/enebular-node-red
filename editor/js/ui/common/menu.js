@@ -1,5 +1,5 @@
 /**
- * Copyright 2014, 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,9 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  **/
-
-
-
 RED.menu = (function() {
 
     var menuItems = {};
@@ -31,20 +28,30 @@ RED.menu = (function() {
         }
 
         function setInitialState() {
-            var savedStateActive = isSavedStateActive(opt.id);
+            var savedStateActive = RED.settings.get("menu-" + opt.id);
+            if (opt.setting) {
+                // May need to migrate pre-0.17 setting
+
+                if (savedStateActive !== null) {
+                    RED.settings.set(opt.setting,savedStateActive);
+                    RED.settings.remove("menu-" + opt.id);
+                } else {
+                    savedStateActive = RED.settings.get(opt.setting);
+                }
+            }
             if (savedStateActive) {
                 link.addClass("active");
-                opt.onselect.call(opt, true);
+                triggerAction(opt.id,true);
             } else if (savedStateActive === false) {
                 link.removeClass("active");
-                opt.onselect.call(opt, false);
+                triggerAction(opt.id,false);
             } else if (opt.hasOwnProperty("selected")) {
                 if (opt.selected) {
                     link.addClass("active");
                 } else {
                     link.removeClass("active");
                 }
-                opt.onselect.call(opt, opt.selected);
+                triggerAction(opt.id,opt.selected);
             }
         }
 
@@ -85,7 +92,8 @@ RED.menu = (function() {
             menuItems[opt.id] = opt;
 
             if (opt.onselect) {
-                link.click(function() {
+                link.click(function(e) {
+                    e.preventDefault();
                     if ($(this).parent().hasClass("disabled")) {
                         return;
                     }
@@ -107,10 +115,12 @@ RED.menu = (function() {
                             setSelected(opt.id, !selected);
                         }
                     } else {
-                        opt.onselect.call(opt);
+                        triggerAction(opt.id);
                     }
                 });
-                setInitialState();
+                if (opt.toggle) {
+                    setInitialState();
+                }
             } else if (opt.href) {
                 link.attr("target","_blank").attr("href",opt.href);
             } else if (!opt.options) {
@@ -141,15 +151,13 @@ RED.menu = (function() {
     }
     function createMenu(options) {
 
-        var button = $("#"+options.id);
+        var menuParent = $("#"+options.id);
 
-        //button.click(function(event) {
-        //    $("#"+options.id+"-submenu").show();
-        //    event.preventDefault();
-        //});
+        var topMenu = $("<ul/>",{id:options.id+"-submenu", class:"dropdown-menu pull-right"});
 
-
-        var topMenu = $("<ul/>",{id:options.id+"-submenu", class:"dropdown-menu pull-right"}).insertAfter(button);
+        if (menuParent.length === 1) {
+            topMenu.insertAfter(menuParent);
+        }
 
         var lastAddedSeparator = false;
         for (var i=0;i<options.options.length;i++) {
@@ -162,18 +170,25 @@ RED.menu = (function() {
                 }
             }
         }
+
+        return topMenu;
     }
 
-    function isSavedStateActive(id) {
-        return RED.settings.get("menu-" + id);
+    function triggerAction(id, args) {
+        var opt = menuItems[id];
+        var callback = opt.onselect;
+        if (typeof opt.onselect === 'string') {
+            callback = RED.actions.get(opt.onselect);
+        }
+        if (callback) {
+            callback.call(opt,args);
+        } else {
+            console.log("No callback for",id,opt.onselect);
+        }
     }
 
     function isSelected(id) {
         return $("#" + id).hasClass("active");
-    }
-
-    function setSavedState(id, state) {
-        RED.settings.set("menu-" + id, state);
     }
 
     function setSelected(id,state) {
@@ -187,9 +202,13 @@ RED.menu = (function() {
             $("#"+id).removeClass("active");
         }
         if (opt && opt.onselect) {
-            opt.onselect.call(opt,state);
+            triggerAction(opt.id,state);
         }
-        setSavedState(id, state);
+        RED.settings.set(opt.setting||("menu-"+opt.id), state);
+    }
+
+    function toggleSelected(id) {
+        setSelected(id,!isSelected(id));
     }
 
     function setDisabled(id,state) {
@@ -231,16 +250,6 @@ RED.menu = (function() {
         var opt = menuItems[id];
         if (opt) {
             opt.onselect = action;
-            // $("#"+id).click(function() {
-            //     if ($(this).parent().hasClass("disabled")) {
-            //         return;
-            //     }
-            //     if (menuItems[id].toggle) {
-            //         setSelected(id,!isSelected(id));
-            //     } else {
-            //         menuItems[id].onselect.call(menuItems[id]);
-            //     }
-            // });
         }
     }
 
@@ -248,6 +257,7 @@ RED.menu = (function() {
         init: createMenu,
         setSelected: setSelected,
         isSelected: isSelected,
+        toggleSelected: toggleSelected,
         setDisabled: setDisabled,
         addItem: addItem,
         removeItem: removeItem,

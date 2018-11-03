@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,6 +30,17 @@ RED.palette.editor = (function() {
     var nodeEntries = {};
     var eventTimers = {};
     var activeFilter = "";
+
+    function semVerCompare(A,B) {
+        var aParts = A.split(".").map(function(m) { return parseInt(m);});
+        var bParts = B.split(".").map(function(m) { return parseInt(m);});
+        for (var i=0;i<3;i++) {
+            var j = aParts[i]-bParts[i];
+            if (j<0) { return -1 }
+            if (j>0) { return 1 }
+        }
+        return 0;
+    }
 
     function delayCallback(start,callback) {
         var delta = Date.now() - start;
@@ -64,20 +75,21 @@ RED.palette.editor = (function() {
             });
         })
     }
-    function installNodeModule(id,shade,callback) {
-        shade.show();
+    function installNodeModule(id,version,callback) {
+        var requestBody = {
+            module: id
+        };
+        if (version) {
+            requestBody.version = version;
+        }
         $.ajax({
             url:"nodes",
             type: "POST",
-            data: JSON.stringify({
-                module: id
-            }),
+            data: JSON.stringify(requestBody),
             contentType: "application/json; charset=utf-8"
         }).done(function(data,textStatus,xhr) {
-            shade.hide();
             callback();
         }).fail(function(xhr,textStatus,err) {
-            shade.hide();
             callback(xhr);
         });
     }
@@ -189,16 +201,15 @@ RED.palette.editor = (function() {
                 }
             }
             nodeEntries[module].index = index.join(",").toLowerCase();
-
             nodeList.editableList('addItem', nodeEntries[module]);
-            //console.log(nodeList.editableList('items'));
-
         } else {
             var moduleInfo = nodeEntries[module].info;
             var nodeEntry = nodeEntries[module].elements;
             if (nodeEntry) {
                 var activeTypeCount = 0;
                 var typeCount = 0;
+                var errorCount = 0;
+                nodeEntry.errorList.empty();
                 nodeEntries[module].totalUseCount = 0;
                 nodeEntries[module].setUseCount = {};
 
@@ -207,7 +218,10 @@ RED.palette.editor = (function() {
                         var inUseCount = 0;
                         var set = moduleInfo.sets[setName];
                         var setElements = nodeEntry.sets[setName];
-
+                        if (set.err) {
+                            errorCount++;
+                            $("<li>").text(set.err).appendTo(nodeEntry.errorList);
+                        }
                         if (set.enabled) {
                             activeTypeCount += set.types.length;
                         }
@@ -233,93 +247,60 @@ RED.palette.editor = (function() {
                         nodeEntries[module].totalUseCount += inUseCount;
 
                         if (inUseCount > 0) {
-                            setElements.enableButton.html(RED._('palette.editor.inuse'));
+                            setElements.enableButton.text(RED._('palette.editor.inuse'));
                             setElements.enableButton.addClass('disabled');
                         } else {
                             setElements.enableButton.removeClass('disabled');
                             if (set.enabled) {
-                                setElements.enableButton.html(RED._('palette.editor.disable'));
+                                setElements.enableButton.text(RED._('palette.editor.disable'));
                             } else {
-                                setElements.enableButton.html(RED._('palette.editor.enable'));
+                                setElements.enableButton.text(RED._('palette.editor.enable'));
                             }
                         }
                         setElements.setRow.toggleClass("palette-module-set-disabled",!set.enabled);
                     }
                 }
+
+                if (errorCount === 0) {
+                    nodeEntry.errorRow.hide()
+                } else {
+                    nodeEntry.errorRow.show();
+                }
+
                 var nodeCount = (activeTypeCount === typeCount)?typeCount:activeTypeCount+" / "+typeCount;
-                nodeEntry.setCount.html(RED._('palette.editor.nodeCount',{count:typeCount,label:nodeCount}));
+                nodeEntry.setCount.text(RED._('palette.editor.nodeCount',{count:typeCount,label:nodeCount}));
 
                 if (nodeEntries[module].totalUseCount > 0) {
-                    nodeEntry.enableButton.html(RED._('palette.editor.inuse'));
+                    nodeEntry.enableButton.text(RED._('palette.editor.inuse'));
                     nodeEntry.enableButton.addClass('disabled');
                     nodeEntry.removeButton.hide();
                 } else {
                     nodeEntry.enableButton.removeClass('disabled');
                     if (moduleInfo.local) {
-                        nodeEntry.removeButton.show();
+                        nodeEntry.removeButton.css('display', 'inline-block');
                     }
                     if (activeTypeCount === 0) {
-                        nodeEntry.enableButton.html(RED._('palette.editor.enableall'));
+                        nodeEntry.enableButton.text(RED._('palette.editor.enableall'));
                     } else {
-                        nodeEntry.enableButton.html(RED._('palette.editor.disableall'));
+                        nodeEntry.enableButton.text(RED._('palette.editor.disableall'));
                     }
                     nodeEntry.container.toggleClass("disabled",(activeTypeCount === 0));
                 }
             }
-
-            nodeEntry.updateButton.hide();
-            // if (loadedIndex.hasOwnProperty(module)) {
-            //     if (moduleInfo.version !== loadedIndex[module].version) {
-            //         nodeEntry.updateButton.show();
-            //         nodeEntry.updateButton.html(RED._('palette.editor.update',{version:loadedIndex[module].version}));
-            //     } else {
-            //         nodeEntry.updateButton.hide();
-            //     }
-            //
-            // } else {
-            //     nodeEntry.updateButton.hide();
-            // }
+            if (moduleInfo.pending_version) {
+                nodeEntry.versionSpan.html(moduleInfo.version+' <i class="fa fa-long-arrow-right"></i> '+moduleInfo.pending_version).appendTo(nodeEntry.metaRow)
+                nodeEntry.updateButton.text(RED._('palette.editor.updated')).addClass('disabled').show();
+            } else if (loadedIndex.hasOwnProperty(module)) {
+                if (semVerCompare(loadedIndex[module].version,moduleInfo.version) === 1) {
+                    nodeEntry.updateButton.show();
+                    nodeEntry.updateButton.text(RED._('palette.editor.update',{version:loadedIndex[module].version}));
+                } else {
+                    nodeEntry.updateButton.hide();
+                }
+            } else {
+                nodeEntry.updateButton.hide();
+            }
         }
-
-    }
-    function showPaletteEditor() {
-        if (RED.settings.theme('palette.editable') === false) {
-            return;
-        }
-        if (disabled) {
-            return;
-        }
-
-        initInstallTab();
-        $("#header-shade").show();
-        $("#editor-shade").show();
-        $("#sidebar-shade").show();
-        $("#sidebar-separator").hide();
-
-        editorTabs.activateTab('nodes');
-
-        $("#main-container").addClass("palette-expanded");
-        setTimeout(function() {
-            editorTabs.resize();
-            filterInput.focus();
-        },250);
-        RED.events.emit("palette-editor:open");
-        RED.keyboard.add("*",/* ESCAPE */ 27,function(){hidePaletteEditor();d3.event.preventDefault();});
-    }
-    function hidePaletteEditor() {
-        RED.keyboard.remove("*");
-        $("#main-container").removeClass("palette-expanded");
-        $("#header-shade").hide();
-        $("#editor-shade").hide();
-        $("#sidebar-shade").hide();
-        $("#sidebar-separator").show();
-        $("#palette-editor").find('.expanded').each(function(i,el) {
-            $(el).find(".palette-module-content").slideUp();
-            $(el).removeClass('expanded');
-        });
-        filterInput.searchBox('value',"");
-        searchInput.searchBox('value',"");
-        RED.events.emit("palette-editor:close");
 
     }
 
@@ -338,36 +319,45 @@ RED.palette.editor = (function() {
     var catalogueCount;
     var catalogueLoadStatus = [];
     var catalogueLoadStart;
+    var catalogueLoadErrors = false;
 
     var activeSort = sortModulesAZ;
 
-    function handleCatalogResponse(catalog,index,v) {
-        catalogueLoadStatus.push(v);
-        if (v.modules) {
-            v.modules.forEach(function(m) {
-                loadedIndex[m.id] = m;
-                m.index = [m.id];
-                if (m.keywords) {
-                    m.index = m.index.concat(m.keywords);
-                }
-                if (m.updated_at) {
-                    m.timestamp = new Date(m.updated_at).getTime();
-                } else {
-                    m.timestamp = 0;
-                }
-                m.index = m.index.join(",").toLowerCase();
-            })
-            loadedList = loadedList.concat(v.modules);
+    function handleCatalogResponse(err,catalog,index,v) {
+        catalogueLoadStatus.push(err||v);
+        if (!err) {
+            if (v.modules) {
+                v.modules.forEach(function(m) {
+                    loadedIndex[m.id] = m;
+                    m.index = [m.id];
+                    if (m.keywords) {
+                        m.index = m.index.concat(m.keywords);
+                    }
+                    if (m.updated_at) {
+                        m.timestamp = new Date(m.updated_at).getTime();
+                    } else {
+                        m.timestamp = 0;
+                    }
+                    m.index = m.index.join(",").toLowerCase();
+                })
+                loadedList = loadedList.concat(v.modules);
+            }
+            searchInput.searchBox('count',loadedList.length);
+        } else {
+            catalogueLoadErrors = true;
         }
-        searchInput.searchBox('count',loadedList.length);
         if (catalogueCount > 1) {
             $(".palette-module-shade-status").html(RED._('palette.editor.loading')+"<br>"+catalogueLoadStatus.length+"/"+catalogueCount);
         }
         if (catalogueLoadStatus.length === catalogueCount) {
+            if (catalogueLoadErrors) {
+                RED.notify(RED._('palette.editor.errors.catalogLoadFailed',{url: catalog}),"error",false,8000);
+            }
             var delta = 250-(Date.now() - catalogueLoadStart);
             setTimeout(function() {
                 $("#palette-module-install-shade").hide();
             },Math.max(delta,0));
+
         }
     }
 
@@ -376,19 +366,29 @@ RED.palette.editor = (function() {
             loadedList = [];
             loadedIndex = {};
             packageList.editableList('empty');
-            $(".palette-module-shade-status").html(RED._('palette.editor.loading'));
+
+            $(".palette-module-shade-status").text(RED._('palette.editor.loading'));
             var catalogues = RED.settings.theme('palette.catalogues')||['https://catalogue.nodered.org/catalogue.json'];
             catalogueLoadStatus = [];
+            catalogueLoadErrors = false;
             catalogueCount = catalogues.length;
             if (catalogues.length > 1) {
                 $(".palette-module-shade-status").html(RED._('palette.editor.loading')+"<br>0/"+catalogues.length);
             }
             $("#palette-module-install-shade").show();
             catalogueLoadStart = Date.now();
+            var handled = 0;
             catalogues.forEach(function(catalog,index) {
                 $.getJSON(catalog, {_: new Date().getTime()},function(v) {
-                    handleCatalogResponse(catalog,index,v);
+                    handleCatalogResponse(null,catalog,index,v);
                     refreshNodeModuleList();
+                }).fail(function(jqxhr, textStatus, error) {
+                    handleCatalogResponse(jqxhr,catalog,index);
+                }).always(function() {
+                    handled++;
+                    if (handled === catalogueCount) {
+                        searchInput.searchBox('change');
+                    }
                 })
             });
         }
@@ -396,6 +396,11 @@ RED.palette.editor = (function() {
 
     function refreshFilteredItems() {
         packageList.editableList('empty');
+        var currentFilter = searchInput.searchBox('value').trim();
+        if (currentFilter === ""){
+            packageList.editableList('addItem',{count:loadedList.length})
+            return;
+        }
         filteredList.sort(activeSort);
         for (var i=0;i<Math.min(10,filteredList.length);i++) {
             packageList.editableList('addItem',filteredList[i]);
@@ -415,22 +420,123 @@ RED.palette.editor = (function() {
         return -1 * (A.info.timestamp-B.info.timestamp);
     }
 
+
     function init() {
         if (RED.settings.theme('palette.editable') === false) {
             return;
         }
+        createSettingsPane();
 
-        RED.events.on("editor:open",function() { disabled = true; });
-        RED.events.on("editor:close",function() { disabled = false; });
-        RED.events.on("search:open",function() { disabled = true; });
-        RED.events.on("search:close",function() { disabled = false; });
+        RED.userSettings.add({
+            id:'palette',
+            title: RED._("palette.editor.palette"),
+            get: getSettingsPane,
+            close: function() {
+                settingsPane.detach();
+            },
+            focus: function() {
+                editorTabs.resize();
+                setTimeout(function() {
+                    filterInput.focus();
+                },200);
+            }
+        })
 
-        RED.keyboard.add("*", /* p */ 80,{shift:true,ctrl:true},function() {RED.palette.editor.show();d3.event.preventDefault();});
+        RED.actions.add("core:manage-palette",function() {
+                RED.userSettings.show('palette');
+            });
+
+        RED.events.on('registry:module-updated', function(ns) {
+            refreshNodeModule(ns.module);
+        });
+        RED.events.on('registry:node-set-enabled', function(ns) {
+            refreshNodeModule(ns.module);
+        });
+        RED.events.on('registry:node-set-disabled', function(ns) {
+            refreshNodeModule(ns.module);
+        });
+        RED.events.on('registry:node-type-added', function(nodeType) {
+            if (!/^subflow:/.test(nodeType)) {
+                var ns = RED.nodes.registry.getNodeSetForType(nodeType);
+                refreshNodeModule(ns.module);
+            }
+        });
+        RED.events.on('registry:node-type-removed', function(nodeType) {
+            if (!/^subflow:/.test(nodeType)) {
+                var ns = RED.nodes.registry.getNodeSetForType(nodeType);
+                refreshNodeModule(ns.module);
+            }
+        });
+        RED.events.on('registry:node-set-added', function(ns) {
+            refreshNodeModule(ns.module);
+            for (var i=0;i<filteredList.length;i++) {
+                if (filteredList[i].info.id === ns.module) {
+                    var installButton = filteredList[i].elements.installButton;
+                    installButton.addClass('disabled');
+                    installButton.text(RED._('palette.editor.installed'));
+                    break;
+                }
+            }
+        });
+        RED.events.on('registry:node-set-removed', function(ns) {
+            var module = RED.nodes.registry.getModule(ns.module);
+            if (!module) {
+                var entry = nodeEntries[ns.module];
+                if (entry) {
+                    nodeList.editableList('removeItem', entry);
+                    delete nodeEntries[ns.module];
+                    for (var i=0;i<filteredList.length;i++) {
+                        if (filteredList[i].info.id === ns.module) {
+                            var installButton = filteredList[i].elements.installButton;
+                            installButton.removeClass('disabled');
+                            installButton.text(RED._('palette.editor.install'));
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+        RED.events.on('nodes:add', function(n) {
+            if (!/^subflow:/.test(n.type)) {
+                typesInUse[n.type] = (typesInUse[n.type]||0)+1;
+                if (typesInUse[n.type] === 1) {
+                    var ns = RED.nodes.registry.getNodeSetForType(n.type);
+                    refreshNodeModule(ns.module);
+                }
+            }
+        })
+        RED.events.on('nodes:remove', function(n) {
+            if (typesInUse.hasOwnProperty(n.type)) {
+                typesInUse[n.type]--;
+                if (typesInUse[n.type] === 0) {
+                    delete typesInUse[n.type];
+                    var ns = RED.nodes.registry.getNodeSetForType(n.type);
+                    refreshNodeModule(ns.module);
+                }
+            }
+        })
+    }
+
+    var settingsPane;
+
+    function getSettingsPane() {
+        initInstallTab();
+        editorTabs.activateTab('nodes');
+        return settingsPane;
+    }
+
+
+
+    function createSettingsPane() {
+        settingsPane = $('<div id="user-settings-tab-palette"></div>');
+        var content = $('<div id="palette-editor">'+
+            '<ul id="palette-editor-tabs"></ul>'+
+        '</div>').appendTo(settingsPane);
 
         editorTabs = RED.tabs.create({
-            id:"palette-editor-tabs",
+            element: settingsPane.find('#palette-editor-tabs'),
             onchange:function(tab) {
-                $("#palette-editor .palette-editor-tab").hide();
+                content.find(".palette-editor-tab").hide();
                 tab.content.show();
                 if (filterInput) {
                     filterInput.searchBox('value',"");
@@ -452,17 +558,7 @@ RED.palette.editor = (function() {
         });
 
 
-        $("#editor-shade").click(function() {
-            if ($("#main-container").hasClass("palette-expanded")) {
-                hidePaletteEditor();
-            }
-        });
-
-        $("#palette-editor-close").on("click", function(e) {
-            hidePaletteEditor();
-        })
-
-        var modulesTab = $('<div>',{class:"palette-editor-tab"}).appendTo("#palette-editor");
+        var modulesTab = $('<div>',{class:"palette-editor-tab"}).appendTo(content);
 
         editorTabs.addTab({
             id: 'nodes',
@@ -499,32 +595,38 @@ RED.palette.editor = (function() {
                 if (entry) {
                     var headerRow = $('<div>',{class:"palette-module-header"}).appendTo(container);
                     var titleRow = $('<div class="palette-module-meta palette-module-name"><i class="fa fa-cube"></i></div>').appendTo(headerRow);
-                    $('<span>').html(entry.name).appendTo(titleRow);
+                    $('<span>').text(entry.name).appendTo(titleRow);
                     var metaRow = $('<div class="palette-module-meta palette-module-version"><i class="fa fa-tag"></i></div>').appendTo(headerRow);
-                    $('<span>').html(entry.version).appendTo(metaRow);
+                    var versionSpan = $('<span>').text(entry.version).appendTo(metaRow);
+
+                    var errorRow = $('<div class="palette-module-meta palette-module-errors"><i class="fa fa-warning"></i></div>').hide().appendTo(headerRow);
+                    var errorList = $('<ul class="palette-module-error-list"></ul>').appendTo(errorRow);
                     var buttonRow = $('<div>',{class:"palette-module-meta"}).appendTo(headerRow);
                     var setButton = $('<a href="#" class="editor-button editor-button-small palette-module-set-button"><i class="fa fa-angle-right palette-module-node-chevron"></i> </a>').appendTo(buttonRow);
                     var setCount = $('<span>').appendTo(setButton);
                     var buttonGroup = $('<div>',{class:"palette-module-button-group"}).appendTo(buttonRow);
 
-                    var updateButton = $('<a href="#" class="editor-button editor-button-small"></a>').html(RED._('palette.editor.update')).appendTo(buttonGroup);
+                    var updateButton = $('<a href="#" class="editor-button editor-button-small"></a>').text(RED._('palette.editor.update')).appendTo(buttonGroup);
+                    updateButton.attr('id','up_'+Math.floor(Math.random()*1000000000));
                     updateButton.click(function(evt) {
                         evt.preventDefault();
+                        if ($(this).hasClass('disabled')) {
+                            return;
+                        }
+                        update(entry,loadedIndex[entry.name].version,container,function(err){});
                     })
 
 
-                    var removeButton = $('<a href="#" class="editor-button editor-button-small"></a>').html(RED._('palette.editor.remove')).appendTo(buttonGroup);
+                    var removeButton = $('<a href="#" class="editor-button editor-button-small"></a>').text(RED._('palette.editor.remove')).appendTo(buttonGroup);
+                    removeButton.attr('id','up_'+Math.floor(Math.random()*1000000000));
                     removeButton.click(function(evt) {
                         evt.preventDefault();
-                        shade.show();
-                        removeNodeModule(entry.name, function(xhr) {
-                            console.log(xhr);
-                        })
+                        remove(entry,container,function(err){});
                     })
                     if (!entry.local) {
                         removeButton.hide();
                     }
-                    var enableButton = $('<a href="#" class="editor-button editor-button-small"></a>').html(RED._('palette.editor.disableall')).appendTo(buttonGroup);
+                    var enableButton = $('<a href="#" class="editor-button editor-button-small"></a>').text(RED._('palette.editor.disableall')).appendTo(buttonGroup);
 
                     var contentRow = $('<div>',{class:"palette-module-content"}).appendTo(container);
                     var shade = $('<div class="palette-module-shade hide"><img src="red/images/spin.svg" class="palette-spinner"/></div>').appendTo(container);
@@ -533,9 +635,12 @@ RED.palette.editor = (function() {
                         updateButton: updateButton,
                         removeButton: removeButton,
                         enableButton: enableButton,
+                        errorRow: errorRow,
+                        errorList: errorList,
                         setCount: setCount,
                         container: container,
                         shade: shade,
+                        versionSpan: versionSpan,
                         sets: {}
                     }
                     setButton.click(function(evt) {
@@ -561,17 +666,21 @@ RED.palette.editor = (function() {
                         set.types.forEach(function(t) {
                             var typeDiv = $('<div>',{class:"palette-module-type"}).appendTo(setRow);
                             typeSwatches[t] = $('<span>',{class:"palette-module-type-swatch"}).appendTo(typeDiv);
-                            $('<span>',{class:"palette-module-type-node"}).html(t).appendTo(typeDiv);
+                            $('<span>',{class:"palette-module-type-node"}).text(t).appendTo(typeDiv);
                         })
-
                         var enableButton = $('<a href="#" class="editor-button editor-button-small"></a>').appendTo(buttonGroup);
                         enableButton.click(function(evt) {
                             evt.preventDefault();
                             if (object.setUseCount[setName] === 0) {
                                 var currentSet = RED.nodes.registry.getNodeSet(set.id);
                                 shade.show();
-                                changeNodeState(set.id,!currentSet.enabled,shade,function(xhr){
-                                    console.log(xhr)
+                                var newState = !currentSet.enabled
+                                changeNodeState(set.id,newState,shade,function(xhr){
+                                    if (xhr) {
+                                        if (xhr.responseJSON) {
+                                            RED.notify(RED._('palette.editor.errors.'+(newState?'enable':'disable')+'Failed',{module: id,message:xhr.responseJSON.message}));
+                                        }
+                                    }
                                 });
                             }
                         })
@@ -586,20 +695,24 @@ RED.palette.editor = (function() {
                         evt.preventDefault();
                         if (object.totalUseCount === 0) {
                             changeNodeState(entry.name,(container.hasClass('disabled')),shade,function(xhr){
-                                console.log(xhr)
+                                if (xhr) {
+                                    if (xhr.responseJSON) {
+                                        RED.notify(RED._('palette.editor.errors.installFailed',{module: id,message:xhr.responseJSON.message}));
+                                    }
+                                }
                             });
                         }
                     })
                     refreshNodeModule(entry.name);
                 } else {
-                    $('<div>',{class:"red-ui-search-empty"}).html(RED._('search.empty')).appendTo(container);
+                    $('<div>',{class:"red-ui-search-empty"}).text(RED._('search.empty')).appendTo(container);
                 }
             }
         });
 
 
 
-        var installTab = $('<div>',{class:"palette-editor-tab hide"}).appendTo("#palette-editor");
+        var installTab = $('<div>',{class:"palette-editor-tab hide"}).appendTo(content);
 
         editorTabs.addTab({
             id: 'install',
@@ -615,7 +728,7 @@ RED.palette.editor = (function() {
             .searchBox({
                 delay: 300,
                 change: function() {
-                    var searchTerm = $(this).val().toLowerCase();
+                    var searchTerm = $(this).val().trim().toLowerCase();
                     if (searchTerm.length > 0) {
                         filteredList = loadedList.filter(function(m) {
                             return (m.index.indexOf(searchTerm) > -1);
@@ -625,13 +738,15 @@ RED.palette.editor = (function() {
                     } else {
                         searchInput.searchBox('count',loadedList.length);
                         packageList.editableList('empty');
+                        packageList.editableList('addItem',{count:loadedList.length});
+
                     }
                 }
             });
 
 
-        $('<span>').html(RED._("palette.editor.sort")+' ').appendTo(toolBar);
-        var sortGroup = $('<span class="button-group"></span> ').appendTo(toolBar);
+        $('<span>').text(RED._("palette.editor.sort")+' ').appendTo(toolBar);
+        var sortGroup = $('<span class="button-group"></span>').appendTo(toolBar);
         var sortAZ = $('<a href="#" class="sidebar-header-button-toggle selected" data-i18n="palette.editor.sortAZ"></a>').appendTo(sortGroup);
         var sortRecent = $('<a href="#" class="sidebar-header-button-toggle" data-i18n="palette.editor.sortRecent"></a>').appendTo(sortGroup);
 
@@ -668,138 +783,185 @@ RED.palette.editor = (function() {
         })
 
         packageList = $('<ol>',{style:"position: absolute;top: 78px;bottom: 0;left: 0;right: 0px;"}).appendTo(installTab).editableList({
-           addButton: false,
-           scrollOnAdd: false,
-           addItem: function(container,i,object) {
+            addButton: false,
+            scrollOnAdd: false,
+            addItem: function(container,i,object) {
+                if (object.count) {
+                    $('<div>',{class:"red-ui-search-empty"}).text(RED._('palette.editor.moduleCount',{count:object.count})).appendTo(container);
+                    return
+                }
+                if (object.more) {
+                    container.addClass('palette-module-more');
+                    var moreRow = $('<div>',{class:"palette-module-header palette-module"}).appendTo(container);
+                    var moreLink = $('<a href="#"></a>').text(RED._('palette.editor.more',{count:object.more})).appendTo(moreRow);
+                    moreLink.click(function(e) {
+                        e.preventDefault();
+                        packageList.editableList('removeItem',object);
+                        for (var i=object.start;i<Math.min(object.start+10,object.start+object.more);i++) {
+                            packageList.editableList('addItem',filteredList[i]);
+                        }
+                        if (object.more > 10) {
+                            packageList.editableList('addItem',{start:object.start+10, more:object.more-10})
+                        }
+                    })
+                    return;
+                }
+                if (object.info) {
+                    var entry = object.info;
+                    var headerRow = $('<div>',{class:"palette-module-header"}).appendTo(container);
+                    var titleRow = $('<div class="palette-module-meta"><i class="fa fa-cube"></i></div>').appendTo(headerRow);
+                    $('<span>',{class:"palette-module-name"}).text(entry.name||entry.id).appendTo(titleRow);
+                    $('<a target="_blank" class="palette-module-link"><i class="fa fa-external-link"></i></a>').attr('href',entry.url).appendTo(titleRow);
+                    var descRow = $('<div class="palette-module-meta"></div>').appendTo(headerRow);
+                    $('<div>',{class:"palette-module-description"}).text(entry.description).appendTo(descRow);
 
-               if (object.more) {
-                   container.addClass('palette-module-more');
-                   var moreRow = $('<div>',{class:"palette-module-header palette-module"}).appendTo(container);
-                   var moreLink = $('<a href="#"></a>').html(RED._('palette.editor.more',{count:object.more})).appendTo(moreRow);
-                   moreLink.click(function(e) {
-                       e.preventDefault();
-                       packageList.editableList('removeItem',object);
-                       for (var i=object.start;i<Math.min(object.start+10,object.start+object.more);i++) {
-                           packageList.editableList('addItem',filteredList[i]);
-                       }
-                       if (object.more > 10) {
-                           packageList.editableList('addItem',{start:object.start+10, more:object.more-10})
-                       }
-                   })
-                   return;
-               }
-               if (object.info) {
-                   var entry = object.info;
-                   var headerRow = $('<div>',{class:"palette-module-header"}).appendTo(container);
-                   var titleRow = $('<div class="palette-module-meta"><i class="fa fa-cube"></i></div>').appendTo(headerRow);
-                   $('<span>',{class:"palette-module-name"}).html(entry.name||entry.id).appendTo(titleRow);
-                   $('<a target="_blank" class="palette-module-link"><i class="fa fa-external-link"></i></a>').attr('href',entry.url).appendTo(titleRow);
-                   var descRow = $('<div class="palette-module-meta"></div>').appendTo(headerRow);
-                   $('<div>',{class:"palette-module-description"}).html(entry.description).appendTo(descRow);
+                    var metaRow = $('<div class="palette-module-meta"></div>').appendTo(headerRow);
+                    $('<span class="palette-module-version"><i class="fa fa-tag"></i> '+entry.version+'</span>').appendTo(metaRow);
+                    $('<span class="palette-module-updated"><i class="fa fa-calendar"></i> '+formatUpdatedAt(entry.updated_at)+'</span>').appendTo(metaRow);
+                    var buttonRow = $('<div>',{class:"palette-module-meta"}).appendTo(headerRow);
+                    var buttonGroup = $('<div>',{class:"palette-module-button-group"}).appendTo(buttonRow);
+                    var installButton = $('<a href="#" class="editor-button editor-button-small"></a>').text(RED._('palette.editor.install')).appendTo(buttonGroup);
+                    installButton.click(function(e) {
+                        e.preventDefault();
+                        if (!$(this).hasClass('disabled')) {
+                            install(entry,container,function(xhr) {});
+                        }
+                    })
+                    if (nodeEntries.hasOwnProperty(entry.id)) {
+                        installButton.addClass('disabled');
+                        installButton.text(RED._('palette.editor.installed'));
+                    }
 
-                   var metaRow = $('<div class="palette-module-meta"></div>').appendTo(headerRow);
-                   $('<span class="palette-module-version"><i class="fa fa-tag"></i> '+entry.version+'</span>').appendTo(metaRow);
-                   $('<span class="palette-module-updated"><i class="fa fa-calendar"></i> '+formatUpdatedAt(entry.updated_at)+'</span>').appendTo(metaRow);
-                   var buttonRow = $('<div>',{class:"palette-module-meta"}).appendTo(headerRow);
-                   var buttonGroup = $('<div>',{class:"palette-module-button-group"}).appendTo(buttonRow);
-                   var shade = $('<div class="palette-module-shade hide"><img src="red/images/spin.svg" class="palette-spinner"/></div>').appendTo(container);
-                   var installButton = $('<a href="#" class="editor-button editor-button-small"></a>').html(RED._('palette.editor.install')).appendTo(buttonGroup);
-                   installButton.click(function(e) {
-                       e.preventDefault();
-                       if (!$(this).hasClass('disabled')) {
-                           installNodeModule(entry.id,shade,function(xhr) {
-                               if (xhr) {
-                                   if (xhr.responseJSON) {
-                                       RED.notify(RED._('palette.editor.errors.installFailed',{module: entry.id,message:xhr.responseJSON.message}));
-                                   }
-                               }
-                           })
-                       }
-                   })
-                   if (nodeEntries.hasOwnProperty(entry.id)) {
-                       installButton.addClass('disabled');
-                       installButton.html(RED._('palette.editor.installed'));
-                   }
-
-                   object.elements = {
-                       installButton:installButton
-                   }
-               } else {
-                   $('<div>',{class:"red-ui-search-empty"}).html(RED._('search.empty')).appendTo(container);
-               }
-           }
-       });
-
-       $('<div id="palette-module-install-shade" class="palette-module-shade hide"><div class="palette-module-shade-status"></div><img src="red/images/spin.svg" class="palette-spinner"/></div>').appendTo(installTab);
-
-        RED.events.on('registry:node-set-enabled', function(ns) {
-            refreshNodeModule(ns.module);
-        });
-        RED.events.on('registry:node-set-disabled', function(ns) {
-            refreshNodeModule(ns.module);
-        });
-        RED.events.on('registry:node-type-added', function(nodeType) {
-            if (!/^subflow:/.test(nodeType)) {
-                var ns = RED.nodes.registry.getNodeSetForType(nodeType);
-                refreshNodeModule(ns.module);
-            }
-        });
-        RED.events.on('registry:node-type-removed', function(nodeType) {
-            if (!/^subflow:/.test(nodeType)) {
-                var ns = RED.nodes.registry.getNodeSetForType(nodeType);
-                refreshNodeModule(ns.module);
-            }
-        });
-        RED.events.on('registry:node-set-added', function(ns) {
-            refreshNodeModule(ns.module);
-            for (var i=0;i<filteredList.length;i++) {
-                if (filteredList[i].info.id === ns.module) {
-                    filteredList[i].elements.installButton.hide();
-                    break;
+                    object.elements = {
+                        installButton:installButton
+                    }
+                } else {
+                    $('<div>',{class:"red-ui-search-empty"}).text(RED._('search.empty')).appendTo(container);
                 }
             }
         });
-        RED.events.on('registry:node-set-removed', function(ns) {
-            var module = RED.nodes.registry.getModule(ns.module);
-            if (!module) {
-                var entry = nodeEntries[ns.module];
-                if (entry) {
-                    nodeList.editableList('removeItem', entry);
-                    delete nodeEntries[ns.module];
-                    for (var i=0;i<filteredList.length;i++) {
-                        if (filteredList[i].info.id === ns.module) {
-                            filteredList[i].elements.installButton.show();
-                            break;
-                        }
+
+        $('<div id="palette-module-install-shade" class="palette-module-shade hide"><div class="palette-module-shade-status"></div><img src="red/images/spin.svg" class="palette-spinner"/></div>').appendTo(installTab);
+    }
+    function update(entry,version,container,done) {
+        if (RED.settings.theme('palette.editable') === false) {
+            done(new Error('Palette not editable'));
+            return;
+        }
+        var notification = RED.notify(RED._("palette.editor.confirm.update.body",{module:entry.name}),{
+            modal: true,
+            fixed: true,
+            buttons: [
+                {
+                    text: RED._("common.label.cancel"),
+                    click: function() {
+                        notification.close();
+                    }
+                },
+                {
+                    text: RED._("palette.editor.confirm.button.update"),
+                    class: "primary palette-module-install-confirm-button-update",
+                    click: function() {
+                        var spinner = RED.utils.addSpinnerOverlay(container, true);
+                        installNodeModule(entry.name,version,function(xhr) {
+                            spinner.remove();
+                            if (xhr) {
+                                if (xhr.responseJSON) {
+                                    RED.notify(RED._('palette.editor.errors.updateFailed',{module: entry.name,message:xhr.responseJSON.message}));
+                                }
+                            }
+                            done(xhr);
+                        });
+                        notification.close();
                     }
                 }
+            ]
+        })
+    }
+    function remove(entry,container,done) {
+        if (RED.settings.theme('palette.editable') === false) {
+            done(new Error('Palette not editable'));
+            return;
+        }
+        var notification = RED.notify(RED._("palette.editor.confirm.remove.body",{module:entry.name}),{
+            modal: true,
+            fixed: true,
+            buttons: [
+                {
+                    text: RED._("common.label.cancel"),
+                    click: function() {
+                        notification.close();
+                    }
+                },
+                {
+                    text: RED._("palette.editor.confirm.button.remove"),
+                    class: "primary palette-module-install-confirm-button-remove",
+                    click: function() {
+                        var spinner = RED.utils.addSpinnerOverlay(container, true);
+                        removeNodeModule(entry.name, function(xhr) {
+                            spinner.remove();
+                            if (xhr) {
+                                if (xhr.responseJSON) {
+                                    RED.notify(RED._('palette.editor.errors.removeFailed',{module: entry.name,message:xhr.responseJSON.message}));
+                                }
+                            }
+                        })
+                        notification.close();
+                    }
+                }
+            ]
+        })
+    }
+    function install(entry,container,done) {
+        if (RED.settings.theme('palette.editable') === false) {
+            done(new Error('Palette not editable'));
+            return;
+        }
+        var buttons = [
+            {
+                text: RED._("common.label.cancel"),
+                click: function() {
+                    notification.close();
+                }
+            }
+        ];
+        if (entry.url) {
+            buttons.push({
+                text: RED._("palette.editor.confirm.button.review"),
+                class: "primary palette-module-install-confirm-button-install",
+                click: function() {
+                    var url = entry.url||"";
+                    window.open(url);
+                }
+            });
+        }
+        buttons.push({
+            text: RED._("palette.editor.confirm.button.install"),
+            class: "primary palette-module-install-confirm-button-install",
+            click: function() {
+                var spinner = RED.utils.addSpinnerOverlay(container, true);
+                installNodeModule(entry.id,entry.version,function(xhr) {
+                    spinner.remove();
+                     if (xhr) {
+                         if (xhr.responseJSON) {
+                             RED.notify(RED._('palette.editor.errors.installFailed',{module: entry.id,message:xhr.responseJSON.message}));
+                         }
+                     }
+                     done(xhr);
+                });
+                notification.close();
             }
         });
-        RED.events.on('nodes:add', function(n) {
-            if (!/^subflow:/.test(n.type)) {
-                typesInUse[n.type] = (typesInUse[n.type]||0)+1;
-                if (typesInUse[n.type] === 1) {
-                    var ns = RED.nodes.registry.getNodeSetForType(n.type);
-                    refreshNodeModule(ns.module);
-                }
-            }
-        })
-        RED.events.on('nodes:remove', function(n) {
-            if (typesInUse.hasOwnProperty(n.type)) {
-                typesInUse[n.type]--;
-                if (typesInUse[n.type] === 0) {
-                    delete typesInUse[n.type];
-                    var ns = RED.nodes.registry.getNodeSetForType(n.type);
-                    refreshNodeModule(ns.module);
-                }
-            }
-        })
 
-
+        var notification = RED.notify(RED._("palette.editor.confirm.install.body",{module:entry.id}),{
+            modal: true,
+            fixed: true,
+            buttons: buttons
+        })
     }
 
     return {
         init: init,
-        show: showPaletteEditor
+        install: install
     }
 })();

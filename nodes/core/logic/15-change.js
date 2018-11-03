@@ -1,5 +1,5 @@
 /**
- * Copyright 2013, 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@ module.exports = function(RED) {
 
     function ChangeNode(n) {
         RED.nodes.createNode(this, n);
+        var node = this;
 
         this.rules = n.rules;
         var rule;
@@ -75,7 +76,7 @@ module.exports = function(RED) {
             }
             if (rule.tot === 'num') {
                 rule.to = Number(rule.to);
-            } else if (rule.tot === 'json') {
+            } else if (rule.tot === 'json' || rule.tot === 'bin') {
                 try {
                     // check this is parsable JSON
                     JSON.parse(rule.to);
@@ -85,6 +86,13 @@ module.exports = function(RED) {
                 }
             } else if (rule.tot === 'bool') {
                 rule.to = /^true$/i.test(rule.to);
+            } else if (rule.tot === 'jsonata') {
+                try {
+                    rule.to = RED.util.prepareJSONataExpression(rule.to,this);
+                } catch(e) {
+                    valid = false;
+                    this.error(RED._("change.errors.invalid-expr",{error:e.message}));
+                }
             }
         }
 
@@ -94,6 +102,8 @@ module.exports = function(RED) {
                 var value = rule.to;
                 if (rule.tot === 'json') {
                     value = JSON.parse(rule.to);
+                } else if (rule.tot === 'bin') {
+                    value = Buffer.from(JSON.parse(rule.to))
                 }
                 var current;
                 var fromValue;
@@ -107,14 +117,21 @@ module.exports = function(RED) {
                     value = node.context().global.get(rule.to);
                 } else if (rule.tot === 'date') {
                     value = Date.now();
+                } else if (rule.tot === 'jsonata') {
+                    try{
+                        value = RED.util.evaluateJSONataExpression(rule.to,msg);
+                    } catch(err) {
+                        node.error(RED._("change.errors.invalid-expr",{error:err.message}));
+                        return;
+                    }
                 }
                 if (rule.t === 'change') {
                     if (rule.fromt === 'msg' || rule.fromt === 'flow' || rule.fromt === 'global') {
                         if (rule.fromt === "msg") {
                             fromValue = RED.util.getMessageProperty(msg,rule.from);
-                        } else if (rule.tot === 'flow') {
+                        } else if (rule.fromt === 'flow') {
                             fromValue = node.context().flow.get(rule.from);
-                        } else if (rule.tot === 'global') {
+                        } else if (rule.fromt === 'global') {
                             fromValue = node.context().global.get(rule.from);
                         }
                         if (typeof fromValue === 'number' || fromValue instanceof Number) {
@@ -184,7 +201,7 @@ module.exports = function(RED) {
                         } else if (rule.t === 'set') {
                             target.set(property,value);
                         } else if (rule.t === 'change') {
-                            current = target.get(msg,property);
+                            current = target.get(property);
                             if (typeof current === 'string') {
                                 if ((fromType === 'num' || fromType === 'bool' || fromType === 'str') && current === fromValue) {
                                     // str representation of exact from number/boolean
@@ -210,7 +227,6 @@ module.exports = function(RED) {
             return msg;
         }
         if (valid) {
-            var node = this;
             this.on('input', function(msg) {
                 for (var i=0; i<this.rules.length; i++) {
                     if (this.rules[i].t === "move") {

@@ -1,5 +1,5 @@
 /**
- * Copyright 2015 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ var sinon = require("sinon");
 var Tokens = require("../../../../red/api/auth/tokens");
 
 
-describe("Tokens", function() {
+describe("api/auth/tokens", function() {
     describe("#init",function() {
         it('loads sessions', function(done) {
             Tokens.init({}).then(done);

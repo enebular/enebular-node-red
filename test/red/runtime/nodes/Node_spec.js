@@ -1,5 +1,5 @@
 /**
- * Copyright 2014, 2015 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -63,7 +63,7 @@ describe('Node', function() {
             n.on('close',function(done) {
                 setTimeout(function() {
                     done();
-                },200);
+                },50);
             });
             var p = n.close();
             should.exist(p);
@@ -71,7 +71,22 @@ describe('Node', function() {
                 testdone();
             });
         });
-
+        it('accepts a callback with "removed" and "done" parameters', function(testdone) {
+            var n = new RedNode({id:'123',type:'abc'});
+            var receivedRemoved;
+            n.on('close',function(removed,done) {
+                receivedRemoved = removed;
+                setTimeout(function() {
+                    done();
+                },50);
+            });
+            var p = n.close(true);
+            should.exist(p);
+            (receivedRemoved).should.be.true();
+            p.then(function() {
+                testdone();
+            });
+        })
         it('allows multiple close handlers to be registered',function(testdone) {
             var n = new RedNode({id:'123',type:'abc'});
             var callbacksClosed = 0;
@@ -79,13 +94,13 @@ describe('Node', function() {
                 setTimeout(function() {
                     callbacksClosed++;
                     done();
-                },200);
+                },50);
             });
             n.on('close',function(done) {
                 setTimeout(function() {
                     callbacksClosed++;
                     done();
-                },200);
+                },75);
             });
             n.on('close',function() {
                 callbacksClosed++;
@@ -376,26 +391,26 @@ describe('Node', function() {
 
     describe('#log', function() {
         it('produces a log message', function(done) {
-            var n = new RedNode({id:'123',type:'abc'});
+            var n = new RedNode({id:'123',type:'abc',z:'789'});
             var loginfo = {};
             sinon.stub(Log, 'log', function(msg) {
                 loginfo = msg;
             });
             n.log("a log message");
             should.deepEqual({level:Log.INFO, id:n.id,
-                               type:n.type, msg:"a log message", }, loginfo);
+                               type:n.type, msg:"a log message",z:'789'}, loginfo);
             Log.log.restore();
             done();
         });
         it('produces a log message with a name', function(done) {
-            var n = new RedNode({id:'123', type:'abc', name:"barney"});
+            var n = new RedNode({id:'123', type:'abc', name:"barney", z:'789'});
             var loginfo = {};
             sinon.stub(Log, 'log', function(msg) {
                 loginfo = msg;
             });
             n.log("a log message");
             should.deepEqual({level:Log.INFO, id:n.id, name: "barney",
-                              type:n.type, msg:"a log message"}, loginfo);
+                              type:n.type, msg:"a log message",z:'789'}, loginfo);
             Log.log.restore();
             done();
         });
@@ -403,14 +418,14 @@ describe('Node', function() {
 
     describe('#warn', function() {
         it('produces a warning message', function(done) {
-            var n = new RedNode({id:'123',type:'abc'});
+            var n = new RedNode({id:'123',type:'abc',z:'789'});
             var loginfo = {};
             sinon.stub(Log, 'log', function(msg) {
                 loginfo = msg;
             });
             n.warn("a warning");
             should.deepEqual({level:Log.WARN, id:n.id,
-                              type:n.type, msg:"a warning"}, loginfo);
+                              type:n.type, msg:"a warning",z:'789'}, loginfo);
             Log.log.restore();
             done();
         });
@@ -418,7 +433,7 @@ describe('Node', function() {
 
     describe('#error', function() {
         it('handles a null error message', function(done) {
-            var n = new RedNode({id:'123',type:'abc'});
+            var n = new RedNode({id:'123',type:'abc',z:'789'});
             var loginfo = {};
             sinon.stub(Log, 'log', function(msg) {
                 loginfo = msg;
@@ -429,7 +444,7 @@ describe('Node', function() {
             var message = {a:1};
 
             n.error(null,message);
-            should.deepEqual({level:Log.ERROR, id:n.id, type:n.type, msg:""}, loginfo);
+            should.deepEqual({level:Log.ERROR, id:n.id, type:n.type, msg:"",z:'789'}, loginfo);
 
             flows.handleError.called.should.be.true();
             flows.handleError.args[0][0].should.eql(n);
@@ -442,7 +457,7 @@ describe('Node', function() {
         });
 
         it('produces an error message', function(done) {
-            var n = new RedNode({id:'123',type:'abc'});
+            var n = new RedNode({id:'123',type:'abc',z:'789'});
             var loginfo = {};
             sinon.stub(Log, 'log', function(msg) {
                 loginfo = msg;
@@ -453,7 +468,7 @@ describe('Node', function() {
             var message = {a:2};
 
             n.error("This is an error",message);
-            should.deepEqual({level:Log.ERROR, id:n.id, type:n.type, msg:"This is an error"}, loginfo);
+            should.deepEqual({level:Log.ERROR, id:n.id, type:n.type, msg:"This is an error",z:'789'}, loginfo);
 
             flows.handleError.called.should.be.true();
             flows.handleError.args[0][0].should.eql(n);

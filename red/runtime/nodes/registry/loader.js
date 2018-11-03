@@ -1,5 +1,5 @@
 /**
- * Copyright 2015, 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -83,9 +83,11 @@ function createNodeApi(node) {
         red.library = runtime.adminApi.library;
         red.auth = runtime.adminApi.auth;
         red.httpAdmin = runtime.adminApi.adminApp;
-        red.httpNode = runtime.adminApi.nodeApp;
-        red.server = runtime.adminApi.server;
+        red.httpNode = runtime.nodeApp;
+        red.server = runtime.server;
     } else {
+        //TODO: runtime.adminApi is always stubbed if not enabled, so this block
+        // is unused - but may be needed for the unit tests
         red.comms = {
             publish: function() {}
         };
@@ -114,7 +116,7 @@ function loadNodeFiles(nodeFiles) {
         /* istanbul ignore else */
         if (nodeFiles.hasOwnProperty(module)) {
             if (nodeFiles[module].redVersion &&
-                !semver.satisfies(runtime.version().replace("-git",""), nodeFiles[module].redVersion)) {
+                !semver.satisfies(runtime.version().replace(/(\-[1-9A-Za-z-][0-9A-Za-z-\.]*)?(\+[0-9A-Za-z-\.]+)?$/,""), nodeFiles[module].redVersion)) {
                 //TODO: log it
                 runtime.log.warn("["+module+"] "+runtime.log._("server.node-version-mismatch",{version:nodeFiles[module].redVersion}));
                 continue;
@@ -212,15 +214,15 @@ function loadNodeConfig(fileInfo) {
             } else {
                 var types = [];
 
-                var regExp = /<script ([^>]*)data-template-name=['"]([^'"]*)['"]/gi;
+                var regExp = /<script (?:[^>]*)data-template-name\s*=\s*['"]([^'"]*)['"]/gi;
                 var match = null;
 
                 while ((match = regExp.exec(content)) !== null) {
-                    types.push(match[2]);
+                    types.push(match[1]);
                 }
                 node.types = types;
 
-                var langRegExp = /^<script[^>]* data-lang=['"](.+?)['"]/i;
+                var langRegExp = /^<script[^>]* data-lang\s*=\s*['"](.+?)['"]/i;
                 regExp = /(<script[^>]* data-help-name=[\s\S]*?<\/script>)/gi;
                 match = null;
                 var mainContent = "";
@@ -252,6 +254,12 @@ function loadNodeConfig(fileInfo) {
                         node.err = node.types[i]+" already registered";
                         break;
                     }
+                }
+                if (node.module === 'node-red') {
+                    // do not look up locales directory for core nodes
+                    node.namespace = node.module;
+                    resolve(node);
+                    return;
                 }
                 fs.stat(path.join(path.dirname(file),"locales"),function(err,stat) {
                     if (!err) {
@@ -299,7 +307,7 @@ function loadNodeSet(node) {
                     node.enabled = true;
                     node.loaded = true;
                     return node;
-                }).otherwise(function(err) {
+                }).catch(function(err) {
                     node.err = err;
                     return node;
                 });
@@ -313,6 +321,18 @@ function loadNodeSet(node) {
         return loadPromise;
     } catch(err) {
         node.err = err;
+        var stack = err.stack;
+        var message;
+        if (stack) {
+            var i = stack.indexOf(node.file);
+            if (i > -1) {
+                var excerpt = stack.substring(i+node.file.length+1,i+node.file.length+20);
+                var m = /^(\d+):(\d+)/.exec(excerpt);
+                if (m) {
+                    node.err = err+" (line:"+m[1]+")";
+                }
+            }
+        }
         return when.resolve(node);
     }
 }
@@ -356,9 +376,18 @@ function addModule(module) {
 }
 
 function loadNodeHelp(node,lang) {
-    var dir = path.dirname(node.template);
     var base = path.basename(node.template);
-    var localePath = path.join(dir,"locales",lang,base);
+    var localePath = undefined;
+    if (node.module === 'node-red') {
+        var cat_dir = path.dirname(node.template);
+        var cat = path.basename(cat_dir);
+        var dir = path.dirname(cat_dir);
+        localePath = path.join(dir, "locales", lang, cat, base)
+    }
+    else {
+        var dir = path.dirname(node.template);
+        localePath = path.join(dir,"locales",lang,base);
+    }
     try {
         // TODO: make this async
         var content = fs.readFileSync(localePath, "utf8")
@@ -379,8 +408,10 @@ function getNodeHelp(node,lang) {
         }
         if (help) {
             node.help[lang] = help;
+        } else if (lang === runtime.i18n.defaultLang) {
+            return null;
         } else {
-            node.help[lang] = node.help[runtime.i18n.defaultLang];
+            node.help[lang] = getNodeHelp(node, runtime.i18n.defaultLang);
         }
     }
     return node.help[lang];

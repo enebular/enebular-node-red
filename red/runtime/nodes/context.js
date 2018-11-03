@@ -1,5 +1,5 @@
 /**
- * Copyright 2015, 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,6 +27,16 @@ function createContext(id,seed) {
     obj.set = function set(key, value) {
         util.setMessageProperty(data,key,value);
     }
+    obj.keys = function() {
+        var keysData = Object.keys(data);
+        if (seed == null) {
+            return keysData;
+        } else {
+            return keysData.filter(function (key) {
+                return key !== "set" && key !== "get" && key !== "keys";
+            });
+        }
+    }
     return obj;
 }
 
@@ -44,9 +54,9 @@ function getContext(localId,flowId) {
     var newContext = createContext(contextId);
     if (flowId) {
         newContext.flow = getContext(flowId);
-        if (globalContext) {
-            newContext.global = globalContext;
-        }
+    }
+    if (globalContext) {
+        newContext.global = globalContext;
     }
     contexts[contextId] = newContext;
     return newContext;

@@ -1,5 +1,5 @@
 /**
- * Copyright 2013, 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,24 +27,19 @@ RED.search = (function() {
     var results = [];
 
     function indexNode(n) {
-        var l = "";
-        if (n._def && n._def.label) {
-            l = n._def.label;
-            try {
-                l = (typeof l === "function" ? l.call(n) : l);
-                if (l) {
-                    l = (""+l).toLowerCase();
-                    index[l] = index[l] || {};
-                    index[l][n.id] = {node:n,label:l}
-                }
-            } catch(err) {
-                console.log("Definition error: "+n.type+".label",err);
-            }
+        var l = RED.utils.getNodeLabel(n);
+        if (l) {
+            l = (""+l).toLowerCase();
+            index[l] = index[l] || {};
+            index[l][n.id] = {node:n,label:l}
         }
         l = l||n.label||n.name||n.id||"";
 
 
         var properties = ['id','type','name','label','info'];
+        if (n._def && n._def.defaults) {
+            properties = properties.concat(Object.keys(n._def.defaults));
+        }
         for (var i=0;i<properties.length;i++) {
             if (n.hasOwnProperty(properties[i])) {
                 var v = n[properties[i]];
@@ -130,7 +125,7 @@ RED.search = (function() {
     function createDialog() {
         dialog = $("<div>",{id:"red-ui-search",class:"red-ui-search"}).appendTo("#main-container");
         var searchDiv = $("<div>",{class:"red-ui-search-container"}).appendTo(dialog);
-        searchInput = $('<input type="text" placeholder="search your flows">').appendTo(searchDiv).searchBox({
+        searchInput = $('<input type="text" data-i18n="[placeholder]menu.label.searchInput">').appendTo(searchDiv).searchBox({
             delay: 200,
             change: function() {
                 search($(this).val());
@@ -171,6 +166,7 @@ RED.search = (function() {
                 }
             }
         });
+        searchInput.i18n();
 
         var searchResultsDiv = $("<div>",{class:"red-ui-search-results-container"}).appendTo(dialog);
         searchResults = $('<ol>',{id:"search-result-list", style:"position: absolute;top: 5px;bottom: 5px;left: 5px;right: 5px;"}).appendTo(searchResultsDiv).editableList({
@@ -178,7 +174,7 @@ RED.search = (function() {
             addItem: function(container,i,object) {
                 var node = object.node;
                 if (node === undefined) {
-                    $('<div>',{class:"red-ui-search-empty"}).html(RED._('search.empty')).appendTo(container);
+                    $('<div>',{class:"red-ui-search-empty"}).text(RED._('search.empty')).appendTo(container);
 
                 } else {
                     var def = node._def;
@@ -186,25 +182,14 @@ RED.search = (function() {
 
                     var nodeDiv = $('<div>',{class:"red-ui-search-result-node"}).appendTo(div);
                     var colour = def.color;
-                    var icon_url = "arrow-in.png";
+                    var icon_url = RED.utils.getNodeIcon(def,node);
                     if (node.type === 'tab') {
                         colour = "#C0DEED";
-                        icon_url = "subflow.png";
-                    } else if (def.category === 'config') {
-                        icon_url = "cog.png";
-                    } else if (node.type === 'unknown') {
-                        icon_url = "alert.png";
-                    } else {
-                        try {
-                            icon_url = (typeof def.icon === "function" ? def.icon.call({}) : def.icon);
-                        } catch(err) {
-                            console.log("Definition error: "+nt+".icon",err);
-                        }
                     }
                     nodeDiv.css('backgroundColor',colour);
 
                     var iconContainer = $('<div/>',{class:"palette_icon_container"}).appendTo(nodeDiv);
-                    $('<div/>',{class:"palette_icon",style:"background-image: url(icons/"+icon_url+")"}).appendTo(iconContainer);
+                    $('<div/>',{class:"palette_icon",style:"background-image: url("+icon_url+")"}).appendTo(iconContainer);
 
                     var contentDiv = $('<div>',{class:"red-ui-search-result-description"}).appendTo(div);
                     if (node.z) {
@@ -215,12 +200,12 @@ RED.search = (function() {
                         } else {
                             workspace = "flow:"+workspace.label;
                         }
-                        $('<div>',{class:"red-ui-search-result-node-flow"}).html(workspace).appendTo(contentDiv);
+                        $('<div>',{class:"red-ui-search-result-node-flow"}).text(workspace).appendTo(contentDiv);
                     }
 
-                    $('<div>',{class:"red-ui-search-result-node-label"}).html(object.label || node.id).appendTo(contentDiv);
-                    $('<div>',{class:"red-ui-search-result-node-type"}).html(node.type).appendTo(contentDiv);
-                    $('<div>',{class:"red-ui-search-result-node-id"}).html(node.id).appendTo(contentDiv);
+                    $('<div>',{class:"red-ui-search-result-node-label"}).text(object.label || node.id).appendTo(contentDiv);
+                    $('<div>',{class:"red-ui-search-result-node-type"}).text(node.type).appendTo(contentDiv);
+                    $('<div>',{class:"red-ui-search-result-node-id"}).text(node.id).appendTo(contentDiv);
 
                     div.click(function(evt) {
                         evt.preventDefault();
@@ -238,8 +223,11 @@ RED.search = (function() {
     }
 
     function show() {
+        if (disabled) {
+            return;
+        }
         if (!visible) {
-            RED.keyboard.add("*",/* ESCAPE */ 27,function(){hide();d3.event.preventDefault();});
+            RED.keyboard.add("*","escape",function(){hide()});
             $("#header-shade").show();
             $("#editor-shade").show();
             $("#palette-shade").show();
@@ -249,7 +237,7 @@ RED.search = (function() {
             if (dialog === null) {
                 createDialog();
             }
-            dialog.slideDown();
+            dialog.slideDown(300);
             RED.events.emit("search:open");
             visible = true;
         }
@@ -257,7 +245,7 @@ RED.search = (function() {
     }
     function hide() {
         if (visible) {
-            RED.keyboard.remove(/* ESCAPE */ 27);
+            RED.keyboard.remove("escape");
             visible = false;
             $("#header-shade").hide();
             $("#editor-shade").hide();
@@ -274,11 +262,12 @@ RED.search = (function() {
     }
 
     function init() {
-        RED.keyboard.add("*",/* . */ 190,{ctrl:true},function(){if (!disabled) { show(); } d3.event.preventDefault();});
+        RED.actions.add("core:search",show);
+
         RED.events.on("editor:open",function() { disabled = true; });
         RED.events.on("editor:close",function() { disabled = false; });
-        RED.events.on("palette-editor:open",function() { disabled = true; });
-        RED.events.on("palette-editor:close",function() { disabled = false; });
+        RED.events.on("type-search:open",function() { disabled = true; });
+        RED.events.on("type-search:close",function() { disabled = false; });
 
 
 

@@ -1,5 +1,5 @@
 /**
- * Copyright 2015, 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@
 var should = require("should");
 var permissions = require("../../../../red/api/auth/permissions");
 
-describe("Auth permissions", function() {
+describe("api/auth/permissions", function() {
     describe("hasPermission", function() {
         it('a user with no permissions',function() {
             permissions.hasPermission([],"*").should.be.false();

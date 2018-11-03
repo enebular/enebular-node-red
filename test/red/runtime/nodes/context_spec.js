@@ -1,5 +1,5 @@
 /**
- * Copyright 2015 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -117,6 +117,28 @@ describe('context', function() {
         Context.delete("1","flowA");
         context = Context.get("1","flowA");
         should.not.exist(context.get("foo"));
+    })
+
+    it('enumerates context keys', function() {
+        var context = Context.get("1","flowA");
+
+        var keys = context.keys();
+        keys.should.be.an.Array();
+        keys.should.be.empty();
+
+        context.set("foo","bar");
+        keys = context.keys();
+        keys.should.have.length(1);
+        keys[0].should.eql("foo");
+
+        context.set("abc.def","bar");
+        keys = context.keys();
+        keys.should.have.length(2);
+        keys[1].should.eql("abc");
+
+
+
+
     })
 
 });

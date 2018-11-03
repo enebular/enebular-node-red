@@ -1,5 +1,5 @@
 /**
- * Copyright 2015 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
 
 var should = require("should");
 var catchNode = require("../../../../nodes/core/core/25-catch.js");
-var helper = require("../../helper.js");
+var helper = require("node-red-node-test-helper");
 
 describe('catch Node', function() {
 

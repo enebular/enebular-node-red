@@ -1,5 +1,5 @@
 /**
- * Copyright 2015 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -642,6 +642,80 @@ describe('flows/util', function() {
             diffResult.removed.should.have.length(0);
             diffResult.rewired.should.have.length(0);
             diffResult.linked.sort().should.eql(["1","3"]);
+        });
+
+
+        it('ignores tab changes that are immaterial', function() {
+            var config = [{id:"1",type:"tab",label:"fred"},{id:"2",type:"test",bar:"b",wires:[["1"]],z:"1"}];
+            var newConfig = clone(config);
+            newConfig[0].label = "barney";
+
+            var originalConfig = flowUtil.parseConfig(config);
+            var changedConfig = flowUtil.parseConfig(newConfig);
+
+            originalConfig.missingTypes.should.have.length(0);
+
+            var diffResult = flowUtil.diffConfigs(originalConfig,changedConfig);
+            diffResult.added.should.have.length(0);
+            diffResult.changed.should.have.length(0);
+            diffResult.removed.should.have.length(0);
+            diffResult.rewired.should.have.length(0);
+        });
+
+
+        it('marks a deleted tab as removed', function() {
+            var config = [{id:"f1",type:"tab",label:"fred"},{id:"n1",type:"test",bar:"b",wires:[["1"]],z:"f1"},
+                          {id:"f2",type:"tab",label:"fred"},{id:"n2",type:"test",bar:"b",wires:[["1"]],z:"f2"}];
+            var newConfig = clone(config);
+            newConfig = newConfig.slice(0,2);
+
+            var originalConfig = flowUtil.parseConfig(config);
+            var changedConfig = flowUtil.parseConfig(newConfig);
+
+            originalConfig.missingTypes.should.have.length(0);
+
+            var diffResult = flowUtil.diffConfigs(originalConfig,changedConfig);
+            diffResult.added.should.have.length(0);
+            diffResult.changed.should.have.length(0);
+            diffResult.removed.sort().should.eql(['f2', 'n2']);
+            diffResult.rewired.should.have.length(0);
+        });
+
+        it('marks all nodes as added when tab state changes disabled to enabled', function() {
+            var config = [{id:"1",type:"tab",disabled:true,label:"fred"},{id:"2",type:"test",bar:"b",wires:[["1"]],z:"1"},{id:"3",type:"test"}];
+            var newConfig = clone(config);
+            newConfig[0].disabled = false;
+
+            var originalConfig = flowUtil.parseConfig(config);
+            var changedConfig = flowUtil.parseConfig(newConfig);
+
+            originalConfig.missingTypes.should.have.length(0);
+
+            var diffResult = flowUtil.diffConfigs(originalConfig,changedConfig);
+
+            diffResult.added.should.have.length(2);
+            diffResult.added.sort().should.eql(["1","2"]);
+            diffResult.changed.should.have.length(0);
+            diffResult.removed.should.have.length(0);
+            diffResult.rewired.should.have.length(0);
+        });
+        it('marks all nodes as removed when tab state changes enabled to disabled', function() {
+            var config = [{id:"1",type:"tab",disabled:false,label:"fred"},{id:"2",type:"test",bar:"b",wires:[["1"]],z:"1"},{id:"3",type:"test"}];
+            var newConfig = clone(config);
+            newConfig[0].disabled = true;
+
+            var originalConfig = flowUtil.parseConfig(config);
+            var changedConfig = flowUtil.parseConfig(newConfig);
+
+            originalConfig.missingTypes.should.have.length(0);
+
+            var diffResult = flowUtil.diffConfigs(originalConfig,changedConfig);
+
+            diffResult.added.should.have.length(0);
+            diffResult.changed.should.have.length(0);
+            diffResult.removed.should.have.length(2);
+            diffResult.removed.sort().should.eql(["1","2"]);
+            diffResult.rewired.should.have.length(0);
         });
     });
 });

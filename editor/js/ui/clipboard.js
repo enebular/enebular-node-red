@@ -1,5 +1,5 @@
 /**
- * Copyright 2015 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,6 +21,7 @@ RED.clipboard = (function() {
     var dialogContainer;
     var exportNodesDialog;
     var importNodesDialog;
+    var disabled = false;
 
     function setupDialogs() {
         dialog = $('<div id="clipboard-dialog" class="hide node-red-dialog"><form class="dialog-form form-horizontal"></form></div>')
@@ -128,6 +129,9 @@ RED.clipboard = (function() {
     }
 
     function importNodes() {
+        if (disabled) {
+            return;
+        }
         dialogContainer.empty();
         dialogContainer.append($(importNodesDialog));
         dialogContainer.i18n();
@@ -153,13 +157,19 @@ RED.clipboard = (function() {
     }
 
     function exportNodes() {
+        if (disabled) {
+            return;
+        }
+
         dialogContainer.empty();
         dialogContainer.append($(exportNodesDialog));
         dialogContainer.i18n();
+        var format = RED.settings.flowFilePretty ? "export-format-full" : "export-format-mini";
 
         $("#export-format-group > a").click(function(evt) {
             evt.preventDefault();
             if ($(this).hasClass('disabled') || $(this).hasClass('selected')) {
+                $("#clipboard-export").focus();
                 return;
             }
             $(this).parent().children().removeClass('selected');
@@ -169,18 +179,21 @@ RED.clipboard = (function() {
             if (flow.length > 0) {
                 var nodes = JSON.parse(flow);
 
-                var format = $(this).attr('id');
+                format = $(this).attr('id');
                 if (format === 'export-format-full') {
                     flow = JSON.stringify(nodes,null,4);
                 } else {
                     flow = JSON.stringify(nodes);
                 }
                 $("#clipboard-export").val(flow);
+                $("#clipboard-export").focus();
             }
         });
+
         $("#export-range-group > a").click(function(evt) {
             evt.preventDefault();
             if ($(this).hasClass('disabled') || $(this).hasClass('selected')) {
+                $("#clipboard-export").focus();
                 return;
             }
             $(this).parent().children().removeClass('selected');
@@ -190,7 +203,8 @@ RED.clipboard = (function() {
             var nodes = null;
             if (type === 'export-range-selected') {
                 var selection = RED.view.selection();
-                nodes = RED.nodes.createExportableNodeSet(selection.nodes);
+                // Don't include the subflow meta-port nodes in the exported selection
+                nodes = RED.nodes.createExportableNodeSet(selection.nodes.filter(function(n) { return n.type !== 'subflow'}));
             } else if (type === 'export-range-flow') {
                 var activeWorkspace = RED.workspaces.active();
                 nodes = RED.nodes.filterNodes({z:activeWorkspace});
@@ -201,7 +215,7 @@ RED.clipboard = (function() {
                 nodes = RED.nodes.createCompleteNodeSet(false);
             }
             if (nodes !== null) {
-                if (RED.settings.flowFilePretty) {
+                if (format === "export-format-full") {
                     flow = JSON.stringify(nodes,null,4);
                 } else {
                     flow = JSON.stringify(nodes);
@@ -213,6 +227,7 @@ RED.clipboard = (function() {
                 $("#export-copy").addClass('disabled');
             }
             $("#clipboard-export").val(flow);
+            $("#clipboard-export").focus();
         })
 
         $("#clipboard-dialog-ok").hide();
@@ -226,7 +241,7 @@ RED.clipboard = (function() {
             $("#export-range-selected").addClass('disabled').removeClass('selected');
             $("#export-range-flow").click();
         }
-        if (RED.settings.flowFilePretty) {
+        if (format === "export-format-full") {
             $("#export-format-full").click();
         } else {
             $("#export-format-mini").click();
@@ -242,27 +257,58 @@ RED.clipboard = (function() {
             });
         dialog.dialog("option","title",RED._("clipboard.exportNodes")).dialog( "open" );
 
-        setTimeout(function() {
-            $("#clipboard-export").focus();
-            if (!document.queryCommandEnabled("copy")) {
-                $("#clipboard-dialog-cancel").hide();
-                $("#clipboard-dialog-close").show();
-            } else {
-                $("#clipboard-dialog-cancel").show();
-                $("#clipboard-dialog-copy").show();
-            }
-
-        },0);
+        $("#clipboard-export").focus();
+        if (!document.queryCommandSupported("copy")) {
+            $("#clipboard-dialog-cancel").hide();
+            $("#clipboard-dialog-close").show();
+        } else {
+            $("#clipboard-dialog-cancel").show();
+            $("#clipboard-dialog-copy").show();
+        }
     }
 
     function hideDropTarget() {
         $("#dropTarget").hide();
-        RED.keyboard.remove(/* ESCAPE */ 27);
+        RED.keyboard.remove("escape");
     }
-
+    function copyText(value,element,msg) {
+        var truncated = false;
+        if (typeof value !== "string" ) {
+            value = JSON.stringify(value, function(key,value) {
+                if (value !== null && typeof value === 'object') {
+                    if (value.__encoded__ && value.hasOwnProperty('data') && value.hasOwnProperty('length')) {
+                        truncated = value.data.length !== value.length;
+                        return value.data;
+                    }
+                }
+                return value;
+            });
+        }
+        if (truncated) {
+            msg += "_truncated";
+        }
+        $("#clipboard-hidden").val(value).select();
+        var result =  document.execCommand("copy");
+        if (result && element) {
+            var popover = RED.popover.create({
+                target: element,
+                direction: 'left',
+                size: 'small',
+                content: RED._(msg)
+            });
+            setTimeout(function() {
+                popover.close();
+            },1000);
+            popover.open();
+        }
+        return result;
+    }
     return {
         init: function() {
             setupDialogs();
+
+            $('<input type="text" id="clipboard-hidden">').appendTo("body");
+
             RED.events.on("view:selection-changed",function(selection) {
                 if (!selection.nodes) {
                     RED.menu.setDisabled("menu-item-export",true);
@@ -274,18 +320,30 @@ RED.clipboard = (function() {
                     RED.menu.setDisabled("menu-item-export-library",false);
                 }
             });
-            RED.keyboard.add("workspace", /* e */ 69,{ctrl:true},function(){exportNodes();d3.event.preventDefault();});
-            RED.keyboard.add("workspace", /* i */ 73,{ctrl:true},function(){importNodes();d3.event.preventDefault();});
+
+            RED.actions.add("core:show-export-dialog",exportNodes);
+            RED.actions.add("core:show-import-dialog",importNodes);
+
+
+            RED.events.on("editor:open",function() { disabled = true; });
+            RED.events.on("editor:close",function() { disabled = false; });
+            RED.events.on("search:open",function() { disabled = true; });
+            RED.events.on("search:close",function() { disabled = false; });
+            RED.events.on("type-search:open",function() { disabled = true; });
+            RED.events.on("type-search:close",function() { disabled = false; });
+
 
             $('#chart').on("dragenter",function(event) {
-                if ($.inArray("text/plain",event.originalEvent.dataTransfer.types) != -1) {
+                if ($.inArray("text/plain",event.originalEvent.dataTransfer.types) != -1 ||
+                     $.inArray("Files",event.originalEvent.dataTransfer.types) != -1) {
                     $("#dropTarget").css({display:'table'});
-                    RED.keyboard.add("*", /* ESCAPE */ 27,hideDropTarget);
+                    RED.keyboard.add("*", "escape" ,hideDropTarget);
                 }
             });
 
             $('#dropTarget').on("dragover",function(event) {
-                if ($.inArray("text/plain",event.originalEvent.dataTransfer.types) != -1) {
+                if ($.inArray("text/plain",event.originalEvent.dataTransfer.types) != -1 ||
+                     $.inArray("Files",event.originalEvent.dataTransfer.types) != -1) {
                     event.preventDefault();
                 }
             })
@@ -293,15 +351,30 @@ RED.clipboard = (function() {
                 hideDropTarget();
             })
             .on("drop",function(event) {
-                var data = event.originalEvent.dataTransfer.getData("text/plain");
+                if ($.inArray("text/plain",event.originalEvent.dataTransfer.types) != -1) {
+                    var data = event.originalEvent.dataTransfer.getData("text/plain");
+                    data = data.substring(data.indexOf('['),data.lastIndexOf(']')+1);
+                    RED.view.importNodes(data);
+                } else if ($.inArray("Files",event.originalEvent.dataTransfer.types) != -1) {
+                    var files = event.originalEvent.dataTransfer.files;
+                    if (files.length === 1) {
+                        var file = files[0];
+                        var reader = new FileReader();
+                        reader.onload = (function(theFile) {
+                            return function(e) {
+                                RED.view.importNodes(e.target.result);
+                            };
+                        })(file);
+                        reader.readAsText(file);
+                    }
+                }
                 hideDropTarget();
-                data = data.substring(data.indexOf('['),data.lastIndexOf(']')+1);
-                RED.view.importNodes(data);
                 event.preventDefault();
             });
 
         },
         import: importNodes,
-        export: exportNodes
+        export: exportNodes,
+        copyText: copyText
     }
 })();

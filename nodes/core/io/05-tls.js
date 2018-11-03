@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 IBM Corp.
+ * Copyright JS Foundation and other contributors, http://js.foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,34 +21,72 @@ module.exports = function(RED) {
     function TLSConfig(n) {
         RED.nodes.createNode(this,n);
         this.valid = true;
+        this.verifyservercert = n.verifyservercert;
         var certPath = n.cert.trim();
         var keyPath = n.key.trim();
         var caPath = n.ca.trim();
 
-        if ( (certPath.length > 0) !== (keyPath.length > 0)) {
-            this.valid = false;
-            this.error(RED._("tls.error.missing-file"));
-            return;
-        }
-        this.verifyservercert = n.verifyservercert;
+        if ((certPath.length > 0) || (keyPath.length > 0)) {
 
-        try {
-            if (certPath) {
-                this.cert = fs.readFileSync(certPath);
+            if ( (certPath.length > 0) !== (keyPath.length > 0)) {
+                this.valid = false;
+                this.error(RED._("tls.error.missing-file"));
+                return;
             }
-            if (keyPath) {
-                this.key = fs.readFileSync(keyPath);
+
+            try {
+                if (certPath) {
+                    this.cert = fs.readFileSync(certPath);
+                }
+                if (keyPath) {
+                    this.key = fs.readFileSync(keyPath);
+                }
+                if (caPath) {
+                    this.ca = fs.readFileSync(caPath);
+                }
+            } catch(err) {
+                this.valid = false;
+                this.error(err.toString());
+                return;
             }
-            if (caPath) {
-                this.ca = fs.readFileSync(caPath);
+        } else {
+            if (this.credentials) {
+                var certData = this.credentials.certdata || "";
+                var keyData = this.credentials.keydata || "";
+                var caData = this.credentials.cadata || "";
+
+                if ((certData.length > 0) !== (keyData.length > 0)) {
+                    this.valid = false;
+                    this.error(RED._("tls.error.missing-file"));
+                    return;
+                }
+
+                if (certData) {
+                    this.cert = certData;
+                }
+                if (keyData) {
+                    this.key = keyData;
+                }
+                if (caData) {
+                    this.ca = caData;
+                }
             }
-        } catch(err) {
-            this.valid = false;
-            this.error(err.toString());
-            return;
         }
     }
-    RED.nodes.registerType("tls-config",TLSConfig);
+    RED.nodes.registerType("tls-config", TLSConfig, {
+        credentials: {
+            certdata: {type:"text"},
+            keydata: {type:"text"},
+            cadata: {type:"text"},
+            passphrase: {type:"password"}
+        },
+        settings: {
+            tlsConfigDisableLocalFiles: {
+                value: false,
+                exportable: true
+            }
+        }
+    });
 
     TLSConfig.prototype.addTLSOptions = function(opts) {
         if (this.valid) {
@@ -60,6 +98,9 @@ module.exports = function(RED) {
             }
             if (this.ca) {
                 opts.ca = this.ca;
+            }
+            if (this.credentials && this.credentials.passphrase) {
+                opts.passphrase = this.credentials.passphrase;
             }
             opts.rejectUnauthorized = this.verifyservercert;
         }
