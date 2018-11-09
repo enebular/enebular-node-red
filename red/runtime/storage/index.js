@@ -107,7 +107,6 @@ var storageModuleInterface = {
     return storageModule
       .saveFlows(flows, credentials, screenshot)
       .then(function(response) {
-        console.log(response, '----------response------------')
         return crypto
           .createHash('md5')
           .update(JSON.stringify(config))
