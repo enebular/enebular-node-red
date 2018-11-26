@@ -6252,112 +6252,114 @@ RED.tabs = (function() {
 
         return {
             addTab: function(tab) {
-                tabs[tab.id] = tab;
-                var li = $("<li/>",{class:"red-ui-tab"}).appendTo(ul);
-                li.attr('id',"red-ui-tab-"+(tab.id.replace(".","-")));
-                li.data("tabId",tab.id);
-                var link = $("<a/>",{href:"#"+tab.id, class:"red-ui-tab-label"}).appendTo(li);
-                if (tab.icon) {
-                    $('<img src="'+tab.icon+'" class="red-ui-tab-icon"/>').appendTo(link);
-                }
-                var span = $('<span/>',{class:"bidiAware"}).text(tab.label).appendTo(link);
-                span.attr('dir', RED.text.bidi.resolveBaseTextDir(tab.label));
+                if (tab.id) {
+                    tabs[tab.id] = tab;
+                    var li = $("<li/>",{class:"red-ui-tab"}).appendTo(ul);
+                    li.attr('id',"red-ui-tab-"+(tab.id.replace(".","-")));
+                    li.data("tabId",tab.id);
+                    var link = $("<a/>",{href:"#"+tab.id, class:"red-ui-tab-label"}).appendTo(li);
+                    if (tab.icon) {
+                        $('<img src="'+tab.icon+'" class="red-ui-tab-icon"/>').appendTo(link);
+                    }
+                    var span = $('<span/>',{class:"bidiAware"}).text(tab.label).appendTo(link);
+                    span.attr('dir', RED.text.bidi.resolveBaseTextDir(tab.label));
 
-                link.on("click",onTabClick);
-                link.on("dblclick",onTabDblClick);
-                if (tab.closeable) {
-                    var closeLink = $("<a/>",{href:"#",class:"red-ui-tab-close"}).appendTo(li);
-                    closeLink.append('<i class="fa fa-times" />');
+                    link.on("click",onTabClick);
+                    link.on("dblclick",onTabDblClick);
+                    if (tab.closeable) {
+                        var closeLink = $("<a/>",{href:"#",class:"red-ui-tab-close"}).appendTo(li);
+                        closeLink.append('<i class="fa fa-times" />');
 
-                    closeLink.on("click",function(event) {
-                        event.preventDefault();
-                        removeTab(tab.id);
-                    });
-                }
-                updateTabWidths();
-                if (options.onadd) {
-                    options.onadd(tab);
-                }
-                link.attr("title",tab.label);
-                if (ul.find("li.red-ui-tab").size() == 1) {
-                    activateTab(link);
-                }
-                if (options.onreorder) {
-                    var originalTabOrder;
-                    var tabDragIndex;
-                    var tabElements = [];
-                    var startDragIndex;
+                        closeLink.on("click",function(event) {
+                            event.preventDefault();
+                            removeTab(tab.id);
+                        });
+                    }
+                    updateTabWidths();
+                    if (options.onadd) {
+                        options.onadd(tab);
+                    }
+                    link.attr("title",tab.label);
+                    if (ul.find("li.red-ui-tab").size() == 1) {
+                        activateTab(link);
+                    }
+                    if (options.onreorder) {
+                        var originalTabOrder;
+                        var tabDragIndex;
+                        var tabElements = [];
+                        var startDragIndex;
 
-                    li.draggable({
-                        axis:"x",
-                        distance: 20,
-                        start: function(event,ui) {
-                            originalTabOrder = [];
-                            tabElements = [];
-                            ul.children().each(function(i) {
-                                tabElements[i] = {
-                                    el:$(this),
-                                    text: $(this).text(),
-                                    left: $(this).position().left,
-                                    width: $(this).width()
-                                };
-                                if ($(this).is(li)) {
-                                    tabDragIndex = i;
-                                    startDragIndex = i;
-                                }
-                                originalTabOrder.push($(this).data("tabId"));
-                            });
-                            ul.children().each(function(i) {
-                                if (i!==tabDragIndex) {
-                                    $(this).css({
-                                        position: 'absolute',
-                                        left: tabElements[i].left+"px",
-                                        width: tabElements[i].width+2,
-                                        transition: "left 0.3s"
-                                    });
-                                }
-
-                            })
-                            if (!li.hasClass('active')) {
-                                li.css({'zIndex':1});
-                            }
-                        },
-                        drag: function(event,ui) {
-                            ui.position.left += tabElements[tabDragIndex].left+scrollContainer.scrollLeft();
-                            var tabCenter = ui.position.left + tabElements[tabDragIndex].width/2 - scrollContainer.scrollLeft();
-                            for (var i=0;i<tabElements.length;i++) {
-                                if (i === tabDragIndex) {
-                                    continue;
-                                }
-                                if (tabCenter > tabElements[i].left && tabCenter < tabElements[i].left+tabElements[i].width) {
-                                    if (i < tabDragIndex) {
-                                        tabElements[i].left += tabElements[tabDragIndex].width+8;
-                                        tabElements[tabDragIndex].el.detach().insertBefore(tabElements[i].el);
-                                    } else {
-                                        tabElements[i].left -= tabElements[tabDragIndex].width+8;
-                                        tabElements[tabDragIndex].el.detach().insertAfter(tabElements[i].el);
+                        li.draggable({
+                            axis:"x",
+                            distance: 20,
+                            start: function(event,ui) {
+                                originalTabOrder = [];
+                                tabElements = [];
+                                ul.children().each(function(i) {
+                                    tabElements[i] = {
+                                        el:$(this),
+                                        text: $(this).text(),
+                                        left: $(this).position().left,
+                                        width: $(this).width()
+                                    };
+                                    if ($(this).is(li)) {
+                                        tabDragIndex = i;
+                                        startDragIndex = i;
                                     }
-                                    tabElements[i].el.css({left:tabElements[i].left+"px"});
+                                    originalTabOrder.push($(this).data("tabId"));
+                                });
+                                ul.children().each(function(i) {
+                                    if (i!==tabDragIndex) {
+                                        $(this).css({
+                                            position: 'absolute',
+                                            left: tabElements[i].left+"px",
+                                            width: tabElements[i].width+2,
+                                            transition: "left 0.3s"
+                                        });
+                                    }
 
-                                    tabElements.splice(i, 0, tabElements.splice(tabDragIndex, 1)[0]);
-
-                                    tabDragIndex = i;
-                                    break;
+                                })
+                                if (!li.hasClass('active')) {
+                                    li.css({'zIndex':1});
                                 }
+                            },
+                            drag: function(event,ui) {
+                                ui.position.left += tabElements[tabDragIndex].left+scrollContainer.scrollLeft();
+                                var tabCenter = ui.position.left + tabElements[tabDragIndex].width/2 - scrollContainer.scrollLeft();
+                                for (var i=0;i<tabElements.length;i++) {
+                                    if (i === tabDragIndex) {
+                                        continue;
+                                    }
+                                    if (tabCenter > tabElements[i].left && tabCenter < tabElements[i].left+tabElements[i].width) {
+                                        if (i < tabDragIndex) {
+                                            tabElements[i].left += tabElements[tabDragIndex].width+8;
+                                            tabElements[tabDragIndex].el.detach().insertBefore(tabElements[i].el);
+                                        } else {
+                                            tabElements[i].left -= tabElements[tabDragIndex].width+8;
+                                            tabElements[tabDragIndex].el.detach().insertAfter(tabElements[i].el);
+                                        }
+                                        tabElements[i].el.css({left:tabElements[i].left+"px"});
+
+                                        tabElements.splice(i, 0, tabElements.splice(tabDragIndex, 1)[0]);
+
+                                        tabDragIndex = i;
+                                        break;
+                                    }
+                                }
+                            },
+                            stop: function(event,ui) {
+                                ul.children().css({position:"relative",left:"",transition:""});
+                                if (!li.hasClass('active')) {
+                                    li.css({zIndex:""});
+                                }
+                                updateTabWidths();
+                                if (startDragIndex !== tabDragIndex) {
+                                    options.onreorder(originalTabOrder, $.makeArray(ul.children().map(function() { return $(this).data('tabId');})));
+                                }
+                                activateTab(tabElements[tabDragIndex].el.data('tabId'));
                             }
-                        },
-                        stop: function(event,ui) {
-                            ul.children().css({position:"relative",left:"",transition:""});
-                            if (!li.hasClass('active')) {
-                                li.css({zIndex:""});
-                            }
-                            updateTabWidths();
-                            if (startDragIndex !== tabDragIndex) {
-                                options.onreorder(originalTabOrder, $.makeArray(ul.children().map(function() { return $(this).data('tabId');})));
-                            }
-                            activateTab(tabElements[tabDragIndex].el.data('tabId'));
-                        }
-                    })
+                        })
+                    }
                 }
             },
             removeTab: removeTab,
