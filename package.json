@@ -1,6 +1,6 @@
 {
   "name": "@uhuru/enebular-node-red",
-  "version": "0.18.6-alpha.8",
+  "version": "0.18.6-alpha.10",
   "description": "Node Red customized to work with Enebular",
   "homepage": "https://enebular.com",
   "license": "Apache-2.0",
