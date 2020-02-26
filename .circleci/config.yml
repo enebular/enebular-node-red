@@ -20,6 +20,6 @@ workflows:
   issue-9:
     jobs:
       - clamav
-  feature/update-to-0.18.X:
-    jobs:
-      - clamav
+  # feature/update-to-0.18.X:
+  #   jobs:
+  #     - clamav
