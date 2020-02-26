@@ -17,9 +17,6 @@ jobs: # a collection of steps
 
 workflows:
   version: 2
-  issue-9:
+  feature/update-to-0.18.X:
     jobs:
       - clamav
-  # feature/update-to-0.18.X:
-  #   jobs:
-  #     - clamav
